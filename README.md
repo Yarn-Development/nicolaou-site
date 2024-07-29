@@ -54,6 +54,11 @@ This document outlines the plan for two separate projects: **Marking/Auto Feedba
 - **Marking/Auto Feedback + ESQs:**
   - Set up the Node.js server with Express.
   - Create APIs for assessment uploads, selection, and feedback generation.
+  - Fetch all data from:
+	  - DB 
+	  - Question Bank
+  - Make an API to handle all of this data, use node-fetch, or express etc
+  - Route the API to the respective frontend link
 - **Video Platform:**
   - Develop APIs for video and worksheet management.
   - Implement features for exam and assessment creation, including the question bank.
@@ -62,6 +67,9 @@ This document outlines the plan for two separate projects: **Marking/Auto Feedba
 - **Marking/Auto Feedback + ESQs:**
   - Design the database schema for assessments and learning objectives.
   - Integrate AI for worksheet generation based on incorrect marks.
+    - Use [SymPy Gamma](https://sympygamma.com) to solve generated questions: 
+      [https://github.com/sympy/sympy_gamma](https://sympygamma.com)
+    - You will generate suitable Qs yourself for each topic, to ensure decent answers
 - **Video Platform:**
   - Manage the database for videos, worksheets, and question banks.
   - Implement AI features for worksheet creation and revision list generation.
@@ -92,3 +100,11 @@ This document outlines the plan for two separate projects: **Marking/Auto Feedba
 
 ## Conclusion
 This README provides a comprehensive guide to the development of the Marking/Auto Feedback + ESQs and Video Platform projects. Each team member has clear tasks, and the checklist ensures that all components are developed systematically. Let's collaborate effectively to build these innovative educational tools.
+### Meeting summary (Overall Objectives)
+
+  - [ ] Pre-written questions based on each topic
+  - [ ] Divye will sort through each question and make    random numbers with suitable answers.
+  - [ ]ESQs with year or option to “generate Qs”
+  - [ ]Page for Questions , Answers, Users, Admin, Videos
+  - [ ] All available topics for people 
+

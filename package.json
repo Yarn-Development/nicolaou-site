@@ -1,0 +1,27 @@
+{
+  "name": "nicolaou-site",
+  "version": "1.0.0",
+  "description": "Commission for Ms Nicolaous websites",
+  "main": "backend/src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yarn-Development/nicolaou-site.git"
+  },
+  "author": "Yarn Development",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Yarn-Development/nicolaou-site/issues"
+  },
+  "homepage": "https://github.com/Yarn-Development/nicolaou-site#readme",
+  "dependencies": {
+    "bootstrap": "^5.3.3",
+    "create-react-app": "^5.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.25.1",
+    "react-scripts": "^5.0.1"
+  }
+}
