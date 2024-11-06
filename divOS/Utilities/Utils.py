@@ -13,5 +13,8 @@ def name():
 def num():
     return str(random.randint(1,9))
 
+def num_small():
+    return str(random.randint(1,5))
+
 def op():
     return random.choice(["+", "-"])
