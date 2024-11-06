@@ -5,6 +5,7 @@ const path = require('path');
 require("dotenv").config();
 const app = express();
 const PORT = 5000;
+const fs = require('fs');
 
 // Connect to MongoDB
 mongoose.connect("mongodb+srv://admin:FYF8LrFw5RiqEd7h@nicoloau-site.vz2id.mongodb.net/?retryWrites=true&w=majority&appName=Nicoloau-Site", {
@@ -60,6 +61,14 @@ app.get('/videos', async (req, res) => {
   res.json(videos);
 });
 
+// Demo PDF tester
+app.get('/DemoPDF', (req,res) => {
+  fs.readFile(__dirname + "/uploads/DemoFile1.pdf" , function (err,data){
+    res.contentType("application/pdf");
+    res.send(data);
+  })
+});
+
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname, 'frontend/public')));
@@ -67,4 +76,56 @@ app.use(express.static(path.join(__dirname, 'frontend/public')));
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
+// Alex was here
+
+app.post('/GetVideo', (req, res) => {
+  const id = req.id;
+  const videoPath = path.join(__dirname,'/uploads/',id,'.mp4'); // Path to your video file
+  const stat = fs.statSync(videoPath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-');
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = end - start + 1;
+    const file = fs.createReadStream(videoPath, { start, end });
+    const head = {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': 'video/mp4',
+    };
+    res.writeHead(206, head);
+    file.pipe(res);
+  } else {
+    const head = {
+      'Content-Length': fileSize,
+      'Content-Type': 'video/mp4',
+    };
+    res.writeHead(200, head);
+    fs.createReadStream(videoPath).pipe(res);
+  }
+});
+
+
 module.exports = app;
+
+// bet
+// frontend and backend instances both need to run seperately btw
+// and the backend is on port 5000 (if you check the top)
+
+// right, lets change gears
+// the video, what part of Videos.js do I need to throw that at
+// okay for you to send the video to me
+// youd need to make a post endpoint so i can request the data from you
+// so essentially ur gonna give each video an id of sorts
+// then make a post endpoint so that when the frontend requests some sorta id i can get that specific video
+// i mean probably
+// if you make the id like something related to the video title, and theyre all named in the same way
+// but if not its as simple as just give it like a few letter id, have it as a param in the post endpoint and then return the respective video
+// so app.post(x), req.id is the id of ur video, find the video based on said id, then return the video (somehow)
+// ill brb my foods ready
+
+// right

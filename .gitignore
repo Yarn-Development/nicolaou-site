@@ -131,3 +131,5 @@ dist
 
 
 .venv
+.idea/workspace.xml
+backend/src/uploads/DemoFile1.pdf
