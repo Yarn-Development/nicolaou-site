@@ -1,8 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import fetch from 'node-fetch';
 import 'bootstrap/dist/css/bootstrap.min.css';
 
-const VideoSection = ({ videos }) => {
+const VideoSection = () => {
   const [level, setLevel] = useState('Higher');
+  const [videos, setVideos] = useState([]);
+
+  useEffect(() => {
+    const fetchVideos = async () => {
+      const response = await fetch('http://localhost:5000/videos').then((res) =>
+        res.json()
+      );
+      setVideos(response.data);
+    };
+
+    fetchVideos();
+  }, []);
 
   const handleLevelChange = (e) => {
     setLevel(e.target.value);
@@ -27,12 +40,12 @@ const VideoSection = ({ videos }) => {
         {videos
           .filter((video) => video.level === level)
           .map((video) => (
-            <div key={video.id} className="col-md-4">
+            <div key={video._id} className="col-md-4">
               <div className="card mb-4 shadow-sm">
                 <div className="card-body">
                   <h5 className="card-title">{video.title}</h5>
                   <p className="card-text">{video.description}</p>
-                  <a href={video.link} className="btn btn-outline-primary">
+                  <a href={`http://localhost:5000${video.link}`} className="btn btn-outline-primary">
                     Watch Video
                   </a>
                 </div>
@@ -44,16 +57,10 @@ const VideoSection = ({ videos }) => {
   );
 };
 
-// Example usage
-const videos = [
-  { id: 1, title: 'Simultaneous Equations', description: 'Learn the basics of Simultaneous Equations', link: '/videos/sim-eq', level: 'Higher' },
-  // Add more videos here...
-];
-
 export const Videos = () => {
   return (
     <div>
-      <VideoSection videos={videos} />
+      <VideoSection />
     </div>
   );
 };
