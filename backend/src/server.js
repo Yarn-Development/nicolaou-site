@@ -2,34 +2,23 @@ const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
+const Video = require('./models/Video');
+const User = require('./models/User');
+const Worksheet = require('./models/Worksheet');
+const fs = require('fs');
 require("dotenv").config();
 const app = express();
 const PORT = 5000;
 const fs = require('fs');
+const Video = require('./models/Video');
+const User = require('./models/User');
+const Worksheet = require('./models/Worksheet');
 
 // Connect to MongoDB
 mongoose.connect("mongodb+srv://admin:FYF8LrFw5RiqEd7h@nicoloau-site.vz2id.mongodb.net/?retryWrites=true&w=majority&appName=Nicoloau-Site", {
   useNewUrlParser: true,
 });
 
-// Define Video schema
-const videoSchema = new mongoose.Schema({
-  title: String,
-  description: String,
-  link: String,
-  level: String,
-});
-// Worksheet Schema and Upload Logic 
-
-const worksheetSchema = new mongoose.Schema({
-    title: String,
-    description: String,
-    link: String,
-    level: String,
-    });
-
-const Video = mongoose.model('Video', videoSchema);
-const Worksheet = mongoose.model('Worksheet', worksheetSchema);
 
 // Middleware for parsing JSON
 app.use(express.json());
@@ -68,7 +57,8 @@ app.get('/DemoPDF', (req,res) => {
     res.send(data);
   })
 });
-
+// Login endpoint
+require('./routes/login')(app);
 // Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname, 'frontend/public')));
@@ -111,21 +101,3 @@ app.post('/GetVideo', (req, res) => {
 
 
 module.exports = app;
-
-// bet
-// frontend and backend instances both need to run seperately btw
-// and the backend is on port 5000 (if you check the top)
-
-// right, lets change gears
-// the video, what part of Videos.js do I need to throw that at
-// okay for you to send the video to me
-// youd need to make a post endpoint so i can request the data from you
-// so essentially ur gonna give each video an id of sorts
-// then make a post endpoint so that when the frontend requests some sorta id i can get that specific video
-// i mean probably
-// if you make the id like something related to the video title, and theyre all named in the same way
-// but if not its as simple as just give it like a few letter id, have it as a param in the post endpoint and then return the respective video
-// so app.post(x), req.id is the id of ur video, find the video based on said id, then return the video (somehow)
-// ill brb my foods ready
-
-// right
