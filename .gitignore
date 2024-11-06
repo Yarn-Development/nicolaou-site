@@ -134,3 +134,6 @@ dist
 .idea/workspace.xml
 __pycache__/
 *.pyc
+
+# IntelliJ config
+.idea

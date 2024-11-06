@@ -8,6 +8,7 @@ import  Footer  from "./components/Footer";
 import { Assessments } from "./pages/Assessments";
 import { Worksheets } from "./pages/Worksheets";
 import { Videos } from "./pages/Videos";
+import { LoginPage } from "./pages/Login";
 import "./App.css";
 
 export const App = () => {
@@ -19,6 +20,7 @@ export const App = () => {
                 <Route path="/assessments" element={<Assessments />} />
                 <Route path="/worksheets" element={<Worksheets />} />
                 <Route path="/videos" element={<Videos />} />
+                <Route path="/login" component={LoginPage} />
                 <Route path="*" element={<NotFound />} />
             </Routes>
             <Footer />
