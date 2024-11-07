@@ -17,6 +17,9 @@ function Navbar() {
             <li className="nav-item">
               <Link className="nav-link text-white" to="/worksheets">Worksheets</Link>
             </li>
+            <li className="nav-item">
+              <Link className="nav-link text-white" to="/login">Login</Link>
+            </li>
           </ul>
         </nav>
       </div>

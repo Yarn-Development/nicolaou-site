@@ -20,7 +20,7 @@ export const App = () => {
                 <Route path="/assessments" element={<Assessments />} />
                 <Route path="/worksheets" element={<Worksheets />} />
                 <Route path="/videos" element={<Videos />} />
-                <Route path="/login" component={LoginPage} />
+                <Route path="/login" element={<LoginPage />} />
                 <Route path="*" element={<NotFound />} />
             </Routes>
             <Footer />

@@ -8,6 +8,7 @@ module.exports = function(app){
         const { token } = req.body;
 
         try {
+            console.log(process.env.REACT_APP_GOOGLE_CLIENT_ID);
             const ticket = await client.verifyIdToken({
                 idToken: token,
                 audience: process.env.REACT_APP_GOOGLE_CLIENT_ID
@@ -28,9 +29,6 @@ module.exports = function(app){
             res.status(400).json({ error: 'Invalid Google token' });
         }
     });
-
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
 
     app.post('/auth/refresh', (req, res) => {
         const refreshToken = req.cookies.refreshToken;

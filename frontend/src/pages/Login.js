@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
+import '../App.css'; // Import the CSS file
 
-export const GoogleSignIn = () => {
+const GoogleSignIn = () => {
   useEffect(() => {
     window.handleCredentialResponse = (response) => {
       const token = response.credential;
@@ -31,17 +32,19 @@ export const GoogleSignIn = () => {
   }, []);
 
   return (
-    <div>
+    <div className="google-signin-button">
       <div id="googleSignInButton"></div>
     </div>
   );
 };
 
-const LoginPage = () => {
+export const LoginPage = () => {
   return (
-    <div>
-      <h1>Login with Google</h1>
-      <GoogleSignIn />
+    <div className="login-container">
+      <div>
+        <h1>Login with Google</h1>
+        <GoogleSignIn />
+      </div>
     </div>
   );
 };

@@ -1,24 +1,20 @@
+require('dotenv').config({path: __dirname + '/.env'});
 const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
-const Video = require('./models/Video');
-const User = require('./models/User');
-const Worksheet = require('./models/Worksheet');
-const fs = require('fs');
-require("dotenv").config();
 const app = express();
 const PORT = 5000;
 const fs = require('fs');
 const Video = require('./models/Video');
-const User = require('./models/User');
-const Worksheet = require('./models/Worksheet');
 
 // Connect to MongoDB
-mongoose.connect("mongodb+srv://admin:FYF8LrFw5RiqEd7h@nicoloau-site.vz2id.mongodb.net/?retryWrites=true&w=majority&appName=Nicoloau-Site", {
-  useNewUrlParser: true,
+mongoose.connect("mongodb+srv://yarn:hyenaadmin@nicoloau-site.vz2id.mongodb.net/main?retryWrites=true&w=majority&appName=Nicoloau-Site", {
+  useUnifiedTopology: true,
 });
-
+console.log('Google Client ID:', process.env.REACT_APP_GOOGLE_CLIENT_ID);
+console.log('JWT Secret:', process.env.JWT_SECRET);
+console.log('Refresh Secret:', process.env.REFRESH_SECRET);
 
 // Middleware for parsing JSON
 app.use(express.json());
@@ -70,7 +66,7 @@ app.listen(PORT, () => {
 
 app.post('/GetVideo', (req, res) => {
   const id = req.id;
-  const videoPath = path.join(__dirname,'/uploads/',id,'.mp4'); // Path to your video file
+  const videoPath = path.join(__dirname,'/uploads/videos/',id,'.mp4'); // Path to your video file
   const stat = fs.statSync(videoPath);
   const fileSize = stat.size;
   const range = req.headers.range;

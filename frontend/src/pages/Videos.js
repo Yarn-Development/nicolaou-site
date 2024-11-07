@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import fetch from 'node-fetch';
 import 'bootstrap/dist/css/bootstrap.min.css';
 
 const VideoSection = () => {
