@@ -1,0 +1,200 @@
+@import "tailwindcss";
+
+@layer base {
+  .light {
+    /* Enhanced Light mode colors - Cool blue-grey theme */
+    --background: 210 40% 98%; /* Very light blue-grey instead of pure white */
+    --foreground: 220 35% 15%; /* Deep blue-grey */
+    --card: 210 30% 96%; /* Subtle blue-white */
+    --card-foreground: 220 35% 15%;
+    --popover: 210 30% 96%;
+    --popover-foreground: 220 35% 15%;
+    --primary: 196 100% 50%; /* #00BFFF - Bright blue */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 258 100% 67%; /* #A259FF - Purple */
+    --secondary-foreground: 0 0% 100%;
+    --accent: 162 100% 50%; /* Neon green */
+    --accent-foreground: 220 35% 15%;
+    --muted: 210 30% 92%; /* Light blue-grey */
+    --muted-foreground: 220 20% 45%; /* Medium blue-grey */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 20% 88%; /* Soft blue border */
+    --input: 210 25% 94%; /* Light input background */
+    --ring: 196 100% 50%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    /* Enhanced Dark mode colors - Rich dark theme with color accents */
+    --background: 225 25% 8%; /* Rich dark blue-grey instead of pure black */
+    --foreground: 210 15% 95%; /* Soft white with blue tint */
+    --card: 225 20% 12%; /* Dark blue-grey cards */
+    --card-foreground: 210 15% 95%;
+    --popover: 225 20% 12%;
+    --popover-foreground: 210 15% 95%;
+    --primary: 196 100% 55%; /* Slightly brighter blue in dark mode */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 258 100% 70%; /* Brighter purple in dark mode */
+    --secondary-foreground: 0 0% 100%;
+    --accent: 162 100% 55%; /* Brighter mint green */
+    --accent-foreground: 0 0% 100%;
+    --muted: 225 15% 18%; /* Dark muted areas */
+    --muted-foreground: 210 10% 65%; /* Medium grey text */
+    --destructive: 0 84% 65%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 225 15% 20%; /* Subtle dark borders */
+    --input: 225 15% 16%; /* Input backgrounds */
+    --ring: 196 100% 55%;
+  }
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+    transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+}
+
+/* Enhanced glassmorphic effects with color-aware backgrounds */
+.glassmorphic {
+  backdrop-filter: blur(16px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Light mode glassmorphic */
+:root .glassmorphic {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(59, 130, 246, 0.15); /* Blue tinted border */
+  box-shadow: 
+    0 8px 32px rgba(59, 130, 246, 0.08),
+    0 1px 0px rgba(255, 255, 255, 0.4) inset;
+}
+
+/* Dark mode glassmorphic */
+.dark .glassmorphic {
+  background: rgba(30, 41, 59, 0.6); /* Blue-grey tinted glass */
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.4),
+    0 1px 0px rgba(148, 163, 184, 0.1) inset;
+}
+
+/* Enhanced glow effects */
+.glow {
+  text-shadow: 0 0 20px rgba(0, 191, 255, 0.8);
+}
+
+.glow-border {
+  box-shadow: 
+    0 0 0 1px rgba(0, 191, 255, 0.3),
+    0 0 15px rgba(0, 191, 255, 0.4),
+    0 4px 20px rgba(0, 191, 255, 0.2);
+}
+
+.glow-border-violet {
+  box-shadow: 
+    0 0 0 1px rgba(162, 89, 255, 0.3),
+    0 0 15px rgba(162, 89, 255, 0.4),
+    0 4px 20px rgba(162, 89, 255, 0.2);
+}
+
+.glow-border-mint {
+  box-shadow: 
+    0 0 0 1px rgba(0, 255, 198, 0.3),
+    0 0 15px rgba(0, 255, 198, 0.4),
+    0 4px 20px rgba(0, 255, 198, 0.2);
+}
+
+/* Enhanced gradient animations */
+.animated-gradient {
+  background: linear-gradient(
+    -45deg,
+    rgba(0, 191, 255, 0.2),
+    rgba(162, 89, 255, 0.2),
+    rgba(0, 255, 198, 0.2),
+    rgba(0, 191, 255, 0.2)
+  );
+  background-size: 400% 400%;
+  animation: gradient 15s ease infinite;
+}
+
+.dark .animated-gradient {
+  background: linear-gradient(
+    -45deg,
+    rgba(0, 191, 255, 0.15),
+    rgba(162, 89, 255, 0.15),
+    rgba(0, 255, 198, 0.15),
+    rgba(0, 191, 255, 0.15)
+  );
+}
+
+@keyframes gradient {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Enhanced card hover effects */
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-hover:hover {
+  transform: translateY(-8px) scale(1.02);
+}
+
+:root .card-hover:hover {
+  box-shadow: 
+    0 20px 40px rgba(59, 130, 246, 0.15),
+    0 0 20px rgba(0, 191, 255, 0.3);
+}
+
+.dark .card-hover:hover {
+  box-shadow: 
+    0 20px 40px rgba(0, 0, 0, 0.4),
+    0 0 20px rgba(0, 191, 255, 0.5);
+}
+
+/* Color-specific backgrounds for better visual hierarchy */
+.bg-surface {
+  background-color: hsl(var(--card));
+}
+
+.bg-surface-elevated {
+  background-color: hsl(var(--popover));
+}
+
+/* Light mode specific enhancements */
+:root {
+  /* Subtle color washes for sections */
+  --section-primary: rgba(59, 130, 246, 0.03);
+  --section-secondary: rgba(139, 92, 246, 0.03);
+  --section-accent: rgba(16, 185, 129, 0.03);
+}
+
+.dark {
+  --section-primary: rgba(59, 130, 246, 0.05);
+  --section-secondary: rgba(139, 92, 246, 0.05);
+  --section-accent: rgba(16, 185, 129, 0.05);
+}
+
+.section-primary {
+  background: var(--section-primary);
+}
+
+.section-secondary {
+  background: var(--section-secondary);
+}
+
+.section-accent {
+  background: var(--section-accent);
+}

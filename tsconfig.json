@@ -1,0 +1,68 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "preserve",
+    /* Linting */
+    "strict": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noImplicitAny": false,
+    "noFallthroughCasesInSwitch": false,
+    "baseUrl": ".",
+    "paths": {
+      "@/lib/*": [
+        "./lib/*"
+      ],
+      "@/pages/*": [
+        "./pages/*"
+      ],
+      "@/components/*": [
+        "./components/*"
+      ],
+      "@/hooks/*": [
+        "./hooks/*"
+      ],
+      "@/utils/*": [
+        "./utils/*"
+      ],
+      "@/stores/*": [
+        "./stores/*"
+      ],
+      "@/types/*": [
+        "./types/*"
+      ]
+    },
+    "allowJs": true,
+    "incremental": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
+  },
+  "exclude": [
+    "node_modules"
+  ],
+  "include": [
+    "next-env.d.ts",
+    ".next/types/**/*.ts",
+    "**/*.ts",
+    "**/*.tsx"
+  ]
+}

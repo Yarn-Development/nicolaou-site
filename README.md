@@ -1,110 +1,184 @@
-# Nicolaou Commission
 
-## Table of Contents
-1. [Introduction](#introduction)
-2. [Technologies](#technologies)
-3. [Project Structure](#project-structure)
-4. [Task Distribution](#task-distribution)
-5. [Checklist](#checklist)
+# ✨ nicolaou-site
 
-## Introduction
-This document outlines the plan for two separate projects: **Marking/Auto Feedback + ESQs (Excel but advanced)** and **Video Platform (Similar to DFM)**. Each project will be broken down into various sections, detailing the functionalities, required technologies, and task distribution among team members.
+nicolaou-site is a sophisticated, AI-powered educational platform designed to revolutionize how students learn and teachers manage progress. It merges powerful educational functionality with a visually stunning, futuristic interface inspired by Apple Vision Pro and the data clarity of Baremetrics.
 
-## Technologies
-- **Frontend:** React.js
-- **Backend:** Node.js, Express.js
-- **Database:** MongoDB
-- **Authentication:** JWT (JSON Web Tokens)
-- **Deployment:** AWS/GCP/Azure
-- **AI/Worksheet Generation:** Python, TensorFlow/PyTorch for AI models
 
-## Project Structure
-### Marking/Auto Feedback + ESQs
-- **Admin Section:**
-  - Upload or select pre-made assessments.
-- **Main Section:**
-  - Display assessments with corresponding marks and learning objectives.
-  - Incorrect marks generate learning objectives and worksheets.
-  - All correct marks generate extension questions or shadow papers.
-  - Confidence levels color-coded with a revision checklist.
-  - Assessments can be done online or printed (preferably printed and timed).
-  - KS3 Shadow Papers via TestSpace, KS4 Shadow Papers via ExamWizard.
 
-### Video Platform
-- **Student Section:**
-  - Access videos and worksheets categorized by GCSE topics.
-  - Interactive elements linking worksheets and videos.
-- **Teacher Section:**
-  - Upload videos and worksheets.
-  - Create exams and topic assessments with a bank of categorized questions.
-  - Automatic generation of revision lists and feedback sheets.
-- **Nicolaou Section:**
-  - Upload and manage content, including videos and worksheets.
+## 📖 Table of Contents
 
-## Task Distribution
-### Team Member 1: Frontend Developer
-- **Marking/Auto Feedback + ESQs:**
-  - Develop the Admin and Main sections.
-  - Implement UI for uploading/selecting assessments and displaying assessment results.
-- **Video Platform:**
-  - Create Student and Teacher sections.
-  - Design the UI for video and worksheet integration.
+  - [About The Project](https://www.google.com/search?q=%23-about-the-project)
+  - [Key Features](https://www.google.com/search?q=%23-key-features)
+  - [🎨 Design Philosophy](https://www.google.com/search?q=%23-design-philosophy)
+  - [🛠️ Built With](https://www.google.com/search?q=%23-built-with)
+  - [🚀 Getting Started](https://www.google.com/search?q=%23-getting-started)
+      - [Prerequisites](https://www.google.com/search?q=%23prerequisites)
+      - [Installation](https://www.google.com/search?q=%23installation)
+  - [🧭 Roadmap](https://www.google.com/search?q=%23-roadmap)
+  - [🤝 Contributing](https://www.google.com/search?q=%23-contributing)
+  - [📄 License](https://www.google.com/search?q=%23-license)
+  - [📧 Contact](https://www.google.com/search?q=%23-contact)
 
-### Team Member 2: Backend Developer
-- **Marking/Auto Feedback + ESQs:**
-  - Set up the Node.js server with Express.
-  - Create APIs for assessment uploads, selection, and feedback generation.
-  - Fetch all data from:
-	  - DB 
-	  - Question Bank
-  - Make an API to handle all of this data, use node-fetch, or express etc
-  - Route the API to the respective frontend link
-- **Video Platform:**
-  - Develop APIs for video and worksheet management.
-  - Implement features for exam and assessment creation, including the question bank.
+-----
 
-### Team Member 3: AI/Database Specialist
-- **Marking/Auto Feedback + ESQs:**
-  - Design the database schema for assessments and learning objectives.
-  - Integrate AI for worksheet generation based on incorrect marks.
-    - Use [SymPy Gamma](https://sympygamma.com) to solve generated questions: 
-      [https://github.com/sympy/sympy_gamma](https://sympygamma.com)
-    - You will generate suitable Qs yourself for each topic, to ensure decent answers
-- **Video Platform:**
-  - Manage the database for videos, worksheets, and question banks.
-  - Implement AI features for worksheet creation and revision list generation.
+## 🌟 About The Project
 
-## Checklist
-### Marking/Auto Feedback + ESQs
-1. **Admin Section:**
-   - [ ] Create UI for uploading/selecting assessments.
-   - [ ] Implement APIs for assessment management.
-2. **Main Section:**
-   - [ ] Display assessments and corresponding marks.
-   - [ ] Generate learning objectives and worksheets based on incorrect marks.
-   - [ ] Develop extension question generation.
-   - [ ] Color-code confidence levels and update revision checklists.
-   - [ ] Ensure assessments can be printed and timed.
+This repository contains the codebase for nicolaou-site, an educational platform focused on providing a rich, interactive, and personalized learning experience. The core of the application allows students to engage with a vast library of video lessons, take assessments, and interact with worksheets.
 
-### Video Platform
-1. **Student Section:**
-   - [ ] Develop UI for accessing videos and worksheets.
-   - [ ] Implement interactive elements linking videos and worksheets.
-2. **Teacher Section:**
-   - [ ] Create UI for uploading videos and worksheets.
-   - [ ] Develop features for exam and assessment creation.
-   - [ ] Implement the question bank and automatic feedback generation.
-3. **Nicolaou Section:**
-   - [ ] Set up content management for video and worksheet uploads.
-   - [ ] Integrate AI for worksheet creation and revision list generation.
+The project's ambition is to create an ecosystem that not only serves students but also empowers teachers with advanced class management tools, AI-driven content generation, and insightful analytics, all wrapped in a cutting-edge, high-polish user interface.
 
-## Conclusion
-This README provides a comprehensive guide to the development of the Marking/Auto Feedback + ESQs and Video Platform projects. Each team member has clear tasks, and the checklist ensures that all components are developed systematically. Let's collaborate effectively to build these innovative educational tools.
-### Meeting summary (Overall Objectives)
+-----
 
-  - [ ] Pre-written questions based on each topic
-  - [ ] Divye will sort through each question and make    random numbers with suitable answers.
-  - [ ]ESQs with year or option to “generate Qs”
-  - [ ]Page for Questions , Answers, Users, Admin, Videos
-  - [ ] All available topics for people 
+## ✨ Key Features
 
+### 📊 Current Features
+
+  - **Assessment Engine:** Students can answer questions one-by-one with real-time marking.
+  - **Content Library:** A filterable library of video lessons organised by topic.
+  - **LaTeX Rendering:** Flawless rendering of mathematical and algebraic expressions using KaTeX/MathJax.
+  - **Topic & Difficulty Filtering:** Users can find content based on topic (e.g., Algebra) and difficulty (e.g., GCSE tiers).
+  - **Secure Authentication:** A context-based authentication system with protected routes.
+
+### 🔮 Planned Features
+
+  - **AI-Powered Tools:**
+      - **Generative AI Worksheet Builder:** Generate exam-style worksheets based on user prompts.
+      - **Personalized Recommendations:** Suggest content to students based on performance gaps.
+  - **👩‍🏫 Teacher Portal:**
+      - **Interactive Scheme of Work:** Editable curriculum planner with linked platform content.
+      - **Class Management:** Assign work to classes or individual students.
+      - **Progress Analytics:** Track and visualize class and student performance.
+      - **Feedback System:** A streamlined interface for teachers to leave feedback.
+  - **👨‍🎓 Enhanced Student Dashboard:**
+      - **Granular Progress Tracking:** Visualize scores by topic over time.
+      - **AI-Generated Revision Paths:** Get intelligent suggestions on the "next best topic" to study.
+
+-----
+
+## 🎨 Design Philosophy
+
+The user interface is a core component of the project's identity. The goal is a futuristic, ultra-polished, high-tech aesthetic.
+
+> **Inspiration:** The UI polish of **Apple Vision Pro** meets the data-rich clarity of **Baremetrics**.
+
+  - **Theme:** Dark mode-first (`#0E1117`) with luminous neon accents (Electric Blue, Violet, Mint Green).
+  - **Effects:** Heavy use of **Glassmorphism** for panels and modals (semi-transparent, blurred backgrounds with glowing borders).
+  - **Layout:** Generous negative space, soft shadows, and fully rounded corners.
+  - **Motion:** Fluid and meaningful animations are integral. Charts animate on load, UI elements have smooth hover effects, and section transitions are spring-like and seamless.
+  - **Typography:** Modern sans-serif font (**Geist**, **Satoshi**, or **Space Grotesk**).
+
+-----
+
+## 🛠️ Built With
+
+This project leverages a modern, powerful tech stack:
+
+  - **Frontend:** [React](https://reactjs.org/)
+  - **Styling:** [Tailwind CSS](https://tailwindcss.com/)
+  - **Animation:** [Framer Motion](https://www.framer.com/motion/)
+  - **Backend & DB:** [Supabase](https://supabase.io/)
+  - **AI Integration:** [OpenAI API](https://openai.com/api/)
+  - **LaTeX Rendering:** [KaTeX](https://katex.org/)
+  - **Deployment:** [Vercel](https://vercel.com/)
+
+-----
+
+## 🚀 Getting Started
+
+To get a local copy up and running, follow these simple steps.
+
+### Prerequisites
+
+Make sure you have Node.js and npm (or yarn/pnpm) installed.
+
+  - npm
+    ```sh
+    npm install npm@latest -g
+    ```
+
+### Installation
+
+1.  **Clone the repository**
+
+    ```sh
+    git clone https://github.com/aspekts/nicolaou-site.git
+    ```
+
+2.  **Navigate to the project directory**
+
+    ```sh
+    cd nicolaou-site
+    ```
+
+3.  **Install NPM packages**
+
+    ```sh
+    npm install
+    ```
+
+4.  **Set up your environment variables**
+    Create a `.env.local` file in the root of the project and add the following variables. Get these from your Supabase and OpenAI dashboards.
+
+    ```sh
+    # .env.local
+
+    # Supabase
+    NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+
+    # OpenAI
+    OPENAI_API_KEY=your_openai_api_key
+    ```
+
+5.  **Run the development server**
+
+    ```sh
+    npm run dev
+    ```
+
+    Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+
+-----
+
+## 🧭 Roadmap
+
+See the [open issues](https://github.com/aspekts/nicolaou-site/issues) for a full list of proposed features and known issues.
+
+  - [ ] **Phase 1: UI Overhaul**
+      - [ ] Implement the new Glassmorphism design system across all existing pages.
+      - [ ] Add scroll-triggered animations and enhance UI polish.
+      - [ ] Optimize responsive design for all major breakpoints.
+  - [ ] **Phase 2: Teacher Portal**
+      - [ ] Build the core dashboard UI.
+      - [ ] Implement class and student management logic.
+      - [ ] Integrate data visualizations for progress tracking.
+  - [ ] **Phase 3: AI Integration**
+      - [ ] Develop the AI Worksheet Generator module.
+      - [ ] Build and test the content recommendation engine.
+  - [ ] **Phase 4: Student Dashboard V2**
+      - [ ] Redesign dashboard with advanced progress visualizations.
+      - [ ] Implement the "Next Best Topic" feature.
+  - [ ] **Phase 5: Admin Panel**
+      - [ ] Create CRUD interfaces for all major data models (topics, videos, etc.).
+
+-----
+
+## 🤝 Contributing
+
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+
+If you have a suggestion that would make this better, please fork the repo and create a pull request. You can also simply open an issue with the tag "enhancement".
+
+1.  Fork the Project
+2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4.  Push to the Branch (`git push origin feature/AmazingFeature`)
+5.  Open a Pull Request
+
+-----
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE.txt` for more information.
+
+-----
