@@ -61,14 +61,16 @@ export function StudentList() {
   ]
 
 // Add actual filtering logic
-const filteredStudents = students.filter((student) => {
-  const matchesSearch = student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                       student.email.toLowerCase().includes(searchTerm.toLowerCase())
-  const matchesStatus = filterStatus === "all" || student.status.toLowerCase() === filterStatus
-  const matchesSubject = filterSubject === "all" || student.subjects.includes(filterSubject)
-  
-  return matchesSearch && matchesStatus && matchesSubject
-})
+const filteredStudents = useMemo(() => {
+  return students.filter((student) => {
+    const matchesSearch = student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         student.email.toLowerCase().includes(searchTerm.toLowerCase())
+    const matchesStatus = filterStatus === "all" || student.status.toLowerCase() === filterStatus
+    const matchesSubject = filterSubject === "all" || student.subjects.includes(filterSubject)
+    
+    return matchesSearch && matchesStatus && matchesSubject
+  })
+}, [students, searchTerm, filterStatus, filterSubject])
 
 
   return (
