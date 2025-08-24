@@ -10,13 +10,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sparkles, FileText, Plus, Minus, Trash2, Download } from "lucide-react"
 import { toast } from "sonner"
 
+// Define the structure for a worksheet question
+interface Question {
+  id: number;
+  question: string;
+  options: string[];
+  answer: string;
+}
+
+// Define the structure for the worksheet
+interface Worksheet {
+  title: string;
+  description: string;
+  questions: Question[];
+}
 export function WorksheetGenerator() {
   const [topic, setTopic] = useState("")
   const [gradeLevel, setGradeLevel] = useState("")
   const [difficulty, setDifficulty] = useState([3])
   const [numQuestions, setNumQuestions] = useState(5)
   const [isGenerating, setIsGenerating] = useState(false)
-  const [worksheet, setWorksheet] = useState(null)
+  const [worksheet, setWorksheet] = useState<Worksheet | null>(null)
 
   const handleGenerate = () => {
     if (!topic || !gradeLevel) return
