@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input"
 import { Plus, Trash2, GripVertical } from "lucide-react"
 
 export function SchemeOfWork() {
-  const [schemes, setSchemes] = useState([])
   const [newSchemeName, setNewSchemeName] = useState("")
   
   return (

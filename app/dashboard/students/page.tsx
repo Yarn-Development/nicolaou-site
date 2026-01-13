@@ -106,7 +106,6 @@ const classGroups = [
 ]
 
 export default function StudentsPage() {
-  const [selectedClass, setSelectedClass] = useState("all")
   const [showAddStudent, setShowAddStudent] = useState(false)
 
   const StatCard = ({ 
@@ -119,7 +118,7 @@ export default function StudentsPage() {
     title: string
     value: string | number
     change?: string
-    icon: any
+    icon: React.ElementType
     trend?: "up" | "down" | "neutral"
   }) => (
     <Card className="glassmorphic">
@@ -164,7 +163,7 @@ export default function StudentsPage() {
               <DialogHeader>
                 <DialogTitle>Add New Student</DialogTitle>
                 <DialogDescription>
-                  Add a new student to your class. They'll receive an invitation email.
+                  Add a new student to your class. They&apos;ll receive an invitation email.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 py-4">

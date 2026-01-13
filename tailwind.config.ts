@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss"
 
 const config: Config = {
-  darkMode: ["class"],
+  darkMode: "class" as const,
   content: [
     './pages/**/*.{ts,tsx}',
     './components/**/*.{ts,tsx}',
@@ -18,6 +18,14 @@ const config: Config = {
     },
     extend: {
       colors: {
+        // Swiss Focus International Red palette
+        paper: '#FFFFFF',
+        concrete: '#F4F4F4',
+        ink: '#000000',
+        lead: '#555555',
+        signal: '#FF3B30',
+        
+        // Keep compatibility with shadcn components
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -53,9 +61,21 @@ const config: Config = {
         },
       },
       borderRadius: {
+        none: '0',
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      fontFamily: {
+        sans: ['Inter', 'sans-serif'],
+      },
+      letterSpacing: {
+        tighter: '-0.04em',
+        tight: '-0.02em',
+        normal: '0',
+        wide: '0.02em',
+        wider: '0.04em',
+        widest: '0.1em',
       },
       keyframes: {
         "accordion-down": {

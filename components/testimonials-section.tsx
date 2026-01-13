@@ -56,7 +56,7 @@ export function TestimonialsSection() {
             </div>
             <h2 className="text-3xl font-bold tracking-tighter md:text-4xl/tight">Loved by educators and students</h2>
             <p className="max-w-[700px] text-muted-foreground md:text-xl">
-              See what our community has to say about their experience with Nicolaou's Maths
+              See what our community has to say about their experience with Nicolaou&apos;s Maths
             </p>
           </div>
         </div>
@@ -75,7 +75,7 @@ export function TestimonialsSection() {
                   <Star key={i} className="h-5 w-5 fill-primary text-primary" />
                 ))}
               </div>
-              <blockquote className="text-lg md:text-xl mb-6">"{testimonials[currentTestimonial].content}"</blockquote>
+              <blockquote className="text-lg md:text-xl mb-6">&quot;{testimonials[currentTestimonial].content}&quot;</blockquote>
               <div className="flex items-center justify-center space-x-4">
                 <div
                   className="h-12 w-12 rounded-full bg-muted"

@@ -2,9 +2,7 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Check, Sparkles } from "lucide-react"
-import { motion } from "framer-motion"
+import { Check } from "lucide-react"
 
 export function PricingSection() {
   const [isAnnual, setIsAnnual] = useState(false)
@@ -57,94 +55,111 @@ export function PricingSection() {
   ]
 
   return (
-    <section className="py-12 md:py-24 lg:py-32">
-      <div className="container px-4 md:px-6 mx-auto">
-        <div className="flex flex-col items-center justify-center space-y-4 text-center">
-          <div className="space-y-2">
-            <div className="inline-block rounded-lg bg-muted px-3 py-1 text-sm">
-              <span className="text-primary">Pricing</span>
-            </div>
-            <h2 className="text-3xl font-bold tracking-tighter md:text-4xl/tight">Choose the perfect plan</h2>
-            <p className="max-w-[700px] text-muted-foreground md:text-xl">
-              Start free and scale as you grow. All plans include our core AI features.
-            </p>
-          </div>
-          <div className="flex items-center space-x-4">
-            <span className={`text-sm ${!isAnnual ? "text-foreground" : "text-muted-foreground"}`}>Monthly</span>
-            <button
-              onClick={() => setIsAnnual(!isAnnual)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                isAnnual ? "bg-primary" : "bg-muted"
-              }`}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  isAnnual ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
-            </button>
-            <span className={`text-sm ${isAnnual ? "text-foreground" : "text-muted-foreground"}`}>
-              Annual
-              <Badge variant="secondary" className="ml-2 bg-primary/20 text-primary">
-                Save 17%
-              </Badge>
+    <section className="py-24 bg-swiss-concrete border-t border-swiss-ink">
+      <div className="max-w-7xl mx-auto px-6">
+        {/* Header */}
+        <div className="grid grid-cols-12 gap-8 mb-16">
+          <div className="col-span-12 md:col-span-3">
+            <span className="block text-sm font-bold uppercase tracking-widest text-swiss-signal mb-4">
+              Pricing
             </span>
           </div>
+          <div className="col-span-12 md:col-span-9 lg:col-span-7">
+            <h2 className="text-5xl font-extrabold tracking-tight leading-none mb-6 text-swiss-ink uppercase">
+              Choose the<br />perfect plan.
+            </h2>
+            <p className="text-xl leading-relaxed text-swiss-lead mb-8">
+              Start free and scale as you grow. All plans include our core AI features.
+            </p>
+
+            {/* Toggle */}
+            <div className="flex items-center space-x-4 border border-swiss-ink p-2 w-fit bg-swiss-paper">
+              <button
+                onClick={() => setIsAnnual(false)}
+                className={`px-6 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${
+                  !isAnnual ? "bg-swiss-ink text-swiss-paper" : "bg-transparent text-swiss-ink"
+                }`}
+              >
+                Monthly
+              </button>
+              <button
+                onClick={() => setIsAnnual(true)}
+                className={`px-6 py-3 text-sm font-bold uppercase tracking-wider transition-colors ${
+                  isAnnual ? "bg-swiss-ink text-swiss-paper" : "bg-transparent text-swiss-ink"
+                }`}
+              >
+                Annual
+                <span className="ml-2 text-xs bg-swiss-signal text-white px-2 py-1">Save 17%</span>
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="mx-auto grid max-w-6xl items-start gap-6 py-12 lg:grid-cols-3 lg:gap-8">
-          {plans.map((plan, index) => (
-            <motion.div
+
+        {/* Pricing Grid */}
+        <div className="grid lg:grid-cols-3 gap-0 border-t border-swiss-ink">
+          {plans.map((plan) => (
+            <div
               key={plan.name}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-              className={`relative glassmorphic rounded-xl p-6 card-hover ${plan.popular ? "glow-border-violet" : ""}`}
+              className={`border-r border-b border-swiss-ink p-8 bg-swiss-paper ${
+                plan.popular ? "lg:-mt-8 lg:mb-8 bg-swiss-signal text-white border-4" : ""
+              }`}
             >
               {plan.popular && (
-                <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                  <Badge className="bg-secondary text-secondary-foreground">
-                    <Sparkles className="mr-1 h-3 w-3" />
+                <div className="mb-6">
+                  <span className="text-xs font-bold uppercase tracking-widest bg-white text-swiss-signal px-3 py-1">
                     Most Popular
-                  </Badge>
+                  </span>
                 </div>
               )}
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-2xl font-bold">{plan.name}</h3>
-                  <p className="text-muted-foreground">{plan.description}</p>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-baseline space-x-2">
-                    <span className="text-4xl font-bold">${isAnnual ? plan.price.annual : plan.price.monthly}</span>
-                    <span className="text-muted-foreground">
-                      {plan.price.monthly === 0 ? "forever" : isAnnual ? "/year" : "/month"}
-                    </span>
-                  </div>
-                  {isAnnual && plan.price.monthly > 0 && (
-                    <p className="text-sm text-muted-foreground">
-                      ${Math.round(plan.price.annual / 12)}/month billed annually
-                    </p>
-                  )}
-                </div>
-                <Button
-                  className={`w-full ${
-                    plan.popular
-                      ? "bg-secondary hover:bg-secondary/90 glow-border-violet"
-                      : "bg-primary hover:bg-primary/90"
-                  }`}
-                >
-                  {plan.cta}
-                </Button>
-                <ul className="space-y-3">
-                  {plan.features.map((feature, featureIndex) => (
-                    <li key={featureIndex} className="flex items-start space-x-3">
-                      <Check className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-                      <span className="text-sm">{feature}</span>
-                    </li>
-                  ))}
-                </ul>
+
+              <div className="mb-8">
+                <h3 className={`text-3xl font-black uppercase tracking-tight mb-2 ${plan.popular ? "text-white" : "text-swiss-ink"}`}>
+                  {plan.name}
+                </h3>
+                <p className={`text-sm ${plan.popular ? "text-white opacity-90" : "text-swiss-lead"}`}>
+                  {plan.description}
+                </p>
               </div>
-            </motion.div>
+
+              <div className="mb-8">
+                <div className="flex items-baseline space-x-2 mb-2">
+                  <span className={`text-6xl font-black ${plan.popular ? "text-white" : "text-swiss-ink"}`}>
+                    ${isAnnual ? plan.price.annual : plan.price.monthly}
+                  </span>
+                  <span className={`text-sm font-bold uppercase ${plan.popular ? "text-white opacity-90" : "text-swiss-lead"}`}>
+                    {plan.price.monthly === 0 ? "forever" : isAnnual ? "/year" : "/month"}
+                  </span>
+                </div>
+                {isAnnual && plan.price.monthly > 0 && (
+                  <p className={`text-sm font-medium ${plan.popular ? "text-white opacity-75" : "text-swiss-lead"}`}>
+                    ${Math.round(plan.price.annual / 12)}/month billed annually
+                  </p>
+                )}
+              </div>
+
+              <Button
+                className={`w-full mb-8 font-bold uppercase tracking-wider text-sm px-8 py-6 ${
+                  plan.popular
+                    ? "bg-white text-swiss-signal hover:bg-swiss-ink hover:text-white dark:hover:bg-black"
+                    : "bg-swiss-signal text-white hover:bg-swiss-ink dark:hover:bg-white dark:hover:text-swiss-ink"
+                }`}
+              >
+                {plan.cta}
+              </Button>
+
+              <div className={`w-full h-px mb-8 ${plan.popular ? "bg-white" : "bg-swiss-ink"}`}></div>
+
+              <ul className="space-y-4">
+                {plan.features.map((feature, featureIndex) => (
+                  <li key={featureIndex} className="flex items-start space-x-3">
+                    <Check className={`h-5 w-5 mt-0.5 flex-shrink-0 ${plan.popular ? "text-white" : "text-swiss-ink"}`} />
+                    <span className={`text-sm font-medium ${plan.popular ? "text-white" : "text-swiss-ink"}`}>
+                      {feature}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ))}
         </div>
       </div>

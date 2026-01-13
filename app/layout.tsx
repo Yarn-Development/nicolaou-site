@@ -1,8 +1,14 @@
 import type React from "react"
 import { ThemeProvider } from "@/components/theme-provider"
-import { GeistSans } from "geist/font/sans"
+import { Inter } from "next/font/google"
 import { Toaster } from "sonner"
 import "./globals.css"
+
+const inter = Inter({ 
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800", "900"],
+  variable: "--font-inter",
+})
 
 export const metadata = {
   title: "Nicolaou's Maths | Next-Generation Learning Platform",
@@ -16,7 +22,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${GeistSans.className} antialiased`}>
+      <head>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
+      </head>
+      <body className={`${inter.className} antialiased`}>
         <ThemeProvider>
           {children}
           <Toaster
@@ -26,9 +35,7 @@ export default function RootLayout({
                 background: "hsl(var(--card))",
                 color: "hsl(var(--card-foreground))",
                 border: "1px solid hsl(var(--border))",
-                backdropFilter: "blur(10px)",
               },
-              className: "glassmorphic",
             }}
           />
         </ThemeProvider>

@@ -175,7 +175,7 @@ export default function AssessmentsPage() {
     setIsPlaying(true)
   }
 
-  const togglePlayPause = () => {
+  const togglePlayPause = useCallback(() => {
     if (videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause()
@@ -184,14 +184,14 @@ export default function AssessmentsPage() {
       }
       setIsPlaying(!isPlaying)
     }
-  }
+  }, [isPlaying])
 
-  const toggleMute = () => {
+  const toggleMute = useCallback(() => {
     if (videoRef.current) {
       videoRef.current.muted = !isMuted
       setIsMuted(!isMuted)
     }
-  }
+  }, [isMuted])
 const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
   if (videoRef.current && duration > 0) {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -202,7 +202,7 @@ const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
   }
 }
 
-const toggleFullscreen = () => {
+const toggleFullscreen = useCallback(() => {
   if (videoRef.current) {
     if (!document.fullscreenElement) {
       videoRef.current.requestFullscreen().catch(err => {
@@ -212,7 +212,7 @@ const toggleFullscreen = () => {
       document.exitFullscreen()
     }
   }
-}
+}, [])
 
 
 const handleKeyPress = useCallback((e: KeyboardEvent) => {
@@ -313,7 +313,8 @@ const togglePictureInPicture = async () => {
       if (question.type === "multiple-choice") {
         if (parseInt(userAnswer) === question.correct) correct++
       } else if (question.type === "input") {
-        if (userAnswer?.toLowerCase() === question.correct.toLowerCase()) correct++
+        const correctAnswer = typeof question.correct === 'string' ? question.correct : String(question.correct)
+        if (userAnswer?.toLowerCase() === correctAnswer.toLowerCase()) correct++
       }
     })
     return Math.round((correct / activeAssessment.questions.length) * 100)
@@ -553,9 +554,10 @@ const togglePictureInPicture = async () => {
                 <div className="space-y-4">
                   {activeAssessment.questions.map((question, index) => {
                     const userAnswer = userAnswers[question.id]
+                    const correctAnswer = typeof question.correct === 'string' ? question.correct : String(question.correct)
                     const isCorrect = question.type === "multiple-choice" 
                       ? parseInt(userAnswer) === question.correct
-                      : userAnswer?.toLowerCase() === question.correct.toLowerCase()
+                      : userAnswer?.toLowerCase() === correctAnswer.toLowerCase()
 
                     return (
                       <Card key={question.id} className={`glassmorphic ${isCorrect ? 'border-green-500/50' : 'border-red-500/50'}`}>
