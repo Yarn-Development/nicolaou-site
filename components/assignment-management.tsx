@@ -7,7 +7,7 @@ import { WorksheetGenerator } from "@/components/worksheet-generator"
 import { Plus } from "lucide-react"
 
 export function AssignmentManagement() {
-  const [activeView, setActiveView] = useState("overview")
+  const [activeView] = useState("overview")
   
   return (
     <div className="space-y-6">

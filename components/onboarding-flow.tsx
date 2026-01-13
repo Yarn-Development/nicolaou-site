@@ -93,7 +93,7 @@ export function OnboardingFlow() {
               <div className="space-y-2">
                 <h2 className="text-2xl font-bold">Choose your role</h2>
                 <p className="text-muted-foreground">
-                  We'll personalize your experience based on how you'll use Nicolaou's Maths
+                  We&apos;ll personalize your experience based on how you&apos;ll use Nicolaou&apos;s Maths
                 </p>
               </div>
 
@@ -239,7 +239,7 @@ export function OnboardingFlow() {
                     <Check className="h-8 w-8 text-primary" />
                   </div>
                 </div>
-                <h2 className="text-2xl font-bold">You're all set!</h2>
+                <h2 className="text-2xl font-bold">You&apos;re all set!</h2>
                 <p className="text-muted-foreground">Your personalized dashboard is ready to explore</p>
               </div>
 

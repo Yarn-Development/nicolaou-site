@@ -87,7 +87,7 @@ export default function AnalyticsPage() {
     title: string
     value: string
     change: string
-    icon: any
+    icon: React.ElementType
     trend?: "up" | "down"
   }) => (
     <Card className="glassmorphic">

@@ -2,199 +2,250 @@
 
 @layer base {
   .light {
-    /* Enhanced Light mode colors - Cool blue-grey theme */
-    --background: 210 40% 98%; /* Very light blue-grey instead of pure white */
-    --foreground: 220 35% 15%; /* Deep blue-grey */
-    --card: 210 30% 96%; /* Subtle blue-white */
-    --card-foreground: 220 35% 15%;
-    --popover: 210 30% 96%;
-    --popover-foreground: 220 35% 15%;
-    --primary: 196 100% 50%; /* #00BFFF - Bright blue */
+    /* Swiss Focus - International Red Palette (Light Mode) */
+    --background: 0 0% 100%; /* Pure white (#FFFFFF) */
+    --foreground: 0 0% 0%; /* Pure black (#000000) */
+    --card: 0 0% 96%; /* Concrete (#F4F4F4) */
+    --card-foreground: 0 0% 0%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 0%;
+    --primary: 4 100% 60%; /* Signal Red (#FF3B30) */
     --primary-foreground: 0 0% 100%;
-    --secondary: 258 100% 67%; /* #A259FF - Purple */
+    --secondary: 0 0% 0%; /* Black for secondary elements */
     --secondary-foreground: 0 0% 100%;
-    --accent: 162 100% 50%; /* Neon green */
-    --accent-foreground: 220 35% 15%;
-    --muted: 210 30% 92%; /* Light blue-grey */
-    --muted-foreground: 220 20% 45%; /* Medium blue-grey */
+    --accent: 0 0% 33%; /* Lead (#555555) for accents */
+    --accent-foreground: 0 0% 100%;
+    --muted: 0 0% 96%; /* Concrete background */
+    --muted-foreground: 0 0% 33%; /* Lead text */
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 210 20% 88%; /* Soft blue border */
-    --input: 210 25% 94%; /* Light input background */
-    --ring: 196 100% 50%;
-    --radius: 0.75rem;
+    --border: 0 0% 0%; /* Pure black borders */
+    --input: 0 0% 96%;
+    --ring: 4 100% 60%;
+    --radius: 0rem; /* No border radius - Sharp rectangles */
   }
 
   .dark {
-    /* Enhanced Dark mode colors - Rich dark theme with color accents */
-    --background: 225 25% 8%; /* Rich dark blue-grey instead of pure black */
-    --foreground: 210 15% 95%; /* Soft white with blue tint */
-    --card: 225 20% 12%; /* Dark blue-grey cards */
-    --card-foreground: 210 15% 95%;
-    --popover: 225 20% 12%;
-    --popover-foreground: 210 15% 95%;
-    --primary: 196 100% 55%; /* Slightly brighter blue in dark mode */
+    /* Swiss Focus - International Red Palette (Dark Mode) */
+    --background: 0 0% 0%; /* Pure black */
+    --foreground: 0 0% 100%; /* Pure white */
+    --card: 0 0% 7%; /* Very dark grey */
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 4 100% 60%; /* Signal Red */
     --primary-foreground: 0 0% 100%;
-    --secondary: 258 100% 70%; /* Brighter purple in dark mode */
-    --secondary-foreground: 0 0% 100%;
-    --accent: 162 100% 55%; /* Brighter mint green */
-    --accent-foreground: 0 0% 100%;
-    --muted: 225 15% 18%; /* Dark muted areas */
-    --muted-foreground: 210 10% 65%; /* Medium grey text */
+    --secondary: 0 0% 100%; /* White for secondary in dark mode */
+    --secondary-foreground: 0 0% 0%;
+    --accent: 0 0% 67%; /* Lighter grey for accents */
+    --accent-foreground: 0 0% 0%;
+    --muted: 0 0% 7%;
+    --muted-foreground: 0 0% 67%;
     --destructive: 0 84% 65%;
     --destructive-foreground: 0 0% 100%;
-    --border: 225 15% 20%; /* Subtle dark borders */
-    --input: 225 15% 16%; /* Input backgrounds */
-    --ring: 196 100% 55%;
+    --border: 0 0% 100%; /* White borders in dark mode */
+    --input: 0 0% 7%;
+    --ring: 4 100% 60%;
   }
 }
 
 @layer base {
   * {
     border-color: hsl(var(--border));
-    transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
   }
   
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
+    font-family: 'Inter', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
-/* Enhanced glassmorphic effects with color-aware backgrounds */
-.glassmorphic {
-  backdrop-filter: blur(16px);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/* Swiss Focus Design System - Flat, No Shadows, No Gradients */
+
+/* Removed all glassmorphic effects - Solid backgrounds only */
+.swiss-surface {
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
 }
 
-/* Light mode glassmorphic */
-:root .glassmorphic {
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(59, 130, 246, 0.15); /* Blue tinted border */
-  box-shadow: 
-    0 8px 32px rgba(59, 130, 246, 0.08),
-    0 1px 0px rgba(255, 255, 255, 0.4) inset;
+.swiss-elevated {
+  background-color: hsl(var(--background));
+  border: 2px solid hsl(var(--border));
 }
 
-/* Dark mode glassmorphic */
-.dark .glassmorphic {
-  background: rgba(30, 41, 59, 0.6); /* Blue-grey tinted glass */
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.4),
-    0 1px 0px rgba(148, 163, 184, 0.1) inset;
+/* Swiss theme-aware utility classes */
+.bg-swiss-paper {
+  background-color: hsl(var(--background));
 }
 
-/* Enhanced glow effects */
-.glow {
-  text-shadow: 0 0 20px rgba(0, 191, 255, 0.8);
-}
-
-.glow-border {
-  box-shadow: 
-    0 0 0 1px rgba(0, 191, 255, 0.3),
-    0 0 15px rgba(0, 191, 255, 0.4),
-    0 4px 20px rgba(0, 191, 255, 0.2);
-}
-
-.glow-border-violet {
-  box-shadow: 
-    0 0 0 1px rgba(162, 89, 255, 0.3),
-    0 0 15px rgba(162, 89, 255, 0.4),
-    0 4px 20px rgba(162, 89, 255, 0.2);
-}
-
-.glow-border-mint {
-  box-shadow: 
-    0 0 0 1px rgba(0, 255, 198, 0.3),
-    0 0 15px rgba(0, 255, 198, 0.4),
-    0 4px 20px rgba(0, 255, 198, 0.2);
-}
-
-/* Enhanced gradient animations */
-.animated-gradient {
-  background: linear-gradient(
-    -45deg,
-    rgba(0, 191, 255, 0.2),
-    rgba(162, 89, 255, 0.2),
-    rgba(0, 255, 198, 0.2),
-    rgba(0, 191, 255, 0.2)
-  );
-  background-size: 400% 400%;
-  animation: gradient 15s ease infinite;
-}
-
-.dark .animated-gradient {
-  background: linear-gradient(
-    -45deg,
-    rgba(0, 191, 255, 0.15),
-    rgba(162, 89, 255, 0.15),
-    rgba(0, 255, 198, 0.15),
-    rgba(0, 191, 255, 0.15)
-  );
-}
-
-@keyframes gradient {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-/* Enhanced card hover effects */
-.card-hover {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.card-hover:hover {
-  transform: translateY(-8px) scale(1.02);
-}
-
-:root .card-hover:hover {
-  box-shadow: 
-    0 20px 40px rgba(59, 130, 246, 0.15),
-    0 0 20px rgba(0, 191, 255, 0.3);
-}
-
-.dark .card-hover:hover {
-  box-shadow: 
-    0 20px 40px rgba(0, 0, 0, 0.4),
-    0 0 20px rgba(0, 191, 255, 0.5);
-}
-
-/* Color-specific backgrounds for better visual hierarchy */
-.bg-surface {
+.bg-swiss-concrete {
   background-color: hsl(var(--card));
 }
 
-.bg-surface-elevated {
-  background-color: hsl(var(--popover));
+.bg-swiss-signal {
+  background-color: hsl(var(--primary));
 }
 
-/* Light mode specific enhancements */
-:root {
-  /* Subtle color washes for sections */
-  --section-primary: rgba(59, 130, 246, 0.03);
-  --section-secondary: rgba(139, 92, 246, 0.03);
-  --section-accent: rgba(16, 185, 129, 0.03);
+.bg-swiss-ink {
+  background-color: hsl(var(--foreground));
 }
 
-.dark {
-  --section-primary: rgba(59, 130, 246, 0.05);
-  --section-secondary: rgba(139, 92, 246, 0.05);
-  --section-accent: rgba(16, 185, 129, 0.05);
+.text-swiss-ink {
+  color: hsl(var(--foreground));
 }
 
-.section-primary {
-  background: var(--section-primary);
+.text-swiss-paper {
+  color: hsl(var(--background));
 }
 
-.section-secondary {
-  background: var(--section-secondary);
+.text-swiss-lead {
+  color: hsl(var(--muted-foreground));
 }
 
-.section-accent {
-  background: var(--section-accent);
+.text-swiss-signal {
+  color: hsl(var(--primary));
+}
+
+.border-swiss-ink {
+  border-color: hsl(var(--border));
+}
+
+/* Typography - Grotesque Sans-Serif Hierarchy */
+.swiss-heading-xl {
+  font-size: 6rem;
+  font-weight: 900;
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+}
+
+.swiss-heading-lg {
+  font-size: 3rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.swiss-heading-md {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.swiss-body {
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.swiss-label {
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* Layout - Strict Grid System */
+.swiss-grid-12 {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 2rem;
+}
+
+/* Buttons - Flat, No Shadows, Sharp Rectangles */
+.swiss-btn-primary {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border: none;
+  padding: 1rem 2rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: background-color 0.2s;
+}
+
+.swiss-btn-primary:hover {
+  background-color: hsl(var(--secondary));
+}
+
+.swiss-btn-secondary {
+  background-color: transparent;
+  color: hsl(var(--foreground));
+  border: 2px solid hsl(var(--border));
+  padding: 1rem 2rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: all 0.2s;
+}
+
+.swiss-btn-secondary:hover {
+  background-color: hsl(var(--foreground));
+  color: hsl(var(--background));
+}
+
+/* Cards - Flat with Borders Only */
+.swiss-card {
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  padding: 2rem;
+  transition: border-color 0.2s;
+}
+
+.swiss-card:hover {
+  border-color: hsl(var(--primary));
+}
+
+/* Dividers - Horizontal Rules */
+.swiss-divider {
+  width: 100%;
+  height: 1px;
+  background-color: hsl(var(--border));
+  border: none;
+}
+
+.swiss-divider-thick {
+  width: 100%;
+  height: 4px;
+  background-color: hsl(var(--border));
+  border: none;
+}
+
+/* Module Labels - Small Caps */
+.swiss-module-label {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: hsl(var(--primary));
+}
+
+/* Large Number Overlays */
+.swiss-number-overlay {
+  font-size: 8rem;
+  font-weight: 900;
+  color: hsl(var(--muted));
+  opacity: 0.3;
+  line-height: 1;
+}
+
+/* Animation - Minimal, Functional Only */
+@keyframes swiss-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.swiss-animate-in {
+  animation: swiss-fade-in 0.4s ease-out;
 }

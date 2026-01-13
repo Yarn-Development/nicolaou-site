@@ -1,10 +1,7 @@
-import { SignupForm } from "@/components/signup-form"
-import { AuthLayout } from "@/components/auth-layout"
+import { redirect } from "next/navigation"
 
 export default function SignupPage() {
-  return (
-    <AuthLayout>
-      <SignupForm />
-    </AuthLayout>
-  )
+  // Redirect to login page since we only use Google OAuth
+  // Sign up and sign in are the same flow with Google
+  redirect('/login')
 }

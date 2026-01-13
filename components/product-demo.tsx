@@ -29,7 +29,6 @@ interface DemoProps {
 export function ProductDemo({ onClose }: DemoProps) {
   const [currentStep, setCurrentStep] = useState(0)
   const [isPlaying, setIsPlaying] = useState(true)
-  const [activeTab, setActiveTab] = useState("worksheet")
 
   const demoSteps = [
     {
@@ -91,7 +90,7 @@ export function ProductDemo({ onClose }: DemoProps) {
           </span>
         </h2>
         <p className="text-muted-foreground max-w-md mx-auto">
-          Transform your teaching with intelligent tools that adapt to every student's learning style
+          Transform your teaching with intelligent tools that adapt to every student&apos;s learning style
         </p>
       </div>
       
@@ -346,7 +345,7 @@ export function ProductDemo({ onClose }: DemoProps) {
           </div>
           
           <div className="space-y-3">
-            {topicData.map((item, index) => (
+            {topicData.map((item) => (
               <div key={item.topic} className="space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-medium">{item.topic}</span>

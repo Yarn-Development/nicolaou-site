@@ -19,18 +19,18 @@ export function ThemeToggle() {
         <Button 
           variant="ghost" 
           size="icon" 
-          className="h-9 w-9 glassmorphic border-0 hover:glow-border transition-all duration-300"
+          className="h-9 w-9 border-2 border-swiss-ink hover:bg-swiss-concrete transition-colors"
         >
           <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
           <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
           <span className="sr-only">Toggle theme</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="glassmorphic border-muted/30 min-w-[140px]">
+      <DropdownMenuContent align="end" className="bg-swiss-paper border-2 border-swiss-ink min-w-[160px] p-2">
         <DropdownMenuItem 
           onClick={() => setTheme("light")}
-          className={`cursor-pointer transition-all duration-200 ${
-            theme === "light" ? "bg-primary/10 text-primary" : ""
+          className={`cursor-pointer transition-colors font-bold uppercase tracking-wider text-xs py-3 ${
+            theme === "light" ? "bg-swiss-signal text-white" : "hover:bg-swiss-concrete"
           }`}
         >
           <Sun className="mr-2 h-4 w-4" />
@@ -38,8 +38,8 @@ export function ThemeToggle() {
         </DropdownMenuItem>
         <DropdownMenuItem 
           onClick={() => setTheme("dark")}
-          className={`cursor-pointer transition-all duration-200 ${
-            theme === "dark" ? "bg-primary/10 text-primary" : ""
+          className={`cursor-pointer transition-colors font-bold uppercase tracking-wider text-xs py-3 ${
+            theme === "dark" ? "bg-swiss-signal text-white" : "hover:bg-swiss-concrete"
           }`}
         >
           <Moon className="mr-2 h-4 w-4" />
@@ -47,8 +47,8 @@ export function ThemeToggle() {
         </DropdownMenuItem>
         <DropdownMenuItem 
           onClick={() => setTheme("system")}
-          className={`cursor-pointer transition-all duration-200 ${
-            theme === "system" ? "bg-primary/10 text-primary" : ""
+          className={`cursor-pointer transition-colors font-bold uppercase tracking-wider text-xs py-3 ${
+            theme === "system" ? "bg-swiss-signal text-white" : "hover:bg-swiss-concrete"
           }`}
         >
           <Monitor className="mr-2 h-4 w-4" />
