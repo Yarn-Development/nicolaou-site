@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Bell, Search, User, LogOut } from "lucide-react"
+import { Bell, Search, User, LogOut, Sparkles, Database, Plus } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
@@ -40,6 +40,47 @@ export function DashboardHeader() {
         </div>
         
         <div className="ml-auto flex items-center gap-3">
+          {/* Quick Actions - Question Tools */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="ghost"
+                className="hidden md:flex items-center gap-2 hover:bg-swiss-concrete border-2 border-swiss-ink font-bold uppercase tracking-wider text-xs"
+              >
+                <Plus className="h-4 w-4" />
+                Quick Actions
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="bg-swiss-paper border-2 border-swiss-ink min-w-[240px] p-2">
+              <DropdownMenuLabel className="font-black uppercase tracking-wider text-xs text-swiss-signal">
+                Question Tools
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator className="bg-swiss-ink my-2" />
+              <Link href="/dashboard/questions">
+                <DropdownMenuItem className="font-bold text-xs py-3 hover:bg-swiss-concrete cursor-pointer">
+                  <div className="flex items-center gap-3">
+                    <Sparkles className="h-4 w-4 text-swiss-signal" />
+                    <div>
+                      <p className="font-bold mb-0.5">Create Question</p>
+                      <p className="text-swiss-lead text-[10px] font-medium">AI Generator & OCR</p>
+                    </div>
+                  </div>
+                </DropdownMenuItem>
+              </Link>
+              <Link href="/dashboard/questions/browse">
+                <DropdownMenuItem className="font-bold text-xs py-3 hover:bg-swiss-concrete cursor-pointer">
+                  <div className="flex items-center gap-3">
+                    <Database className="h-4 w-4 text-swiss-signal" />
+                    <div>
+                      <p className="font-bold mb-0.5">Question Bank</p>
+                      <p className="text-swiss-lead text-[10px] font-medium">Browse & Manage</p>
+                    </div>
+                  </div>
+                </DropdownMenuItem>
+              </Link>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {/* Search */}
           {searchOpen ? (
             <div className="relative w-full max-w-sm">

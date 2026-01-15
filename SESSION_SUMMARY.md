@@ -1,489 +1,685 @@
-# Session Summary - January 13, 2026
+# Session Summary: Curriculum-Aware Question System
 
-## What We Accomplished ✅
+## 🎯 What We Accomplished
 
-### 1. Fixed All Build Errors (High Priority) ✅
-
-**Problem:** The codebase had 30+ TypeScript and ESLint errors preventing production builds.
-
-**Solution:** Systematically fixed all errors:
-- ✅ Replaced `any` types with proper `React.ElementType`
-- ✅ Fixed all apostrophe escaping issues (`&apos;`, `&quot;`)
-- ✅ Removed unused variables and imports
-- ✅ Wrapped functions in `useCallback` to fix React Hook dependencies
-- ✅ Fixed type safety issues with string/number unions
-
-**Result:** Build now succeeds! ✅
-```
-✓ Generating static pages (19/19)
-✓ Finalizing page optimization
-```
-
-Only 1 minor warning remains (custom fonts) which doesn't affect functionality.
+### 1. ✅ Fixed Switch Component (High Priority)
+**Problem:** `switch.ts` file contained JSX but had `.ts` extension  
+**Solution:** Renamed to `switch.tsx`  
+**Impact:** Build now compiles successfully
 
 ---
 
-### 2. Created Complete Assessment Database Schema ✅
+### 2. ✅ Updated API Route with Curriculum-Aware Prompts (High Priority)
+**File:** `app/api/ai/generate/route.ts`
 
-**What Was Built:**
+**What Changed:**
+- Added support for curriculum-aware request parameters
+- Implemented rich prompt engineering with UK curriculum context
+- Maintains backward compatibility with legacy `topic/tier` format
 
-#### Database Tables (4 new tables)
-1. **`assessments`** - Teacher-created exams/tests
-2. **`assessment_questions`** - Individual questions per assessment
-3. **`student_assessments`** - Student-to-assessment assignments
-4. **`graded_questions`** - Individual question results (powers feedback sheets!)
-
-#### Features Implemented
-- ✅ Row Level Security (RLS) policies for all tables
-- ✅ Automatic triggers for calculations:
-  - Auto-update total marks when questions change
-  - Auto-calculate percentage scores
-  - Auto-update timestamps
-- ✅ Database functions for complex operations
-- ✅ Proper indexes for performance
-- ✅ Full TypeScript type definitions
-- ✅ Comprehensive helper functions
-
-#### Files Created
-```
-supabase/
-├── migrations/
-│   └── 003_assessments_schema.sql     # Complete schema + triggers + RLS
-
-lib/
-├── types/
-│   └── database.ts                    # Updated with all assessment types
-└── assessments/
-    └── helpers.ts                     # Server-side helper functions
-
-Documentation:
-└── ASSESSMENT_SYSTEM.md               # Complete usage guide
-```
-
----
-
-## Database Schema Overview
-
-```
-┌─────────────────┐
-│   assessments   │
-│  (teacher-made) │
-└────────┬────────┘
-         │
-         ├─────────────────────┐
-         │                     │
-┌────────▼────────────┐  ┌────▼─────────────────┐
-│ assessment_questions│  │ student_assessments  │
-│   (questions)       │  │  (assignments)       │
-└─────────────────────┘  └──────┬───────────────┘
-                                 │
-                         ┌───────▼──────────┐
-                         │ graded_questions │
-                         │  (results!)      │
-                         └──────────────────┘
-```
-
----
-
-## Key Features of the Assessment System
-
-### For Teachers
-
-#### 1. Create Assessments
+**New Request Format:**
 ```typescript
-const assessment = await createAssessment({
-  title: "GCSE Module 5: Quadratic Equations",
-  tier: "higher",
-  topic: "Algebra",
-  duration_minutes: 45
-})
+{
+  type: 'text_gen',
+  level: 'GCSE Higher',
+  sub_topic: 'Completing the Square',
+  question_type: 'Problem Solving',
+  marks: 4,
+  calculator_allowed: false,
+  context: 'involving a garden fence'
+}
 ```
 
-#### 2. Add Questions
+**Prompt Engineering Improvements:**
+- System prompt includes UK curriculum expertise (KS3, GCSE, A-Level)
+- User prompt includes pedagogical guidelines for each question type
+- Calculator guidance (avoid complex decimals for non-calculator)
+- Mark allocation breakdown (1-mark = single step, 4-mark = multi-step)
+- LaTeX quality requirements based on curriculum level
+
+**Example Generated Prompt:**
+```
+System: "You are an expert UK mathematics exam question writer..."
+
+User: "Create a unique GCSE Higher mathematics question:
+
+**CURRICULUM CONTEXT:**
+- Level: GCSE Higher
+- Sub-Topic: Completing the Square
+
+**QUESTION REQUIREMENTS:**
+- Type: Problem Solving
+- Marks: 4
+- Calculator: Non-calculator
+- Context: involving a garden fence
+
+**QUESTION TYPE GUIDELINES:**
+- Require multi-step reasoning
+- Include real-world context
+- Test ability to select appropriate methods
+
+**CALCULATOR GUIDANCE:**
+- Avoid calculations requiring calculator
+- Use integer values or simple fractions
+- Students must show all working
+
+**MARK ALLOCATION:**
+- Multi-step question with clear progression
+- Award marks for method and accuracy
+- Could include interpretation or explanation
+```
+
+---
+
+### 3. ✅ Created Database Migration (Medium Priority)
+**File:** `supabase/migrations/005_add_curriculum_fields.sql`
+
+**Added Columns:**
+1. `curriculum_level` (TEXT) - KS3, GCSE Foundation/Higher, A-Level Pure/Stats/Mechanics
+2. `topic_name` (TEXT) - e.g., "Algebra", "Geometry"
+3. `sub_topic_name` (TEXT) - e.g., "Completing the Square"
+4. `question_type` (TEXT) - Fluency, Problem Solving, Reasoning/Proof
+5. `marks` (INTEGER) - Default 3, range 1-10
+6. `calculator_allowed` (BOOLEAN) - Default true
+
+**Added Constraints:**
+- `check_curriculum_level` - Validates 6 curriculum levels
+- `check_question_type` - Validates 3 question types
+- `check_marks_range` - Ensures marks 1-10
+
+**Added Indexes:**
+- Individual indexes on each new column
+- Composite index: `(curriculum_level, topic_name, sub_topic_name, question_type)`
+- Enables efficient filtering in Question Browser
+
+**Data Migration:**
+- Existing questions automatically updated with defaults
+- `difficulty_tier` → `curriculum_level` mapping
+- `topic` → `topic_name` mapping
+- Backward compatible
+
+**Status:** ⏳ **Ready to run** - Needs manual execution in Supabase
+
+---
+
+### 4. ✅ Fixed LaTeX Preview Component (High Priority)
+**File:** `components/latex-preview.tsx`
+
+**Problems Identified:**
+1. **Regex Ordering Bug** - Display `$$...$$` and inline `$...$` processing conflicted
+2. **No HTML Escaping** - XSS vulnerability, special characters broke rendering
+3. **Silent Errors** - Failed LaTeX showed no indication
+4. **Overlapping Delimiters** - Could match across multiple expressions
+
+**Solution: Two-Pass Parsing Algorithm**
+
+**Pass 1: Display Math**
 ```typescript
-await addQuestionsToAssessment(assessmentId, [
-  {
-    question_number: 1,
-    question_text: "Solve x² + 5x + 6 = 0",
-    max_marks: 3,
-    learning_objective: "Solve quadratic equations by factoring"
+1. Find all $$...$$ blocks
+2. Render with KaTeX (displayMode: true)
+3. Mark character positions as "processed"
+4. Store rendered HTML
+```
+
+**Pass 2: Inline Math**
+```typescript
+1. Process only remaining (non-processed) text
+2. Find all $...$ blocks
+3. Render with KaTeX (displayMode: false)
+4. Combine text and rendered math
+```
+
+**Key Improvements:**
+- ✅ Position tracking prevents double-processing
+- ✅ HTML escaping for all plain text (XSS protection)
+- ✅ Errors shown in **red** with original content
+- ✅ Empty content shows "*No content*" in gray italic
+- ✅ Security: `trust: false` blocks dangerous LaTeX commands
+
+**Test Cases:**
+```
+✅ Mixed inline and display math
+✅ Multiple display blocks
+✅ Special characters (<, >, &)
+✅ Empty/null input
+✅ Malformed LaTeX
+✅ Complex nested expressions
+```
+
+---
+
+### 5. ✅ Added LaTeX Rendering to Explanations (Medium Priority)
+**Files Modified:**
+- `components/question-creator-wizard.tsx`
+- `app/dashboard/questions/browse/question-browser-client.tsx`
+- `lib/types/database.ts`
+
+**What Changed:**
+
+#### Question Creator Wizard
+**Before:**
+```tsx
+<div>{aiGenerated.explanation}</div>
+```
+
+**After:**
+```tsx
+<LatexPreview latex={aiGenerated.explanation} className="text-sm" />
+```
+
+**Impact:** Explanations can now include LaTeX for step-by-step solutions
+```
+Example explanation:
+"First, rearrange to get $x^2 + 6x = -5$.
+Next, complete the square: $(x + 3)^2 - 9 = -5$.
+Therefore, $(x + 3)^2 = 4$, giving $x = -1$ or $x = -5$."
+```
+
+#### Question Browser
+**Before:**
+```tsx
+<pre>{JSON.stringify(selectedQuestion.answer_key, null, 2)}</pre>
+```
+
+**After:**
+```tsx
+{/* Answer with LaTeX */}
+<LatexPreview latex={selectedQuestion.answer_key.answer} />
+
+{/* Explanation with LaTeX */}
+<LatexPreview latex={selectedQuestion.answer_key.explanation} />
+
+{/* Marks Badge */}
+<span className="text-swiss-signal">4 MARKS</span>
+
+{/* Curriculum metadata (collapsible) */}
+<details>
+  <summary>Curriculum Metadata</summary>
+  <pre>{JSON.stringify(curriculum, null, 2)}</pre>
+</details>
+```
+
+**Benefits:**
+- ✅ Professional presentation of answers and solutions
+- ✅ LaTeX renders inline with text
+- ✅ Marks shown prominently
+- ✅ Curriculum metadata available but not cluttering UI
+
+#### Database Types
+**Added `QuestionAnswerKey` interface:**
+```typescript
+export interface QuestionAnswerKey {
+  answer?: string
+  explanation?: string
+  marks?: number
+  type?: 'generated' | 'manual' | 'ocr'
+  curriculum?: {
+    level?: string
+    topic?: string
+    topic_id?: string
+    sub_topic?: string
+    sub_topic_id?: string
+    question_type?: string
+    calculator_allowed?: boolean
+    context?: string | null
   }
-])
+}
 ```
 
-#### 3. Assign to Students
+**Updated Question interface:**
 ```typescript
-await assignAssessmentToStudents(
-  assessmentId,
-  ['student-uuid-1', 'student-uuid-2'],
-  '2026-01-20T23:59:59Z' // Due date
+answer_key: QuestionAnswerKey | null  // Was: Record<string, unknown>
+```
+
+**Impact:**
+- ✅ Type-safe access to answer_key properties
+- ✅ No more `as any` type assertions
+- ✅ IntelliSense autocomplete in IDE
+- ✅ Compile-time error checking
+
+---
+
+## 📁 Files Modified This Session
+
+### Core Components
+- ✅ `components/ui/switch.tsx` (renamed from .ts)
+- ✅ `components/latex-preview.tsx` (complete rewrite)
+- ✅ `components/question-creator-wizard.tsx` (LaTeX in explanations)
+
+### API & Backend
+- ✅ `app/api/ai/generate/route.ts` (curriculum-aware prompts)
+- ✅ `lib/types/database.ts` (QuestionAnswerKey interface)
+
+### UI Pages
+- ✅ `app/dashboard/questions/browse/question-browser-client.tsx` (improved display)
+
+### Database
+- ✅ `supabase/migrations/005_add_curriculum_fields.sql` (NEW - ready to run)
+
+### Documentation
+- ✅ `LATEX_PREVIEW_FIX.md` (comprehensive fix documentation)
+
+---
+
+## 🎨 Visual Improvements
+
+### Question Creator - AI Generator Tab
+```
+┌─────────────────────────────────────────┐
+│ 📚 CURRICULUM SPECIFICATION              │
+│                                         │
+│ Level:     [GCSE Higher ▼]             │
+│ Topic:     [Algebra ▼]                  │
+│ Sub-Topic: [Completing the Square ▼]    │
+├─────────────────────────────────────────┤
+│ 💡 QUESTION PARAMETERS                   │
+│                                         │
+│ Type: ◉ Fluency  ○ Problem  ○ Proof    │
+│ Marks: [━━━●━━━] 4                      │
+│ Calculator: ☑ Allowed                   │
+│ Context: [involving projectile motion]  │
+│                                         │
+│ [GENERATE 4-MARK QUESTION]              │
+├─────────────────────────────────────────┤
+│ 👁️ PREVIEW                               │
+│                                         │
+│ Solve x² + 6x + 5 = 0 by completing    │
+│ the square.                             │
+├─────────────────────────────────────────┤
+│ ANSWER                  │ EXPLANATION   │
+│ x = -1 or x = -5        │ Step 1: ...   │
+│                         │ Step 2: ...   │
+└─────────────────────────┴───────────────┘
+```
+
+### Question Browser - Preview Modal
+```
+┌─────────────────────────────────────────┐
+│ QUESTION                                │
+│                                         │
+│ Solve x² + 6x + 5 = 0 by completing    │
+│ the square.                             │
+├─────────────────────────────────────────┤
+│ ANSWER                                  │
+│ x = -1 or x = -5                        │
+├─────────────────────────────────────────┤
+│ EXPLANATION                             │
+│ First, rearrange: x² + 6x = -5         │
+│ Complete square: (x + 3)² - 9 = -5     │
+│ Therefore: (x + 3)² = 4                 │
+│ So: x + 3 = ±2                          │
+│ Thus: x = -1 or x = -5                  │
+├─────────────────────────────────────────┤
+│ MARKS                                   │
+│ 4 MARKS                                 │
+├─────────────────────────────────────────┤
+│ ▸ Curriculum Metadata (click to expand)│
+└─────────────────────────────────────────┘
+```
+
+**All LaTeX Properly Rendered:**
+- Fractions: $\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$
+- Powers: $x^2 + 5x + 6$
+- Radicals: $\sqrt{25} = 5$
+- Greek letters: $\theta = 45°$
+
+---
+
+## 🔄 Workflow Comparison
+
+### Before (Generic)
+```
+1. Select Topic: "Algebra"
+2. Select Tier: "Higher"
+3. Generate
+4. Get generic algebra question
+5. Save to database
+```
+
+**Problems:**
+- Questions too generic
+- No pedagogical context
+- Poor LaTeX quality
+- No mark allocation
+- Can't filter effectively
+
+### After (Curriculum-Aware)
+```
+1. Select Level: "GCSE Higher"
+2. Select Topic: "Algebra"
+3. Select Sub-Topic: "Completing the Square"
+4. Choose Type: "Problem Solving"
+5. Set Marks: 4
+6. Toggle Calculator: OFF
+7. Add Context: "involving projectile motion"
+8. Generate
+9. Get targeted 4-mark problem-solving question
+10. Preview with LaTeX rendering
+11. Save with full curriculum metadata
+```
+
+**Benefits:**
+- ✅ Precise curriculum targeting
+- ✅ Pedagogically appropriate questions
+- ✅ High-quality LaTeX
+- ✅ Proper mark allocation
+- ✅ Filterable by all criteria
+- ✅ Professional presentation
+
+---
+
+## 📊 Database Schema Evolution
+
+### Before
+```sql
+questions (
+  id,
+  question_latex,
+  topic,              -- Simple string: "Algebra"
+  difficulty,         -- Enum: Foundation/Higher
+  answer_key          -- JSONB blob
 )
 ```
 
-#### 4. Grade Work
-```typescript
-await submitGradedQuestions(studentAssessmentId, [
-  {
-    question_id: "q1-uuid",
-    marks_awarded: 3,
-    max_marks: 3,
-    feedback: "Perfect!"
-  }
-])
-```
-
-#### 5. Generate Feedback Sheets
-```typescript
-const questions = await getGradedQuestions(studentAssessmentId)
-
-<FeedbackSheet 
-  questions={questions}
-  studentName="Alex Johnson"
-  assessmentTitle="Module 5"
-/>
-```
-
-### For Students
-
-- View assigned assessments
-- Submit work
-- Receive detailed feedback with RAG status
-- Track progress by learning objective
-
----
-
-## Automatic Database Features
-
-### 🤖 Auto-Calculations
-
-#### Total Marks
+### After
 ```sql
--- When you add/update/delete questions:
--- total_marks updates AUTOMATICALLY via trigger
+questions (
+  id,
+  question_latex,
+  topic,              -- Legacy: "Algebra"
+  difficulty,         -- Legacy: Foundation/Higher
+  answer_key,         -- Typed JSONB structure
+  
+  -- NEW: Curriculum-aware columns
+  curriculum_level,   -- "GCSE Higher", "A-Level Pure"
+  topic_name,         -- "Algebra"
+  sub_topic_name,     -- "Completing the Square"
+  question_type,      -- "Problem Solving"
+  marks,              -- 4
+  calculator_allowed  -- false
+)
 ```
 
-#### Percentage Score
+**Query Performance:**
 ```sql
--- When you set total_marks_awarded:
-UPDATE student_assessments SET total_marks_awarded = 28;
--- percentage_score calculates AUTOMATICALLY (e.g., 93.33%)
+-- BEFORE: Had to parse JSONB (slow)
+SELECT * FROM questions 
+WHERE answer_key->'curriculum'->>'level' = 'GCSE Higher';
+
+-- AFTER: Direct column access (fast, indexed)
+SELECT * FROM questions 
+WHERE curriculum_level = 'GCSE Higher'
+  AND question_type = 'Problem Solving'
+  AND marks = 4
+  AND calculator_allowed = false;
 ```
-
-#### Timestamps
-```sql
--- updated_at maintains itself on every UPDATE
-```
-
-### 🔒 Security (RLS)
-
-**Teachers:**
-- ✅ View/edit only their own assessments
-- ✅ Grade only their own assignments
-- ✅ Cannot access other teachers' data
-
-**Students:**
-- ✅ View only their own assignments
-- ✅ View only their own feedback
-- ❌ Cannot see other students' work
-- ❌ Cannot modify grades
 
 ---
 
-## Integration with Existing Components
+## 🔐 Security Improvements
 
-### ✅ Feedback Sheet Component
-The `FeedbackSheet` component we built last session is **already compatible**!
+### LaTeX Preview
+**Blocked Commands:**
+- `\url{...}` - Could inject arbitrary URLs
+- `\href{...}` - Could create phishing links  
+- `\includegraphics{...}` - Could load external images
 
+**Configuration:**
 ```typescript
-// graded_questions table → FeedbackSheet component
-const questions = await getGradedQuestions(studentAssessmentId)
-<FeedbackSheet questions={questions} {...props} />
-```
-
-### ✅ Exam Builder
-Can be easily updated to save to database instead of mock data:
-```typescript
-// Current: Uses mock data
-// Next: Call createAssessment() + addQuestionsToAssessment()
-```
-
----
-
-## TypeScript Types Added
-
-```typescript
-// New types in lib/types/database.ts
-type AssessmentStatus = 'draft' | 'published' | 'archived'
-type AssessmentTier = 'foundation' | 'higher'
-type QuestionType = 'multiple_choice' | 'short_answer' | 'long_answer' | 'calculation'
-type GradingStatus = 'pending' | 'in_progress' | 'completed'
-
-interface Assessment { ... }
-interface AssessmentQuestion { ... }
-interface StudentAssessment { ... }
-interface GradedQuestion { ... }
-```
-
----
-
-## Helper Functions Created
-
-All in `lib/assessments/helpers.ts`:
-
-```typescript
-✅ getTeacherAssessments()
-✅ getAssessmentWithQuestions(id)
-✅ createAssessment(data)
-✅ addQuestionsToAssessment(id, questions)
-✅ assignAssessmentToStudents(id, studentIds, dueDate)
-✅ getStudentAssessments(studentId?)
-✅ submitGradedQuestions(studentAssessmentId, questions)
-✅ getGradedQuestions(studentAssessmentId)
-✅ getStudentAssessmentForFeedback(id)
-✅ publishAssessment(id)
-✅ getAssessmentResults(id)
-```
-
----
-
-## Documentation Created
-
-1. **`ASSESSMENT_SYSTEM.md`** (Comprehensive guide)
-   - Setup instructions
-   - Complete workflow examples
-   - API reference
-   - Security policies
-   - Troubleshooting guide
-
-2. **SQL Migration** (`003_assessments_schema.sql`)
-   - Fully documented
-   - Includes comments
-   - Sample data (commented out)
-   - Drop commands for testing
-
----
-
-## Next Steps (Pending Tasks)
-
-### High Priority 🔴
-
-#### 3. Integrate Feedback Sheet with Exam Builder
-- Update exam builder to save to database
-- Add "Assign to Students" flow
-- Create grading interface
-- Connect to feedback sheet
-
-### Medium Priority 🟡
-
-#### 4. Build Admin Panel for Role Management
-- UI for changing user roles
-- Student/teacher management
-- Bulk operations
-
-#### 5. Add PDF Export for Feedback Sheets
-- Install PDF library (jsPDF or react-pdf)
-- Add "Download PDF" button
-- Format for printing
-- Email delivery option
-
----
-
-## How to Deploy This
-
-### 1. Run the Migration
-
-In Supabase SQL Editor:
-```sql
--- Copy and paste contents of:
-supabase/migrations/003_assessments_schema.sql
-```
-
-### 2. Verify Tables
-
-```sql
-SELECT table_name FROM information_schema.tables 
-WHERE table_schema = 'public' 
-AND table_name LIKE '%assessment%';
-```
-
-### 3. Test with Sample Data
-
-```typescript
-// In your app:
-import { createAssessment } from '@/lib/assessments/helpers'
-
-const test = await createAssessment({
-  title: "Test Assessment",
-  tier: "foundation",
-  topic: "Algebra"
+katex.renderToString(content, {
+  trust: false,    // Block dangerous commands
+  strict: false,   // Allow common math extensions
+  throwOnError: false  // Show error instead of crash
 })
-
-console.log('Assessment created:', test)
 ```
+
+### HTML Escaping
+```typescript
+// All plain text escaped before insertion
+const escapeHtml = (text: string): string => {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+```
+
+**Prevents:**
+- XSS attacks via malicious LaTeX
+- HTML injection in question text
+- Script injection in explanations
 
 ---
 
-## Performance Optimizations
+## 🧪 Testing Checklist
 
-### Denormalized Fields
-For 10x faster feedback sheet generation:
-- `question_number` stored in `graded_questions`
-- `learning_objective` stored in `graded_questions`
-- `max_marks` stored in `graded_questions`
+### LaTeX Rendering
+- [x] Inline math: `$x^2$` → x²
+- [x] Display math: `$$\frac{1}{2}$$` → ½ (centered)
+- [x] Mixed content: Text + inline + display
+- [x] Special characters: `<`, `>`, `&`
+- [x] Malformed LaTeX shows error in red
+- [x] Empty content shows placeholder
+- [x] Greek letters: `$\alpha$`, `$\beta$`
+- [x] Complex fractions and radicals
 
-Avoids expensive JOINs when generating feedback for 100+ students.
+### Question Creator
+- [ ] Generate GCSE Foundation question
+- [ ] Generate GCSE Higher question
+- [ ] Generate A-Level question
+- [ ] Non-calculator question (no complex decimals)
+- [ ] Problem Solving type (multi-step)
+- [ ] Reasoning/Proof type (requires explanation)
+- [ ] Save with curriculum metadata
+- [ ] Preview shows LaTeX correctly
+- [ ] Explanation renders LaTeX
 
-### Strategic Indexes
-```sql
-✅ student_id (fast student lookups)
-✅ assessment_id (class overview)
-✅ learning_objective (analytics)
-✅ due_date (upcoming assignments)
-✅ grading_status (pending work)
-```
-
----
-
-## Testing Checklist
-
-### Before Deploying:
-
-- [x] Build succeeds without errors ✅
-- [x] TypeScript types are correct ✅
-- [x] Database schema is valid ✅
-- [x] Helper functions are typed ✅
-- [x] Documentation is complete ✅
-- [ ] Migration tested in Supabase ⏳
-- [ ] RLS policies verified ⏳
-- [ ] Sample data works ⏳
-- [ ] Feedback sheet integration tested ⏳
-
----
-
-## Files Modified This Session
-
-### Fixed Errors In:
-```
-✓ app/dashboard/analytics/page.tsx
-✓ app/dashboard/assessments/page.tsx
-✓ app/dashboard/students/page.tsx
-✓ app/page.tsx
-✓ app/student-dashboard/page.tsx
-✓ app/student-dashboard/student-dashboard-client.tsx
-✓ components/assignment-management.tsx
-✓ components/feature-section.tsx
-✓ components/hero-section.tsx
-✓ components/onboarding-flow.tsx
-✓ components/pricing-section.tsx
-✓ components/product-demo.tsx
-✓ components/scheme-of-work.tsx
-✓ components/teacher-dashboard.tsx
-✓ components/testimonials-section.tsx
-✓ lib/supabase/middleware.ts
-```
-
-### Created New Files:
-```
-✓ supabase/migrations/003_assessments_schema.sql
-✓ lib/types/database.ts (updated)
-✓ lib/assessments/helpers.ts
-✓ ASSESSMENT_SYSTEM.md
-```
-
----
-
-## Impact Summary
-
-### Code Quality
-- **Before:** 30+ errors, build fails ❌
-- **After:** 0 errors, production-ready ✅
+### Question Browser
+- [ ] Questions display with LaTeX
+- [ ] Answer shows with LaTeX
+- [ ] Explanation shows with LaTeX
+- [ ] Marks displayed prominently
+- [ ] Curriculum metadata expandable
+- [ ] Filter by curriculum level (TODO)
+- [ ] Filter by question type (TODO)
 
 ### Database
-- **Before:** No assessment storage
-- **After:** Full-featured assessment system with RLS, triggers, and helpers
-
-### Developer Experience
-- **Before:** Manual SQL queries, no type safety
-- **After:** Type-safe helper functions, auto-complete, documentation
-
-### Features Unlocked
-- ✅ Save exams to database
-- ✅ Assign work to students
-- ✅ Grade assessments
-- ✅ Generate feedback sheets
-- ✅ Track learning objectives
-- ✅ Class analytics (ready)
-- ✅ Student progress tracking (ready)
+- [ ] Run migration in Supabase
+- [ ] Verify new columns exist
+- [ ] Check constraints enforced
+- [ ] Indexes created
+- [ ] Existing data migrated
 
 ---
 
-## What You Can Do Now
+## ⏳ Pending Tasks
 
-### Immediately Available:
-1. Run the migration
-2. Create assessments via API
-3. Assign to students
-4. Grade work
-5. Generate feedback sheets
+### 1. Run Database Migration (REQUIRED)
+**File:** `supabase/migrations/005_add_curriculum_fields.sql`
 
-### Next Session (Recommended):
-1. Update exam builder UI to use database
-2. Create grading interface
-3. Build student assessment view
-4. Add PDF export
-5. Create admin panel
+**Steps:**
+1. Open Supabase Dashboard → SQL Editor
+2. Copy migration content
+3. Paste and run
+4. Verify success
 
----
+**SQL to verify:**
+```sql
+SELECT column_name, data_type 
+FROM information_schema.columns 
+WHERE table_name = 'questions' 
+AND column_name LIKE 'curriculum%' OR column_name = 'marks';
+```
 
-## Questions to Address Next Session
+### 2. Update Question Browser Filters (RECOMMENDED)
+Add filters for:
+- Curriculum Level dropdown
+- Sub-Topic dropdown
+- Question Type selector
+- Marks range slider
+- Calculator filter
 
-1. **Grading Interface:** Manual entry or auto-grade multiple choice?
-2. **Question Bank:** Reuse questions across assessments?
-3. **Rubrics:** Standard grading rubrics per topic?
-4. **Notifications:** Email students when graded?
-5. **Analytics Dashboard:** Performance by learning objective?
-
----
-
-## Links to Key Files
-
-- **Database Schema:** `supabase/migrations/003_assessments_schema.sql`
-- **TypeScript Types:** `lib/types/database.ts`
-- **Helper Functions:** `lib/assessments/helpers.ts`
-- **Documentation:** `ASSESSMENT_SYSTEM.md`
-- **Feedback Sheet Component:** `components/feedback-sheet.tsx`
-- **Exam Builder:** `app/dashboard/exam-builder/page.tsx`
+### 3. End-to-End Testing (CRITICAL)
+1. Generate question with all parameters
+2. Verify LaTeX renders correctly
+3. Save to database
+4. Browse and find question
+5. Preview shows all details correctly
+6. Filter works (after implementing)
 
 ---
 
-## Summary
+## 🚀 Quick Start Guide
 
-### ✅ Completed This Session:
-1. Fixed all TypeScript/ESLint errors (30+ fixes)
-2. Created complete assessment database schema
-3. Built 11 helper functions for assessments
-4. Added full TypeScript types
-5. Wrote comprehensive documentation
-6. Made build production-ready
+### Generate Your First Curriculum-Aware Question
 
-### 🎯 Ready for Next Session:
-- Integrate with exam builder UI
-- Create grading interface
-- Build student assessment view
-- Add PDF export
-- Launch admin panel
+1. **Start Dev Server:**
+   ```bash
+   npm run dev
+   ```
 
-### 📊 Stats:
-- **Files Modified:** 28
-- **Files Created:** 5
-- **Database Tables:** 4
-- **Helper Functions:** 11
-- **Documentation Pages:** 1
-- **Build Status:** ✅ SUCCESS
+2. **Navigate to Question Creator:**
+   ```
+   http://localhost:3000/dashboard/questions
+   ```
+
+3. **Select Curriculum:**
+   - Level: GCSE Higher
+   - Topic: Algebra
+   - Sub-Topic: Quadratic Equations
+
+4. **Set Parameters:**
+   - Type: Problem Solving
+   - Marks: 4
+   - Calculator: ❌ OFF
+   - Context: "A ball is thrown upward..."
+
+5. **Generate & Save:**
+   - Click "GENERATE 4-MARK QUESTION"
+   - Review LaTeX preview
+   - Check answer and explanation
+   - Click "SAVE QUESTION"
+
+6. **Browse Question:**
+   - Go to Question Bank
+   - Find your question
+   - Click preview
+   - See LaTeX-rendered content
 
 ---
 
-**Session Duration:** ~45 minutes  
-**Status:** ✅ All tasks completed  
-**Build Status:** ✅ Production-ready  
-**Next Priority:** Integrate feedback sheet with exam builder workflow
+## 📚 Documentation Created
+
+1. **LATEX_PREVIEW_FIX.md** - Comprehensive fix documentation
+   - Problem analysis
+   - Solution explanation
+   - Test cases
+   - Usage examples
+
+2. **This Summary** - Complete session overview
+   - All changes made
+   - Files modified
+   - Testing checklist
+   - Next steps
+
+---
+
+## 🎯 Success Metrics
+
+**Code Quality:**
+- ✅ Build passes with no errors
+- ✅ Only non-blocking warnings (image optimization)
+- ✅ TypeScript fully typed (no `any`)
+- ✅ Security hardened (XSS protection)
+
+**Feature Completeness:**
+- ✅ Curriculum-aware question generation
+- ✅ LaTeX rendering in all views
+- ✅ Typed database schema
+- ✅ Professional UI presentation
+- ⏳ Database migration (ready)
+- ⏳ Curriculum filters (pending)
+
+**User Experience:**
+- ✅ Cascading dropdowns work correctly
+- ✅ LaTeX renders instantly
+- ✅ Errors shown clearly
+- ✅ Dark mode compatible
+- ✅ Swiss Focus design maintained
+
+---
+
+## 💡 Key Learnings
+
+### LaTeX Parsing
+**Don't:**
+```typescript
+// This breaks!
+text.replace(/\$\$...\$\$/g, ...).replace(/\$...\$/g, ...)
+```
+
+**Do:**
+```typescript
+// Two-pass with position tracking
+1. Process $$...$$ first
+2. Mark positions as processed
+3. Process $...$ in remaining text only
+```
+
+### TypeScript Patterns
+**Don't:**
+```typescript
+(obj as any).property  // Loses type safety
+```
+
+**Do:**
+```typescript
+interface MyType { property: string }
+const obj: MyType = ...
+obj.property  // Fully typed
+```
+
+### Database Design
+**Don't:**
+```typescript
+// Everything in JSONB
+answer_key: { level: '...', marks: '...' }
+```
+
+**Do:**
+```typescript
+// Queryable columns + JSONB for extras
+curriculum_level: 'GCSE Higher'  -- Indexed column
+answer_key: { explanation: '...' }  -- Flexible data
+```
+
+---
+
+## 🔗 Related Resources
+
+- **KaTeX Docs:** https://katex.org/docs/supported.html
+- **Supabase Migrations:** https://supabase.com/docs/guides/database/migrations
+- **UK Curriculum:** https://www.gov.uk/government/publications/national-curriculum
+
+---
+
+## 🎉 Session Outcome
+
+**Status:** ✅ **Successfully Completed**
+
+**Ready for Production:** Almost!
+- Just needs database migration
+- Optionally add curriculum filters
+- Then ready for teacher use
+
+**Next Session Focus:**
+1. Run migration
+2. Test workflow
+3. Add curriculum filters (optional)
+4. Deploy to production
+
+---
+
+**Total Progress:** 5/8 tasks completed (62.5%)  
+**Build Status:** ✅ Passing  
+**Type Safety:** ✅ 100%  
+**Documentation:** ✅ Complete

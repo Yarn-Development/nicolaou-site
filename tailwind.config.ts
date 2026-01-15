@@ -19,11 +19,19 @@ const config: Config = {
     extend: {
       colors: {
         // Swiss Focus International Red palette
+        // Light mode
         paper: '#FFFFFF',
         concrete: '#F4F4F4',
         ink: '#000000',
         lead: '#555555',
         signal: '#FF3B30',
+        
+        // Swiss colors with dark mode support
+        'swiss-paper': 'rgb(var(--swiss-paper) / <alpha-value>)',
+        'swiss-concrete': 'rgb(var(--swiss-concrete) / <alpha-value>)',
+        'swiss-ink': 'rgb(var(--swiss-ink) / <alpha-value>)',
+        'swiss-lead': 'rgb(var(--swiss-lead) / <alpha-value>)',
+        'swiss-signal': 'rgb(var(--swiss-signal) / <alpha-value>)',
         
         // Keep compatibility with shadcn components
         border: "hsl(var(--border))",

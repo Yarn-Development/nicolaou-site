@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { BarChart, BookOpen, FileText, LayoutDashboard, Settings, Sparkles, Users, ChevronLeft, ChevronRight } from "lucide-react"
+import { BarChart, FileText, LayoutDashboard, Settings, Sparkles, Users, ChevronLeft, ChevronRight, Database, ClipboardList, ClipboardCheck, PlusCircle } from "lucide-react"
 
 export function DashboardSidebar() {
   const pathname = usePathname()
@@ -25,34 +25,46 @@ export function DashboardSidebar() {
       number: "02"
     },
     {
-      title: "Scheme of Work",
-      href: "/dashboard/scheme",
-      icon: <BookOpen className="h-5 w-5" />,
+      title: "Marking",
+      href: "/dashboard/marking",
+      icon: <ClipboardCheck className="h-5 w-5" />,
       number: "03"
     },
     {
-      title: "Topics",
-      href: "/dashboard/topics",
-      icon: <FileText className="h-5 w-5" />,
+      title: "New Assignment",
+      href: "/dashboard/assignments/create",
+      icon: <PlusCircle className="h-5 w-5" />,
       number: "04"
     },
     {
-      title: "Assessments",
+      title: "Question Bank",
+      href: "/dashboard/questions/browse",
+      icon: <Database className="h-5 w-5" />,
+      number: "05"
+    },
+    {
+      title: "Exam Builder",
+      href: "/dashboard/exam-builder",
+      icon: <ClipboardList className="h-5 w-5" />,
+      number: "06"
+    },
+    {
+      title: "Videos",
       href: "/dashboard/assessments",
       icon: <FileText className="h-5 w-5" />,
-      number: "05"
+      number: "07"
     },
     {
       title: "Analytics",
       href: "/dashboard/analytics",
       icon: <BarChart className="h-5 w-5" />,
-      number: "06"
+      number: "08"
     },
     {
-      title: "AI Tools",
-      href: "/dashboard/ai-tools",
+      title: "Create Question",
+      href: "/dashboard/questions",
       icon: <Sparkles className="h-5 w-5" />,
-      number: "07"
+      number: "09"
     },
   ]
 

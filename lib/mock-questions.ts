@@ -1,5 +1,8 @@
 import { Question } from "@/components/question-card"
 
+// Re-export the Question type for convenience
+export type { Question }
+
 export const mockQuestions: Question[] = [
   {
     id: "Q001",
