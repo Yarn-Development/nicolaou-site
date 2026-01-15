@@ -8,6 +8,26 @@ export type AssessmentStatus = 'draft' | 'published' | 'archived'
 export type AssessmentTier = 'foundation' | 'higher'
 export type QuestionType = 'multiple_choice' | 'short_answer' | 'long_answer' | 'calculation'
 export type GradingStatus = 'pending' | 'in_progress' | 'completed'
+export type ContentType = 'image_ocr' | 'generated_text'
+export type DifficultyTier = 'Foundation' | 'Higher'
+
+// Answer key structure for questions
+export interface QuestionAnswerKey {
+  answer?: string
+  explanation?: string
+  marks?: number
+  type?: 'generated' | 'manual' | 'ocr'
+  curriculum?: {
+    level?: string
+    topic?: string
+    topic_id?: string
+    sub_topic?: string
+    sub_topic_id?: string
+    question_type?: string
+    calculator_allowed?: boolean
+    context?: string | null
+  }
+}
 
 export interface Profile {
   id: string
@@ -85,6 +105,31 @@ export interface GradedQuestion {
   updated_at: string
 }
 
+export interface Question {
+  id: string
+  created_at: string
+  updated_at: string
+  content_type: ContentType
+  question_latex: string | null
+  image_url: string | null
+  topic: string
+  difficulty: DifficultyTier
+  meta_tags: string[]
+  answer_key: QuestionAnswerKey | null
+  created_by: string | null
+  is_verified: boolean
+  verification_notes: string | null
+  times_used: number
+  avg_score: number | null
+  // NEW: Curriculum-aware fields
+  curriculum_level: string | null
+  topic_name: string | null
+  sub_topic_name: string | null
+  question_type: 'Fluency' | 'Problem Solving' | 'Reasoning/Proof' | null
+  marks: number | null
+  calculator_allowed: boolean | null
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -113,6 +158,11 @@ export interface Database {
         Insert: Omit<GradedQuestion, 'id' | 'created_at' | 'updated_at'>
         Update: Partial<Omit<GradedQuestion, 'id' | 'student_assessment_id' | 'question_id' | 'created_at'>>
       }
+      questions: {
+        Row: Question
+        Insert: Omit<Question, 'id' | 'created_at' | 'updated_at' | 'times_used' | 'avg_score'>
+        Update: Partial<Omit<Question, 'id' | 'created_at'>>
+      }
     }
     Enums: {
       user_role: UserRole
@@ -120,6 +170,8 @@ export interface Database {
       assessment_tier: AssessmentTier
       question_type: QuestionType
       grading_status: GradingStatus
+      content_type: ContentType
+      difficulty_tier: DifficultyTier
     }
   }
 }

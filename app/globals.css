@@ -23,6 +23,13 @@
     --input: 0 0% 96%;
     --ring: 4 100% 60%;
     --radius: 0rem; /* No border radius - Sharp rectangles */
+    
+    /* Swiss RGB colors for alpha support */
+    --swiss-paper: 255 255 255;
+    --swiss-concrete: 244 244 244;
+    --swiss-ink: 0 0 0;
+    --swiss-lead: 85 85 85;
+    --swiss-signal: 255 59 48;
   }
 
   .dark {
@@ -46,6 +53,13 @@
     --border: 0 0% 100%; /* White borders in dark mode */
     --input: 0 0% 7%;
     --ring: 4 100% 60%;
+    
+    /* Swiss RGB colors for alpha support - Dark Mode */
+    --swiss-paper: 0 0 0;
+    --swiss-concrete: 18 18 18;
+    --swiss-ink: 255 255 255;
+    --swiss-lead: 171 171 171;
+    --swiss-signal: 255 59 48;
   }
 }
 

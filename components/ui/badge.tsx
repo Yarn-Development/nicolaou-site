@@ -5,18 +5,23 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  "inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive transition-[color,box-shadow] overflow-hidden",
+  // Swiss Focus: No rounded corners, bold text, uppercase, wide tracking, flat design
+  "inline-flex items-center justify-center border-2 px-3 py-1 text-xs font-bold uppercase tracking-widest w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1.5 [&>svg]:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 transition-colors overflow-hidden",
   {
     variants: {
       variant: {
         default:
-          "border-transparent bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
+          "border-swiss-ink dark:border-swiss-paper bg-swiss-ink dark:bg-swiss-paper text-swiss-paper dark:text-swiss-ink [a&]:hover:bg-swiss-ink/90 dark:[a&]:hover:bg-swiss-paper/90 focus-visible:ring-swiss-ink dark:focus-visible:ring-swiss-paper",
         secondary:
-          "border-transparent bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
+          "border-swiss-ink/30 dark:border-swiss-paper/30 bg-swiss-ink/10 dark:bg-swiss-paper/10 text-swiss-ink dark:text-swiss-paper [a&]:hover:bg-swiss-ink/20 dark:[a&]:hover:bg-swiss-paper/20 focus-visible:ring-swiss-ink dark:focus-visible:ring-swiss-paper",
         destructive:
-          "border-transparent bg-destructive text-white [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
+          "border-red-600 dark:border-red-400 bg-red-600 dark:bg-red-400 text-white dark:text-red-950 [a&]:hover:bg-red-700 dark:[a&]:hover:bg-red-500 focus-visible:ring-red-600 dark:focus-visible:ring-red-400",
         outline:
-          "text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+          "border-swiss-ink dark:border-swiss-paper bg-transparent text-swiss-ink dark:text-swiss-paper [a&]:hover:bg-swiss-ink/5 dark:[a&]:hover:bg-swiss-paper/5 focus-visible:ring-swiss-ink dark:focus-visible:ring-swiss-paper",
+        success:
+          "border-green-600 dark:border-green-400 bg-green-600 dark:bg-green-400 text-white dark:text-green-950 [a&]:hover:bg-green-700 dark:[a&]:hover:bg-green-500 focus-visible:ring-green-600 dark:focus-visible:ring-green-400",
+        warning:
+          "border-yellow-600 dark:border-yellow-400 bg-yellow-600 dark:bg-yellow-400 text-yellow-950 dark:text-yellow-950 [a&]:hover:bg-yellow-700 dark:[a&]:hover:bg-yellow-500 focus-visible:ring-yellow-600 dark:focus-visible:ring-yellow-400",
       },
     },
     defaultVariants: {

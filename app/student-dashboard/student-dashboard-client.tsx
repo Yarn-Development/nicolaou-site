@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { 
   Target, 
   TrendingUp, 
@@ -10,12 +10,17 @@ import {
   Circle,
   ChevronRight,
   Play,
-  FileText
+  FileText,
+  Users,
+  BookOpen,
+  LogOut
 } from "lucide-react"
 import type { Profile } from "@/lib/types/database"
 import { SignOutButton } from "@/components/auth/sign-out-button"
+import { JoinClassCard } from "@/components/join-class-card"
+import { getEnrolledClasses, leaveClass } from "@/app/actions/classes"
 
-// Mock student data
+// Mock student data (will be replaced with real data later)
 const topicMastery = [
   { topic: "ALGEBRA", mastery: 92, total: 45, completed: 41 },
   { topic: "GEOMETRY", mastery: 85, total: 38, completed: 32 },
@@ -76,6 +81,15 @@ interface StudentDashboardClientProps {
 
 export default function StudentDashboardClient({ profile }: StudentDashboardClientProps) {
   const [selectedTab, setSelectedTab] = useState("overview")
+  const [enrolledClasses, setEnrolledClasses] = useState<Array<{
+    id: string
+    name: string
+    subject: string
+    joined_at: string
+    teacher?: { full_name: string | null; email: string }[]
+  }>>([])
+  const [loadingClasses, setLoadingClasses] = useState(true)
+  const [leavingClass, setLeavingClass] = useState<string | null>(null)
 
   // Calculate stats
   const totalAssignments = 40
@@ -84,6 +98,36 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
   const currentStreak = 12
   const overallScore = 87
   const studyHours = 12.5
+
+  // Fetch enrolled classes
+  useEffect(() => {
+    fetchEnrolledClasses()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const fetchEnrolledClasses = async () => {
+    setLoadingClasses(true)
+    const result = await getEnrolledClasses()
+    if (result.success && result.data) {
+      setEnrolledClasses(result.data)
+    }
+    setLoadingClasses(false)
+  }
+
+  const handleLeaveClass = async (classId: string, className: string) => {
+    if (!confirm(`Are you sure you want to leave "${className}"?`)) {
+      return
+    }
+
+    setLeavingClass(classId)
+    const result = await leaveClass(classId)
+    
+    if (result.success) {
+      fetchEnrolledClasses()
+    }
+    
+    setLeavingClass(null)
+  }
 
   return (
     <div className="min-h-screen bg-swiss-paper">
@@ -106,7 +150,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
 
           {/* Key Stats Row */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="border-2 border-swiss-ink bg-swiss-concrete dark:bg-swiss-ink/5 p-4">
+            <div className="border-2 border-swiss-ink bg-swiss-concrete p-4">
               <p className="text-xs font-black uppercase tracking-widest text-swiss-lead mb-2">
                 OVERALL SCORE
               </p>
@@ -115,11 +159,11 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
             
             <div className="border-2 border-swiss-ink bg-swiss-paper p-4">
               <p className="text-xs font-black uppercase tracking-widest text-swiss-lead mb-2">
-                CURRENT STREAK
+                MY CLASSES
               </p>
-              <p className="text-4xl font-black text-swiss-ink">{currentStreak}</p>
+              <p className="text-4xl font-black text-swiss-ink">{enrolledClasses.length}</p>
               <p className="text-xs text-swiss-lead uppercase tracking-wider font-bold mt-1">
-                DAYS
+                ENROLLED
               </p>
             </div>
 
@@ -150,7 +194,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
       <nav className="border-b-2 border-swiss-ink bg-swiss-paper sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex gap-2">
-            {["OVERVIEW", "ASSIGNMENTS", "PROGRESS", "PRACTICE"].map((tab) => (
+            {["OVERVIEW", "CLASSES", "ASSIGNMENTS", "PROGRESS", "PRACTICE"].map((tab) => (
               <button
                 key={tab}
                 onClick={() => setSelectedTab(tab.toLowerCase())}
@@ -172,6 +216,60 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
         {/* OVERVIEW TAB */}
         {selectedTab === "overview" && (
           <div className="space-y-8">
+            {/* Join Class Card */}
+            <section>
+              <h2 className="text-2xl font-black uppercase tracking-widest text-swiss-ink mb-6 flex items-center gap-3">
+                <Users className="w-6 h-6 text-swiss-signal" />
+                MY CLASSES
+              </h2>
+              
+              <div className="grid gap-6 md:grid-cols-2">
+                <JoinClassCard />
+                
+                {/* Quick class summary */}
+                <div className="border-2 border-swiss-ink bg-swiss-paper p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <BookOpen className="h-6 w-6 text-swiss-signal" />
+                    <h3 className="font-black uppercase tracking-tight text-swiss-ink">
+                      ENROLLED CLASSES
+                    </h3>
+                  </div>
+                  
+                  {loadingClasses ? (
+                    <p className="text-sm text-swiss-lead">Loading classes...</p>
+                  ) : enrolledClasses.length === 0 ? (
+                    <p className="text-sm text-swiss-lead">
+                      You haven&apos;t joined any classes yet. Use a class code to get started!
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {enrolledClasses.slice(0, 3).map((cls) => (
+                        <div
+                          key={cls.id}
+                          className="border border-swiss-ink p-3 bg-swiss-concrete"
+                        >
+                          <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
+                            {cls.name}
+                          </p>
+                          <p className="text-xs text-swiss-lead uppercase tracking-wider font-bold">
+                            {cls.subject}
+                          </p>
+                        </div>
+                      ))}
+                      {enrolledClasses.length > 3 && (
+                        <button
+                          onClick={() => setSelectedTab("classes")}
+                          className="text-xs text-swiss-signal font-bold uppercase tracking-wider hover:underline"
+                        >
+                          View All {enrolledClasses.length} Classes →
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+
             {/* Topic Mastery */}
             <section>
               <h2 className="text-2xl font-black uppercase tracking-widest text-swiss-ink mb-6 flex items-center gap-3">
@@ -208,7 +306,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                     </div>
                     
                     {/* Progress Bar */}
-                    <div className="w-full h-3 bg-swiss-concrete dark:bg-swiss-ink/10 border-2 border-swiss-ink">
+                    <div className="w-full h-3 bg-swiss-concrete border-2 border-swiss-ink">
                       <div
                         className="h-full bg-swiss-signal transition-all duration-300"
                         style={{ width: `${topic.mastery}%` }}
@@ -261,6 +359,112 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                 ))}
               </div>
             </section>
+          </div>
+        )}
+
+        {/* CLASSES TAB */}
+        {selectedTab === "classes" && (
+          <div className="space-y-8">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-black uppercase tracking-widest text-swiss-ink flex items-center gap-3">
+                <Users className="w-6 h-6 text-swiss-signal" />
+                MY CLASSES
+              </h2>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* Join Class Card */}
+              <JoinClassCard />
+
+              {/* Placeholder for another action card if needed */}
+              <div className="border-2 border-swiss-ink bg-swiss-concrete p-6">
+                <h3 className="font-black uppercase tracking-tight text-swiss-ink mb-2">
+                  QUICK STATS
+                </h3>
+                <div className="space-y-3 mt-4">
+                  <div className="flex justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">
+                      Total Classes
+                    </span>
+                    <span className="text-lg font-black text-swiss-ink">
+                      {enrolledClasses.length}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">
+                      Active Assignments
+                    </span>
+                    <span className="text-lg font-black text-swiss-ink">
+                      {recentAssignments.filter(a => !a.completed).length}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Enrolled Classes List */}
+            {loadingClasses ? (
+              <div className="border-2 border-swiss-ink bg-swiss-paper p-12 text-center">
+                <p className="text-swiss-lead font-bold uppercase tracking-wider">
+                  Loading classes...
+                </p>
+              </div>
+            ) : enrolledClasses.length === 0 ? (
+              <div className="border-2 border-swiss-ink bg-swiss-paper p-12 text-center">
+                <Users className="w-16 h-16 mx-auto text-swiss-lead/40 mb-6" />
+                <h3 className="text-xl font-black uppercase tracking-widest text-swiss-ink mb-3">
+                  NO CLASSES YET
+                </h3>
+                <p className="text-sm text-swiss-lead uppercase tracking-wider font-bold max-w-md mx-auto">
+                  Ask your teacher for a class code and join your first class to get started
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {enrolledClasses.map((cls) => {
+                  const teacher = Array.isArray(cls.teacher) && cls.teacher.length > 0 
+                    ? cls.teacher[0] 
+                    : null
+
+                  return (
+                    <div
+                      key={cls.id}
+                      className="border-2 border-swiss-ink bg-swiss-paper p-6 hover:border-swiss-signal transition-colors duration-200"
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h3 className="text-lg font-bold uppercase tracking-wider text-swiss-ink mb-2">
+                            {cls.name}
+                          </h3>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs px-2 py-1 border-2 border-swiss-ink text-swiss-ink font-bold uppercase tracking-wider">
+                              {cls.subject}
+                            </span>
+                            {teacher && (
+                              <span className="text-xs text-swiss-lead uppercase tracking-wider font-bold">
+                                Teacher: {teacher.full_name || teacher.email}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-swiss-lead uppercase tracking-wider font-bold mt-2">
+                            Joined: {new Date(cls.joined_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        
+                        <button
+                          onClick={() => handleLeaveClass(cls.id, cls.name)}
+                          disabled={leavingClass === cls.id}
+                          className="flex items-center gap-2 px-4 py-2 border-2 border-swiss-signal text-swiss-signal font-bold uppercase tracking-wider text-xs hover:bg-swiss-signal hover:text-white transition-colors disabled:opacity-50"
+                        >
+                          <LogOut className="w-4 h-4" />
+                          {leavingClass === cls.id ? "Leaving..." : "Leave"}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -364,7 +568,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                         stroke="currentColor"
                         strokeWidth="16"
                         fill="none"
-                        className="text-swiss-concrete dark:text-swiss-ink/10"
+                        className="text-swiss-concrete"
                       />
                       <circle
                         cx="96"
@@ -399,7 +603,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                       {completedAssignments}/{totalAssignments}
                     </span>
                   </div>
-                  <div className="w-full h-2 bg-swiss-concrete dark:bg-swiss-ink/10 border border-swiss-ink">
+                  <div className="w-full h-2 bg-swiss-concrete border border-swiss-ink">
                     <div
                       className="h-full bg-swiss-signal"
                       style={{ width: `${completionRate}%` }}
@@ -458,7 +662,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
               PRACTICE & RECOMMENDATIONS
             </h2>
 
-            <div className="border-2 border-swiss-ink bg-swiss-concrete dark:bg-swiss-ink/5 p-12 text-center">
+            <div className="border-2 border-swiss-ink bg-swiss-concrete p-12 text-center">
               <Target className="w-16 h-16 mx-auto text-swiss-lead/40 mb-6" />
               <h3 className="text-xl font-black uppercase tracking-widest text-swiss-ink mb-3">
                 AI-POWERED PRACTICE

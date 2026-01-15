@@ -3,80 +3,79 @@
 import { useEffect, useState } from "react"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 
-const data = [
-  { name: "Week 1", Math: 65, Science: 78, English: 72, History: 68 },
-  { name: "Week 2", Math: 68, Science: 75, English: 74, History: 70 },
-  { name: "Week 3", Math: 72, Science: 77, English: 76, History: 73 },
-  { name: "Week 4", Math: 75, Science: 80, English: 78, History: 75 },
-  { name: "Week 5", Math: 78, Science: 82, English: 80, History: 77 },
-  { name: "Week 6", Math: 82, Science: 85, English: 81, History: 80 },
+export interface PerformanceDataPoint {
+  week: string
+  average: number
+}
+
+interface PerformanceChartProps {
+  data: PerformanceDataPoint[]
+}
+
+// Demo data used when no real data is available
+const demoData: PerformanceDataPoint[] = [
+  { week: "Week 1", average: 65 },
+  { week: "Week 2", average: 68 },
+  { week: "Week 3", average: 72 },
+  { week: "Week 4", average: 75 },
+  { week: "Week 5", average: 78 },
+  { week: "Week 6", average: 82 },
 ]
 
-export function PerformanceChart() {
+export function PerformanceChart({ data }: PerformanceChartProps) {
   const [isMounted, setIsMounted] = useState(false)
 
   useEffect(() => {
     setIsMounted(true)
   }, [])
 
+  // Use demo data if no data provided or data is empty
+  const chartData = data.length > 0 ? data : demoData
+  const isDemo = data.length === 0
+
   if (!isMounted) {
     return <div className="h-[300px] flex items-center justify-center">Loading chart...</div>
   }
 
   return (
-    <ResponsiveContainer width="100%" height={300}>
-      <LineChart
-        data={data}
-        margin={{
-          top: 5,
-          right: 10,
-          left: 0,
-          bottom: 5,
-        }}
-      >
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-        <XAxis dataKey="name" stroke="rgba(255,255,255,0.5)" />
-        <YAxis stroke="rgba(255,255,255,0.5)" />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: "rgba(14, 17, 23, 0.8)",
-            borderColor: "rgba(255,255,255,0.1)",
-            color: "white",
+    <div className="relative">
+      {isDemo && (
+        <div className="absolute top-0 right-0 px-2 py-1 bg-amber-500/20 text-amber-500 text-xs rounded-md z-10">
+          Demo Data
+        </div>
+      )}
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart
+          data={chartData}
+          margin={{
+            top: 5,
+            right: 10,
+            left: 0,
+            bottom: 5,
           }}
-        />
-        <Line
-          type="monotone"
-          dataKey="Math"
-          stroke="#00BFFF"
-          strokeWidth={2}
-          dot={{ r: 4 }}
-          activeDot={{ r: 6, strokeWidth: 2 }}
-        />
-        <Line
-          type="monotone"
-          dataKey="Science"
-          stroke="#A259FF"
-          strokeWidth={2}
-          dot={{ r: 4 }}
-          activeDot={{ r: 6, strokeWidth: 2 }}
-        />
-        <Line
-          type="monotone"
-          dataKey="English"
-          stroke="#00FFC6"
-          strokeWidth={2}
-          dot={{ r: 4 }}
-          activeDot={{ r: 6, strokeWidth: 2 }}
-        />
-        <Line
-          type="monotone"
-          dataKey="History"
-          stroke="#FF6B6B"
-          strokeWidth={2}
-          dot={{ r: 4 }}
-          activeDot={{ r: 6, strokeWidth: 2 }}
-        />
-      </LineChart>
-    </ResponsiveContainer>
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+          <XAxis dataKey="week" stroke="rgba(255,255,255,0.5)" />
+          <YAxis stroke="rgba(255,255,255,0.5)" domain={[0, 100]} />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "rgba(14, 17, 23, 0.8)",
+              borderColor: "rgba(255,255,255,0.1)",
+              color: "white",
+            }}
+            formatter={(value: number) => [`${value}%`, "Average Score"]}
+          />
+          <Line
+            type="monotone"
+            dataKey="average"
+            stroke="#00BFFF"
+            strokeWidth={2}
+            dot={{ r: 4 }}
+            activeDot={{ r: 6, strokeWidth: 2 }}
+            name="Average Score"
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
   )
 }

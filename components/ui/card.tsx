@@ -7,7 +7,8 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card"
       className={cn(
-        "bg-card text-card-foreground flex flex-col gap-6 rounded-xl border py-6 shadow-sm",
+        // Swiss Focus: No rounded corners, 2px border, no shadow
+        "bg-swiss-paper dark:bg-swiss-ink text-swiss-ink dark:text-swiss-paper flex flex-col gap-6 border-2 border-swiss-ink dark:border-swiss-paper py-6",
         className
       )}
       {...props}
@@ -20,7 +21,7 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-header"
       className={cn(
-        "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-1.5 px-6 has-data-[slot=card-action]:grid-cols-[1fr_auto] [.border-b]:pb-6",
+        "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-6 has-data-[slot=card-action]:grid-cols-[1fr_auto] [.border-b]:pb-6",
         className
       )}
       {...props}
@@ -32,7 +33,11 @@ function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-title"
-      className={cn("leading-none font-semibold", className)}
+      className={cn(
+        // Swiss Focus: Bold, uppercase, wide tracking
+        "leading-tight font-bold uppercase tracking-widest text-lg",
+        className
+      )}
       {...props}
     />
   )
@@ -42,7 +47,11 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-description"
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn(
+        // Swiss Focus: Normal weight, normal case for descriptions
+        "text-swiss-ink/70 dark:text-swiss-paper/70 text-sm font-normal tracking-normal",
+        className
+      )}
       {...props}
     />
   )

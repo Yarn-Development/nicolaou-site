@@ -39,13 +39,15 @@ function Slider({
       <SliderPrimitive.Track
         data-slot="slider-track"
         className={cn(
-          "bg-muted relative grow overflow-hidden rounded-full data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
+          // Swiss Focus: Sharp rectangles (no rounded corners), flat design
+          "bg-swiss-ink/20 dark:bg-swiss-paper/20 relative grow overflow-hidden data-[orientation=horizontal]:h-2 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-2"
         )}
       >
         <SliderPrimitive.Range
           data-slot="slider-range"
           className={cn(
-            "bg-white absolute data-[orientation=horizontal]:h-full data-[orientation=vertical]:w-full"
+            // Swiss Focus: High contrast fill
+            "bg-swiss-ink dark:bg-swiss-paper absolute data-[orientation=horizontal]:h-full data-[orientation=vertical]:w-full"
           )}
         />
       </SliderPrimitive.Track>
@@ -53,7 +55,13 @@ function Slider({
         <SliderPrimitive.Thumb
           data-slot="slider-thumb"
           key={index}
-          className="border-primary bg-background ring-ring/50 block size-4 shrink-0 rounded-full border shadow-sm transition-[color,box-shadow] hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
+          className={cn(
+            // Swiss Focus: Square thumb (no rounded corners), 2px border, flat
+            "block size-5 shrink-0 border-2 border-swiss-ink dark:border-swiss-paper bg-swiss-paper dark:bg-swiss-ink transition-colors",
+            "hover:bg-swiss-ink/10 dark:hover:bg-swiss-paper/10",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-swiss-ink dark:focus-visible:ring-swiss-paper focus-visible:ring-offset-2",
+            "disabled:pointer-events-none disabled:opacity-50"
+          )}
         />
       ))}
     </SliderPrimitive.Root>

@@ -1,7 +1,7 @@
 import type React from "react"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Inter } from "next/font/google"
-import { Toaster } from "sonner"
+import { Toaster } from "@/components/ui/sonner"
 import "./globals.css"
 
 const inter = Inter({ 
@@ -28,16 +28,7 @@ export default function RootLayout({
       <body className={`${inter.className} antialiased`}>
         <ThemeProvider>
           {children}
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              style: {
-                background: "hsl(var(--card))",
-                color: "hsl(var(--card-foreground))",
-                border: "1px solid hsl(var(--border))",
-              },
-            }}
-          />
+          <Toaster position="top-right" />
         </ThemeProvider>
       </body>
     </html>
