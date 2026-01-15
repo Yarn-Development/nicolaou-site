@@ -9,7 +9,7 @@ export type CurriculumLevel =
   | 'GCSE Foundation'
   | 'GCSE Higher'
   | 'A-Level Pure'
-  | 'A-Level Stats'
+  | 'A-Level Statistics'
   | 'A-Level Mechanics'
 
 export type QuestionType = 'Fluency' | 'Problem Solving' | 'Reasoning/Proof'
@@ -311,7 +311,7 @@ export const CURRICULUM_DATA: Record<CurriculumLevel, Topic[]> = {
     },
   ],
   
-  'A-Level Stats': [
+  'A-Level Statistics': [
     {
       id: 'alevel-s-data',
       name: 'Statistical Sampling',
@@ -440,5 +440,5 @@ export function getSubTopicsForTopic(level: CurriculumLevel, topicId: string): S
 
 // Helper to get all levels
 export function getAllLevels(): CurriculumLevel[] {
-  return ['KS3', 'GCSE Foundation', 'GCSE Higher', 'A-Level Pure', 'A-Level Stats', 'A-Level Mechanics']
+  return ['KS3', 'GCSE Foundation', 'GCSE Higher', 'A-Level Pure', 'A-Level Statistics', 'A-Level Mechanics']
 }

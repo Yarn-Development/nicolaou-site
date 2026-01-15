@@ -259,7 +259,7 @@ const SEED_CURRICULUM: Record<string, Record<string, string[]>> = {
       "Vector Proofs"
     ]
   },
-  "A-Level Stats": {
+  "A-Level Statistics": {
     "Statistical Sampling": [
       "Sampling Methods",
       "Population & Sample",
