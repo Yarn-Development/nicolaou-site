@@ -190,52 +190,6 @@ export default function FeedbackPrintPage({ params }: PrintPageProps) {
           </div>
         </div>
       </div>
-
-      {/* Print Styles */}
-      <style jsx global>{`
-        @media print {
-          /* Force color printing */
-          body {
-            print-color-adjust: exact;
-            -webkit-print-color-adjust: exact;
-          }
-
-          /* Hide print buttons and control bar when printing */
-          .print-hidden {
-            display: none !important;
-          }
-
-          /* Page break before revision list */
-          .break-before-page {
-            break-before: page;
-            page-break-before: always;
-          }
-
-          /* Ensure clean margins */
-          @page {
-            margin: 1cm;
-          }
-
-          /* Prevent orphan rows in tables */
-          tr {
-            break-inside: avoid;
-            page-break-inside: avoid;
-          }
-
-          /* Ensure backgrounds print */
-          * {
-            print-color-adjust: exact;
-            -webkit-print-color-adjust: exact;
-          }
-        }
-
-        /* Screen styles for print-hidden elements */
-        @media screen {
-          .print-hidden {
-            display: flex;
-          }
-        }
-      `}</style>
     </>
   )
 }

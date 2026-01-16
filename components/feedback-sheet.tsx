@@ -488,20 +488,6 @@ export function FeedbackSheet({
         revisionList={revisionList} 
         className="print:break-before-page"
       />
-
-      {/* Print Styles */}
-      <style jsx>{`
-        @media print {
-          body {
-            print-color-adjust: exact;
-            -webkit-print-color-adjust: exact;
-          }
-          
-          .print\\:break-before-page {
-            page-break-before: always;
-          }
-        }
-      `}</style>
     </div>
   )
 }

@@ -195,9 +195,13 @@ function QuestionBankCard({ question, onAdd, isAdded }: QuestionCardProps) {
               <Badge variant="outline" className="text-[10px]">DB</Badge>
             )}
           </div>
-          {/* LaTeX preview with truncation */}
-          <div className="text-sm font-medium leading-relaxed text-swiss-ink line-clamp-2 mb-3 overflow-hidden">
-            <LatexPreview latex={question.questionLatex} className="text-sm" />
+          {/* LaTeX preview with truncation - fixed height container for consistent card sizing */}
+          <div className="h-16 mb-3 overflow-hidden relative">
+            <div className="text-sm font-medium leading-relaxed text-swiss-ink">
+              <LatexPreview latex={question.questionLatex} className="text-sm [&_.katex]:text-sm" />
+            </div>
+            {/* Fade overlay to indicate truncation */}
+            <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-swiss-paper to-transparent pointer-events-none group-hover:from-swiss-concrete" />
           </div>
         </div>
       </div>

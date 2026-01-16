@@ -71,7 +71,7 @@ export function DashboardSidebar() {
   return (
     <div
       className={cn(
-        "bg-swiss-paper border-r-2 border-swiss-ink h-[calc(100vh-4rem)] transition-all duration-300",
+        "bg-swiss-paper border-r-2 border-swiss-ink h-[calc(100vh-4rem)] transition-all duration-300 print:hidden",
         collapsed ? "w-[80px]" : "w-[280px]",
       )}
     >
