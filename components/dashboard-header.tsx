@@ -29,7 +29,7 @@ export function DashboardHeader() {
   }
 
   return (
-    <header className="sticky top-0 z-30 w-full bg-swiss-paper border-b-2 border-swiss-ink">
+    <header className="sticky top-0 z-30 w-full bg-swiss-paper border-b-2 border-swiss-ink print:hidden">
       <div className="flex h-16 items-center px-6">
         <div className="flex items-center gap-4">
           <Link href="/dashboard" className="hidden md:flex">

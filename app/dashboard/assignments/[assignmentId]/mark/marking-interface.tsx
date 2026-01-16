@@ -12,7 +12,9 @@ import {
   BellOff,
   Users,
   FileText,
-  Save
+  Save,
+  Printer,
+  BookOpen
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -286,14 +288,29 @@ export function MarkingInterface({ data }: MarkingInterfaceProps) {
             </Badge>
           )}
 
-          <Button
-            onClick={handleSaveAll}
-            disabled={!hasUnsavedChanges}
-            className="ml-auto bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider"
-          >
-            <Save className="h-4 w-4 mr-2" />
-            Save All
-          </Button>
+          <div className="flex items-center gap-2 ml-auto">
+            <Button
+              onClick={handleSaveAll}
+              disabled={!hasUnsavedChanges}
+              className="bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider"
+            >
+              <Save className="h-4 w-4 mr-2" />
+              Save All
+            </Button>
+            
+            {/* Print All Revision Sheets */}
+            {gradedCount > 0 && (
+              <Link href={`/dashboard/assignments/${assignment.id}/feedback`}>
+                <Button
+                  variant="outline"
+                  className="border-2 border-swiss-ink font-bold uppercase tracking-wider"
+                >
+                  <BookOpen className="h-4 w-4 mr-2" />
+                  Class Feedback
+                </Button>
+              </Link>
+            )}
+          </div>
         </div>
       </div>
 
@@ -573,16 +590,31 @@ function StudentRow({
             )}
           </Button>
           
-          {student.submission_id && (
-            <Link href={`/dashboard/feedback/${student.id}/print?assignmentId=${assignmentId}`}>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-2 border-swiss-ink font-bold uppercase text-xs"
-              >
-                <Eye className="h-3 w-3" />
-              </Button>
-            </Link>
+          {state.isSaved && (
+            <>
+              {student.submission_id && (
+                <Link href={`/dashboard/feedback/submission/${student.submission_id}`}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-2 border-swiss-ink font-bold uppercase text-xs"
+                    title="View feedback sheet"
+                  >
+                    <Eye className="h-3 w-3" />
+                  </Button>
+                </Link>
+              )}
+              <Link href={`/revision/${student.id}/${assignmentId}`} target="_blank">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-2 border-swiss-ink font-bold uppercase text-xs"
+                  title="Print revision worksheet"
+                >
+                  <Printer className="h-3 w-3" />
+                </Button>
+              </Link>
+            </>
           )}
         </div>
       </td>

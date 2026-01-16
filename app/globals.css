@@ -263,3 +263,44 @@
 .swiss-animate-in {
   animation: swiss-fade-in 0.4s ease-out;
 }
+
+/* Print Styles */
+@media print {
+  body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .break-inside-avoid {
+    break-inside: avoid;
+  }
+  /* Hide print buttons and control bar when printing */
+  .print-hidden {
+    display: none !important;
+  }
+  /* Page break before revision list */
+  .break-before-page {
+    break-before: page;
+    page-break-before: always;
+  }
+  /* Ensure clean margins */
+  @page {
+    margin: 1cm;
+  }
+  /* Prevent orphan rows in tables */
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* Ensure backgrounds print */
+  * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
+
+/* Screen styles for print-hidden elements */
+@media screen {
+  .print-hidden {
+    display: flex;
+  }
+}
