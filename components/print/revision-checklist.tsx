@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { Printer, ArrowLeft, CheckCircle } from "lucide-react"
+import { Printer, ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { 
   extractTopicsFromAssignment, 
@@ -118,7 +118,7 @@ export function RevisionChecklist({
             </span>
             <span className="flex items-center gap-2">
               <span className="w-4 h-4 bg-green-500 border border-swiss-ink"></span>
-              <span>G = Green (I'm confident)</span>
+              <span>G = Green (I&apos;m confident)</span>
             </span>
           </div>
         </div>
@@ -363,7 +363,7 @@ export function RevisionChecklistPage({
             </span>
             <span className="flex items-center gap-2">
               <span className="w-4 h-4 bg-green-500 border border-swiss-ink"></span>
-              <span>G = Green (I'm confident)</span>
+              <span>G = Green (I&apos;m confident)</span>
             </span>
           </div>
         </div>

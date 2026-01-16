@@ -80,8 +80,8 @@ export function PrintBatchClient({
             Print Instructions
           </h2>
           <ul className="text-sm text-blue-800 space-y-1">
-            <li>• Click "Print All" to open the print dialog</li>
-            <li>• Each student's feedback will print on a new page</li>
+            <li>• Click &ldquo;Print All&rdquo; to open the print dialog</li>
+            <li>• Each student&apos;s feedback will print on a new page</li>
             <li>• Recommended: Print in color for RAG status visibility</li>
             <li>• Total pages: {studentFeedback.length * 2} (2 pages per student)</li>
           </ul>
