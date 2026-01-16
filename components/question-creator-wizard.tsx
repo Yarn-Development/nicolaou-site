@@ -35,6 +35,7 @@ import {
   FileText,
   Lightbulb,
 } from "lucide-react"
+import Image from "next/image"
 import { createClient } from "@/lib/supabase/client"
 import type { DifficultyTier } from "@/lib/types/database"
 import { LatexPreview } from "@/components/latex-preview"
@@ -779,10 +780,14 @@ Generate ONE unique, exam-style question now.
                 
                 {ocrImagePreview ? (
                   <div className="space-y-4">
-                    <img
+                    <Image
                       src={ocrImagePreview}
                       alt="Preview"
-                      className="max-h-64 mx-auto border-2 border-swiss-ink dark:border-swiss-paper"
+                      width={500}
+                      height={350}
+                      className="mx-auto border-2 border-swiss-ink dark:border-swiss-paper"
+                      style={{ maxHeight: "256px", width: "auto", height: "auto" }}
+                      unoptimized
                     />
                     <div className="flex gap-2 justify-center">
                       <Button
@@ -853,10 +858,14 @@ Generate ONE unique, exam-style question now.
                         ORIGINAL IMAGE
                       </Label>
                       <div className="border-2 border-swiss-ink dark:border-swiss-paper p-2 bg-swiss-paper dark:bg-swiss-ink/10">
-                        <img
+                        <Image
                           src={ocrImagePreview!}
                           alt="Original"
-                          className="w-full"
+                          width={500}
+                          height={400}
+                          className="w-full h-auto"
+                          style={{ maxWidth: "100%", height: "auto" }}
+                          unoptimized
                         />
                       </div>
                     </div>

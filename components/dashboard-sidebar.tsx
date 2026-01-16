@@ -31,21 +31,21 @@ export function DashboardSidebar() {
       number: "03"
     },
     {
+      title: "Assignments",
+      href: "/dashboard/assignments",
+      icon: <ClipboardList className="h-5 w-5" />,
+      number: "04"
+    },
+    {
       title: "New Assignment",
       href: "/dashboard/assignments/create",
       icon: <PlusCircle className="h-5 w-5" />,
-      number: "04"
+      number: "05"
     },
     {
       title: "Question Bank",
       href: "/dashboard/questions/browse",
       icon: <Database className="h-5 w-5" />,
-      number: "05"
-    },
-    {
-      title: "Exam Builder",
-      href: "/dashboard/exam-builder",
-      icon: <ClipboardList className="h-5 w-5" />,
       number: "06"
     },
     {

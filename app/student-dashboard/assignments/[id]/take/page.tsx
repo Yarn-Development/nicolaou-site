@@ -3,6 +3,7 @@ import { loadAssignment } from "@/app/actions/student-work"
 import { SubmittedView } from "@/components/worksheet-player"
 import { createClient } from "@/lib/supabase/server"
 import { TakeAssignmentClient } from "./take-assignment-client"
+import { PaperExamPrepSheet } from "@/components/paper-exam-prep-sheet"
 
 interface Props {
   params: Promise<{
@@ -64,7 +65,70 @@ export default async function TakeAssignmentPage({ params }: Props) {
 
   const { assignment, submission, mode } = result.data
 
-  // If already submitted or graded, show the submitted view
+  // Paper mode: Show prep sheet before exam, or feedback after grading
+  if (assignment.mode === "paper") {
+    // If already graded, show the submitted view with feedback
+    if (submission?.status === "graded") {
+      const answeredCount = Object.values(submission.answers).filter(a => a.trim() !== "").length
+
+      return (
+        <SubmittedView
+          title={assignment.title}
+          className={assignment.class_name}
+          submittedAt={submission.submitted_at}
+          answeredCount={answeredCount}
+          totalQuestions={assignment.questions.length}
+          status={submission.status}
+          score={submission.score}
+          totalMarks={assignment.total_marks}
+          isPaperMode={true}
+        />
+      )
+    }
+
+    // Before grading: Show exam preparation sheet
+    // Calculate topic summaries
+    const topicMap = new Map<string, { subTopics: Set<string>; questionCount: number; totalMarks: number }>()
+    
+    assignment.questions.forEach(q => {
+      if (!topicMap.has(q.topic)) {
+        topicMap.set(q.topic, {
+          subTopics: new Set(),
+          questionCount: 0,
+          totalMarks: 0,
+        })
+      }
+      const topicData = topicMap.get(q.topic)!
+      if (q.sub_topic) {
+        topicData.subTopics.add(q.sub_topic)
+      }
+      topicData.questionCount++
+      topicData.totalMarks += q.marks
+    })
+
+    const topicSummaries = Array.from(topicMap.entries()).map(([topic, data]) => ({
+      topic,
+      subTopics: Array.from(data.subTopics),
+      questionCount: data.questionCount,
+      totalMarks: data.totalMarks,
+    }))
+
+    // Estimate duration: 1.5 minutes per mark (rough heuristic)
+    const estimatedDuration = Math.round(assignment.total_marks * 1.5)
+
+    return (
+      <PaperExamPrepSheet
+        title={assignment.title}
+        className={assignment.class_name}
+        dueDate={assignment.due_date}
+        totalMarks={assignment.total_marks}
+        topicSummaries={topicSummaries}
+        estimatedDuration={estimatedDuration}
+      />
+    )
+  }
+
+  // Online mode: If already submitted or graded, show the submitted view
   if (mode === "readonly" && submission) {
     const answeredCount = Object.values(submission.answers).filter(a => a.trim() !== "").length
 

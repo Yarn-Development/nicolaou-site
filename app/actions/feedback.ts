@@ -1268,3 +1268,251 @@ export async function getStudentDashboardData(): Promise<{
     return { success: false, error: "An unexpected error occurred" }
   }
 }
+
+// =====================================================
+// Release Feedback & Generate Packs for All Students
+// =====================================================
+
+export interface BulkFeedbackResult {
+  assignmentId: string
+  assignmentTitle: string
+  className: string
+  totalStudents: number
+  successCount: number
+  failedCount: number
+  studentFeedback: StudentFeedbackData[]
+}
+
+/**
+ * Releases feedback and generates personalized feedback packs for all graded students
+ * in an assignment. This is the main action called from the marking grid.
+ * 
+ * Steps:
+ * 1. Update assignment status to 'graded'
+ * 2. Set feedback_released = true for all submissions
+ * 3. Generate StudentFeedbackData for each graded submission
+ * 4. Return all feedback data for bulk printing
+ */
+export async function releaseFeedbackAndGeneratePacks(assignmentId: string): Promise<{
+  success: boolean
+  data?: BulkFeedbackResult
+  error?: string
+}> {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError || !user) {
+    return { success: false, error: "You must be logged in" }
+  }
+
+  try {
+    // 1. Fetch assignment and verify teacher permission
+    const { data: assignment, error: assignmentError } = await supabase
+      .from("assignments")
+      .select(`
+        id,
+        title,
+        class_id,
+        status,
+        classes!inner(
+          id,
+          name,
+          teacher_id
+        )
+      `)
+      .eq("id", assignmentId)
+      .single()
+
+    if (assignmentError || !assignment) {
+      return { success: false, error: "Assignment not found" }
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const classData = assignment.classes as any
+    if (classData.teacher_id !== user.id) {
+      return { success: false, error: "Permission denied" }
+    }
+
+    // 2. Update assignment status to 'graded' if not already
+    if (assignment.status !== "graded") {
+      const { error: updateAssignmentError } = await supabase
+        .from("assignments")
+        .update({ status: "graded" })
+        .eq("id", assignmentId)
+
+      if (updateAssignmentError) {
+        console.error("Failed to update assignment status:", updateAssignmentError)
+        return { success: false, error: "Failed to update assignment status" }
+      }
+    }
+
+    // 3. Get all graded submissions for this assignment
+    const { data: submissions, error: submissionsError } = await supabase
+      .from("submissions")
+      .select("id, student_id, status")
+      .eq("assignment_id", assignmentId)
+      .eq("status", "graded")
+
+    if (submissionsError) {
+      console.error("Failed to fetch submissions:", submissionsError)
+      return { success: false, error: "Failed to fetch submissions" }
+    }
+
+    if (!submissions || submissions.length === 0) {
+      return { 
+        success: false, 
+        error: "No graded submissions found. Please grade students first." 
+      }
+    }
+
+    // 4. Release feedback for all submissions
+    const { error: releaseError } = await supabase
+      .from("submissions")
+      .update({ feedback_released: true })
+      .eq("assignment_id", assignmentId)
+      .eq("status", "graded")
+
+    if (releaseError) {
+      console.error("Failed to release feedback:", releaseError)
+      return { success: false, error: "Failed to release feedback" }
+    }
+
+    // 5. Generate feedback for each student
+    const studentFeedback: StudentFeedbackData[] = []
+    let successCount = 0
+    let failedCount = 0
+
+    for (const submission of submissions) {
+      const result = await generateStudentFeedback(submission.id)
+      
+      if (result.success && result.data) {
+        studentFeedback.push(result.data)
+        successCount++
+      } else {
+        console.error(`Failed to generate feedback for submission ${submission.id}:`, result.error)
+        failedCount++
+      }
+    }
+
+    return {
+      success: true,
+      data: {
+        assignmentId,
+        assignmentTitle: assignment.title,
+        className: classData.name,
+        totalStudents: submissions.length,
+        successCount,
+        failedCount,
+        studentFeedback,
+      },
+    }
+  } catch (error) {
+    console.error("Error in releaseFeedbackAndGeneratePacks:", error)
+    return { success: false, error: "An unexpected error occurred" }
+  }
+}
+
+// =====================================================
+// Get All Student Feedback for Bulk Print
+// =====================================================
+
+/**
+ * Fetches all student feedback data for an assignment (for bulk printing)
+ * This is used by the print-batch page to render all feedback sheets
+ */
+export async function getAssignmentFeedbackForPrint(assignmentId: string): Promise<{
+  success: boolean
+  data?: {
+    assignmentTitle: string
+    className: string
+    studentFeedback: StudentFeedbackData[]
+  }
+  error?: string
+}> {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError || !user) {
+    return { success: false, error: "You must be logged in" }
+  }
+
+  try {
+    // Fetch assignment and verify teacher permission
+    const { data: assignment, error: assignmentError } = await supabase
+      .from("assignments")
+      .select(`
+        id,
+        title,
+        class_id,
+        classes!inner(
+          id,
+          name,
+          teacher_id
+        )
+      `)
+      .eq("id", assignmentId)
+      .single()
+
+    if (assignmentError || !assignment) {
+      return { success: false, error: "Assignment not found" }
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const classData = assignment.classes as any
+    if (classData.teacher_id !== user.id) {
+      return { success: false, error: "Permission denied" }
+    }
+
+    // Get all graded submissions with feedback released
+    const { data: submissions, error: submissionsError } = await supabase
+      .from("submissions")
+      .select("id")
+      .eq("assignment_id", assignmentId)
+      .eq("status", "graded")
+      .eq("feedback_released", true)
+
+    if (submissionsError) {
+      return { success: false, error: "Failed to fetch submissions" }
+    }
+
+    if (!submissions || submissions.length === 0) {
+      return { 
+        success: false, 
+        error: "No feedback available. Please release feedback first." 
+      }
+    }
+
+    // Generate feedback for each student
+    const studentFeedback: StudentFeedbackData[] = []
+
+    for (const submission of submissions) {
+      const result = await generateStudentFeedback(submission.id)
+      if (result.success && result.data) {
+        studentFeedback.push(result.data)
+      }
+    }
+
+    // Sort by student name for consistent ordering
+    studentFeedback.sort((a, b) => a.studentName.localeCompare(b.studentName))
+
+    return {
+      success: true,
+      data: {
+        assignmentTitle: assignment.title,
+        className: classData.name,
+        studentFeedback,
+      },
+    }
+  } catch (error) {
+    console.error("Error in getAssignmentFeedbackForPrint:", error)
+    return { success: false, error: "An unexpected error occurred" }
+  }
+}

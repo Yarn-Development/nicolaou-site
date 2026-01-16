@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Search, Filter, Eye, Trash2, CheckCircle2, Circle, Loader2 } from 'lucide-react'
+import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
 import type { Question, DifficultyTier } from '@/lib/types/database'
 import { LatexPreview } from '@/components/latex-preview'
@@ -404,10 +405,13 @@ export default function QuestionBrowserClient() {
                       Original Image
                     </label>
                     <div className="border-2 border-swiss-ink p-2 bg-white">
-                      <img 
-                        src={selectedQuestion.image_url} 
+                      <Image
+                        src={selectedQuestion.image_url}
                         alt="Original question"
-                        className="max-w-full"
+                        width={700}
+                        height={500}
+                        className="w-full h-auto"
+                        style={{ maxWidth: "100%", height: "auto" }}
                       />
                     </div>
                   </div>
