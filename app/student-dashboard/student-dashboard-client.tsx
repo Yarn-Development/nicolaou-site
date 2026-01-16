@@ -20,7 +20,8 @@ import {
   LogOut,
   Laptop,
   Printer,
-  PenLine
+  PenLine,
+  ClipboardList,
 } from "lucide-react"
 import type { Profile } from "@/lib/types/database"
 import { SignOutButton } from "@/components/auth/sign-out-button"
@@ -391,15 +392,22 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                             </Button>
                           </Link>
                         ) : (
-                          <Button 
-                            size="sm"
-                            variant="outline"
-                            disabled
-                            className="border-amber-500 text-amber-600 font-bold uppercase tracking-wider cursor-not-allowed"
-                          >
-                            <PenLine className="w-4 h-4 mr-2" />
-                            In Class
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Link href={`/revision-checklist/${assignment.id}`}>
+                              <Button 
+                                size="sm"
+                                variant="outline"
+                                className="border-2 border-swiss-ink text-swiss-ink font-bold uppercase tracking-wider"
+                              >
+                                <ClipboardList className="w-4 h-4 mr-2" />
+                                Revision List
+                              </Button>
+                            </Link>
+                            <Badge variant="outline" className="border-amber-500 text-amber-600 font-bold text-xs px-2 py-1">
+                              <PenLine className="w-3 h-3 mr-1" />
+                              In Class
+                            </Badge>
+                          </div>
                         )}
                       </div>
                     )
@@ -747,7 +755,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                                 className="border-swiss-signal text-swiss-signal hover:bg-swiss-signal hover:text-white font-bold uppercase tracking-wider"
                               >
                                 <Eye className="w-4 h-4 mr-2" />
-                                Feedback
+                                View Results
                               </Button>
                             </Link>
                           ) : isGraded ? (

@@ -23,6 +23,7 @@ import {
   Printer,
   ClipboardList,
   GripVertical,
+  BookOpen,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -891,6 +892,15 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                     <ClipboardList className="w-4 h-4 mr-2" />
                     Download with Mark Scheme
                   </Button>
+                  <Link href={`/revision-checklist/${createdAssignment.id}`} className="block">
+                    <Button
+                      variant="outline"
+                      className="w-full border-2 border-swiss-ink font-bold uppercase tracking-wider"
+                    >
+                      <BookOpen className="w-4 h-4 mr-2" />
+                      Download Revision Checklist
+                    </Button>
+                  </Link>
                   <Link href={`/dashboard/assignments/${createdAssignment.id}/mark`} className="block">
                     <Button
                       variant="outline"

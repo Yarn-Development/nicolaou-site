@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { 
   ArrowLeft, 
   Check, 
@@ -14,7 +15,8 @@ import {
   FileText,
   Save,
   Printer,
-  BookOpen
+  BookOpen,
+  Send,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -26,6 +28,7 @@ import {
   saveMarks,
   toggleFeedbackRelease,
 } from "@/app/actions/marking"
+import { releaseFeedbackAndGeneratePacks } from "@/app/actions/feedback"
 import { toast } from "sonner"
 
 interface MarkingInterfaceProps {
@@ -56,6 +59,7 @@ export function MarkingInterface({ data }: MarkingInterfaceProps) {
 // =====================================================
 
 function PaperMarkingGrid({ data }: MarkingInterfaceProps) {
+  const router = useRouter()
   const { assignment, questions, students, maxTotalMarks } = data
 
   // Track feedback release state
@@ -63,6 +67,7 @@ function PaperMarkingGrid({ data }: MarkingInterfaceProps) {
     students.some(s => s.feedback_released)
   )
   const [isTogglingFeedback, setIsTogglingFeedback] = useState(false)
+  const [isReleasingPacks, setIsReleasingPacks] = useState(false)
 
   // Initialize student states
   const [studentStates, setStudentStates] = useState<Record<string, StudentRowState>>(() => {
@@ -232,6 +237,37 @@ function PaperMarkingGrid({ data }: MarkingInterfaceProps) {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload)
   }, [hasUnsavedChanges])
 
+  // Release feedback and generate packs for all students (Paper Mode)
+  const handleReleaseFeedbackPacks = useCallback(async () => {
+    if (hasUnsavedChanges) {
+      toast.error("Please save all changes before releasing feedback")
+      return
+    }
+
+    if (gradedCount === 0) {
+      toast.error("Please grade at least one student before releasing feedback")
+      return
+    }
+
+    setIsReleasingPacks(true)
+    
+    const result = await releaseFeedbackAndGeneratePacks(assignment.id)
+    
+    if (result.success && result.data) {
+      setFeedbackReleased(true)
+      toast.success(
+        `Feedback released for ${result.data.successCount} student(s). ` +
+        `${result.data.failedCount > 0 ? `${result.data.failedCount} failed.` : ""}`
+      )
+      // Navigate to the bulk print page
+      router.push(`/dashboard/assignments/${assignment.id}/feedback/print-batch`)
+    } else {
+      toast.error(result.error || "Failed to release feedback")
+    }
+    
+    setIsReleasingPacks(false)
+  }, [assignment.id, hasUnsavedChanges, gradedCount, router])
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -315,8 +351,24 @@ function PaperMarkingGrid({ data }: MarkingInterfaceProps) {
               Save All
             </Button>
             
-            {/* Print All Revision Sheets */}
+            {/* Release Feedback & Generate Packs */}
             {gradedCount > 0 && (
+              <Button
+                onClick={handleReleaseFeedbackPacks}
+                disabled={isReleasingPacks || hasUnsavedChanges}
+                className="bg-green-600 hover:bg-green-700 text-white font-bold uppercase tracking-wider"
+              >
+                {isReleasingPacks ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4 mr-2" />
+                )}
+                {feedbackReleased ? "Print Feedback Packs" : "Release & Print Packs"}
+              </Button>
+            )}
+            
+            {/* View Class Feedback Overview */}
+            {gradedCount > 0 && feedbackReleased && (
               <Link href={`/dashboard/assignments/${assignment.id}/feedback`}>
                 <Button
                   variant="outline"
