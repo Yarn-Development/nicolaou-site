@@ -17,7 +17,10 @@ import {
   Clock,
   AlertCircle,
   Eye,
-  LogOut
+  LogOut,
+  Laptop,
+  Printer,
+  PenLine
 } from "lucide-react"
 import type { Profile } from "@/lib/types/database"
 import { SignOutButton } from "@/components/auth/sign-out-button"
@@ -326,6 +329,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                 ) : (
                   pendingAssignments.slice(0, 5).map((assignment) => {
                     const overdue = isOverdue(assignment.due_date)
+                    const isOnline = assignment.mode === "online"
                     
                     return (
                       <div
@@ -338,14 +342,27 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                           <div className={`w-10 h-10 border-2 flex items-center justify-center ${
                             overdue 
                               ? "border-red-500 bg-red-100" 
-                              : "border-swiss-signal bg-swiss-signal"
+                              : isOnline 
+                                ? "border-swiss-signal bg-swiss-signal"
+                                : "border-amber-500 bg-amber-100"
                           }`}>
-                            <FileText className={`w-5 h-5 ${overdue ? "text-red-500" : "text-white"}`} />
+                            {isOnline ? (
+                              <Laptop className={`w-5 h-5 ${overdue ? "text-red-500" : "text-white"}`} />
+                            ) : (
+                              <Printer className={`w-5 h-5 ${overdue ? "text-red-500" : "text-amber-600"}`} />
+                            )}
                           </div>
                           <div>
-                            <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
-                              {assignment.title}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
+                                {assignment.title}
+                              </p>
+                              {!isOnline && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500 text-amber-600 font-bold">
+                                  PAPER
+                                </Badge>
+                              )}
+                            </div>
                             <div className="flex items-center gap-2 mt-1">
                               <span className="text-xs text-swiss-lead uppercase tracking-wider font-bold">
                                 {assignment.class_name}
@@ -353,7 +370,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                               <span className={`text-xs uppercase tracking-wider font-bold ${
                                 overdue ? "text-red-600" : "text-swiss-signal"
                               }`}>
-                                {formatDueDate(assignment.due_date)}
+                                {isOnline ? "Due: " : "Exam: "}{formatDueDate(assignment.due_date)}
                               </span>
                               {assignment.max_marks > 0 && (
                                 <span className="text-xs text-swiss-lead uppercase tracking-wider font-bold">
@@ -363,15 +380,27 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                             </div>
                           </div>
                         </div>
-                        <Link href={`/student-dashboard/assignments/${assignment.id}/take`}>
+                        {isOnline ? (
+                          <Link href={`/student-dashboard/assignments/${assignment.id}/take`}>
+                            <Button 
+                              size="sm"
+                              className="bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider"
+                            >
+                              <Play className="w-4 h-4 mr-2" />
+                              Start
+                            </Button>
+                          </Link>
+                        ) : (
                           <Button 
                             size="sm"
-                            className="bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider"
+                            variant="outline"
+                            disabled
+                            className="border-amber-500 text-amber-600 font-bold uppercase tracking-wider cursor-not-allowed"
                           >
-                            <Play className="w-4 h-4 mr-2" />
-                            Start
+                            <PenLine className="w-4 h-4 mr-2" />
+                            In Class
                           </Button>
-                        </Link>
+                        )}
                       </div>
                     )
                   })
@@ -567,6 +596,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                 <div className="space-y-3">
                   {pendingAssignments.map((assignment) => {
                     const overdue = isOverdue(assignment.due_date)
+                    const isOnline = assignment.mode === "online"
                     
                     return (
                       <div
@@ -576,19 +606,30 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                         }`}
                       >
                         <div className="flex items-center gap-4">
-                          <Circle className={`w-5 h-5 ${overdue ? "text-red-500" : "text-swiss-lead"}`} />
+                          {isOnline ? (
+                            <Laptop className={`w-5 h-5 ${overdue ? "text-red-500" : "text-swiss-signal"}`} />
+                          ) : (
+                            <Printer className={`w-5 h-5 ${overdue ? "text-red-500" : "text-amber-500"}`} />
+                          )}
                           <div>
-                            <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
-                              {assignment.title}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
+                                {assignment.title}
+                              </p>
+                              {!isOnline && (
+                                <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 font-bold uppercase tracking-wider border border-amber-300">
+                                  Paper
+                                </span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-2 mt-1">
                               <span className="text-xs px-2 py-0.5 border border-swiss-ink text-swiss-ink font-bold uppercase tracking-wider">
                                 {assignment.class_name}
                               </span>
                               <span className={`text-xs uppercase tracking-wider font-bold ${
-                                overdue ? "text-red-600" : "text-swiss-signal"
+                                overdue ? "text-red-600" : isOnline ? "text-swiss-signal" : "text-amber-600"
                               }`}>
-                                {formatDueDate(assignment.due_date)}
+                                {isOnline ? "Due: " : "Exam: "}{formatDueDate(assignment.due_date)}
                               </span>
                               {assignment.max_marks > 0 && (
                                 <span className="text-xs text-swiss-lead uppercase tracking-wider font-bold">
@@ -599,15 +640,26 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                           </div>
                         </div>
                         
-                        <Link href={`/student-dashboard/assignments/${assignment.id}/take`}>
+                        {isOnline ? (
+                          <Link href={`/student-dashboard/assignments/${assignment.id}/take`}>
+                            <Button 
+                              size="sm"
+                              className="bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider"
+                            >
+                              <Play className="w-4 h-4 mr-2" />
+                              Start
+                            </Button>
+                          </Link>
+                        ) : (
                           <Button 
                             size="sm"
-                            className="bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider"
+                            disabled
+                            className="bg-amber-100 text-amber-700 border-2 border-amber-300 font-bold uppercase tracking-wider cursor-not-allowed"
                           >
-                            <Play className="w-4 h-4 mr-2" />
-                            Start
+                            <PenLine className="w-4 h-4 mr-2" />
+                            In Class
                           </Button>
-                        </Link>
+                        )}
                       </div>
                     )
                   })}
@@ -634,6 +686,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                   {completedAssignments.map((assignment) => {
                     const colors = getRAGColor(assignment.percentage)
                     const isGraded = assignment.status === "graded"
+                    const isOnline = assignment.mode === "online"
                     
                     return (
                       <div
@@ -644,14 +697,29 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                       >
                         <div className="flex items-center gap-4">
                           {isGraded ? (
-                            <CheckCircle className={`w-5 h-5 ${colors.text}`} />
+                            isOnline ? (
+                              <Laptop className={`w-5 h-5 ${colors.text}`} />
+                            ) : (
+                              <Printer className={`w-5 h-5 ${colors.text}`} />
+                            )
                           ) : (
-                            <Clock className="w-5 h-5 text-amber-500" />
+                            isOnline ? (
+                              <Laptop className="w-5 h-5 text-amber-500" />
+                            ) : (
+                              <Printer className="w-5 h-5 text-amber-500" />
+                            )
                           )}
                           <div>
-                            <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
-                              {assignment.title}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
+                                {assignment.title}
+                              </p>
+                              {!isOnline && (
+                                <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 font-bold uppercase tracking-wider border border-amber-300">
+                                  Paper
+                                </span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-2 mt-1">
                               <span className="text-xs px-2 py-0.5 border border-swiss-ink text-swiss-ink font-bold uppercase tracking-wider">
                                 {assignment.class_name}

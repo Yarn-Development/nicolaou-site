@@ -24,6 +24,7 @@ export interface AssignmentData {
   class_name: string
   due_date: string | null
   total_marks: number
+  mode: "online" | "paper"
   questions: WorksheetQuestion[]
 }
 
@@ -78,6 +79,7 @@ export async function loadAssignment(assignmentId: string): Promise<LoadAssignme
         title,
         due_date,
         status,
+        mode,
         class_id,
         classes!inner (
           id,
@@ -189,6 +191,7 @@ export async function loadAssignment(assignmentId: string): Promise<LoadAssignme
           class_name: cls.name,
           due_date: assignment.due_date,
           total_marks: totalMarks,
+          mode: (assignment.mode as "online" | "paper") || "online",
           questions: transformedQuestions,
         },
         submission: submission

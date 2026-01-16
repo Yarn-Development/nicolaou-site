@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache"
 // =====================================================
 
 export type AssignmentStatus = "draft" | "published"
+export type AssignmentMode = "online" | "paper"
 export type SubmissionStatus = "submitted" | "graded"
 
 export type Assignment = {
@@ -16,6 +17,7 @@ export type Assignment = {
   title: string
   due_date: string | null
   status: AssignmentStatus
+  mode: AssignmentMode
   content: {
     question_ids?: string[]
     description?: string
@@ -107,6 +109,7 @@ export async function createAssignment(
   options: {
     dueDate?: string
     status?: AssignmentStatus
+    mode?: AssignmentMode
   } = {}
 ) {
   const supabase = await createClient()
@@ -154,6 +157,7 @@ export async function createAssignment(
       content: questionData,
       due_date: options.dueDate || null,
       status: options.status || "draft",
+      mode: options.mode || "online",
     })
     .select()
     .single()
@@ -613,6 +617,7 @@ export async function createAssignmentWithQuestions(
   options: {
     dueDate?: string
     status?: AssignmentStatus
+    mode?: AssignmentMode
     description?: string
   } = {}
 ) {
@@ -664,6 +669,7 @@ export async function createAssignmentWithQuestions(
       },
       due_date: options.dueDate || null,
       status: options.status || "draft",
+      mode: options.mode || "online",
     })
     .select()
     .single()

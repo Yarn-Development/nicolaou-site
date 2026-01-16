@@ -21,6 +21,7 @@ export interface StudentAssignment {
   class_id: string
   class_name: string
   due_date: string | null
+  mode: "online" | "paper"
   status: "todo" | "submitted" | "graded"
   score: number | null
   max_marks: number
@@ -186,7 +187,7 @@ export async function getStudentAssignments(): Promise<{
     // Get published assignments for enrolled classes (simple query without join)
     const { data: assignments, error: assignmentsError } = await supabase
       .from("assignments")
-      .select("id, title, class_id, due_date, status, content")
+      .select("id, title, class_id, due_date, status, mode, content")
       .in("class_id", classIds)
       .eq("status", "published")
       .order("due_date", { ascending: true, nullsFirst: false })
@@ -283,6 +284,7 @@ export async function getStudentAssignments(): Promise<{
         class_id: a.class_id,
         class_name: classMap.get(a.class_id) || "Unknown Class",
         due_date: a.due_date,
+        mode: (a.mode as "online" | "paper") || "online",
         status,
         score: submission?.score ?? null,
         max_marks: maxMarks,

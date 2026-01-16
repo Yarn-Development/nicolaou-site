@@ -515,6 +515,7 @@ interface SubmittedViewProps {
   status: "submitted" | "graded"
   score?: number | null
   totalMarks?: number
+  isPaperMode?: boolean
 }
 
 export function SubmittedView({
@@ -526,6 +527,7 @@ export function SubmittedView({
   status,
   score,
   totalMarks,
+  isPaperMode = false,
 }: SubmittedViewProps) {
   return (
     <div className="min-h-screen bg-swiss-paper flex items-center justify-center p-6">
@@ -538,7 +540,10 @@ export function SubmittedView({
 
           {/* Title */}
           <h1 className="text-2xl font-black uppercase tracking-wider text-swiss-ink mb-2">
-            {status === "graded" ? "Assignment Graded" : "Assignment Submitted"}
+            {isPaperMode 
+              ? (status === "graded" ? "Paper Exam Graded" : "Paper Exam Completed")
+              : (status === "graded" ? "Assignment Graded" : "Assignment Submitted")
+            }
           </h1>
           <p className="text-sm text-swiss-lead uppercase tracking-wider font-bold mb-6">
             {title}
@@ -552,15 +557,27 @@ export function SubmittedView({
               </span>
               <span className="text-sm font-bold">{className}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-sm text-swiss-lead uppercase tracking-wider font-bold">
-                Questions Answered
-              </span>
-              <span className="text-sm font-bold">
-                {answeredCount} / {totalQuestions}
-              </span>
-            </div>
-            {submittedAt && (
+            {!isPaperMode && (
+              <div className="flex justify-between">
+                <span className="text-sm text-swiss-lead uppercase tracking-wider font-bold">
+                  Questions Answered
+                </span>
+                <span className="text-sm font-bold">
+                  {answeredCount} / {totalQuestions}
+                </span>
+              </div>
+            )}
+            {isPaperMode && (
+              <div className="flex justify-between">
+                <span className="text-sm text-swiss-lead uppercase tracking-wider font-bold">
+                  Total Questions
+                </span>
+                <span className="text-sm font-bold">
+                  {totalQuestions}
+                </span>
+              </div>
+            )}
+            {submittedAt && !isPaperMode && (
               <div className="flex justify-between">
                 <span className="text-sm text-swiss-lead uppercase tracking-wider font-bold">
                   Submitted
@@ -592,11 +609,11 @@ export function SubmittedView({
           <div className="mt-6 pt-6 border-t-2 border-swiss-ink">
             {status === "graded" ? (
               <span className="inline-block px-4 py-2 bg-green-100 border-2 border-green-500 text-green-700 font-bold uppercase tracking-wider text-sm">
-                Graded - Check Feedback
+                {isPaperMode ? "Graded - View Feedback & Revision Pack" : "Graded - Check Feedback"}
               </span>
             ) : (
               <span className="inline-block px-4 py-2 bg-amber-100 border-2 border-amber-500 text-amber-700 font-bold uppercase tracking-wider text-sm">
-                Awaiting Grade
+                {isPaperMode ? "Paper Submitted - Awaiting Marking" : "Awaiting Grade"}
               </span>
             )}
           </div>

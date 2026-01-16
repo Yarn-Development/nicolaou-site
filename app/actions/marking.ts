@@ -36,6 +36,7 @@ export interface AssignmentMarkingData {
     subject: string
     due_date: string | null
     status: string
+    mode: "online" | "paper"
   }
   questions: QuestionForMarking[]
   students: StudentForMarking[]
@@ -79,6 +80,7 @@ export async function getAssignmentMarkingData(assignmentId: string): Promise<{
         class_id,
         due_date,
         status,
+        mode,
         content,
         classes!inner(
           id,
@@ -238,6 +240,7 @@ export async function getAssignmentMarkingData(assignmentId: string): Promise<{
           subject: classData.subject,
           due_date: assignment.due_date,
           status: assignment.status,
+          mode: (assignment.mode as "online" | "paper") || "online",
         },
         questions,
         students,

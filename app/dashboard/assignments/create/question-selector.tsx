@@ -11,7 +11,6 @@ import {
   Loader2,
   Calculator,
   CheckCircle,
-  ArrowLeft,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,9 +21,8 @@ import {
   type Question,
   type QuestionBankFilters,
 } from "@/app/actions/questions"
-import { createAssignmentWithQuestions } from "@/app/actions/assignments"
+import { createAssignmentWithQuestions, type AssignmentMode } from "@/app/actions/assignments"
 import { type Class } from "@/app/actions/classes"
-import Link from "next/link"
 
 // =====================================================
 // Types
@@ -42,13 +40,14 @@ interface SelectedQuestion {
 
 interface QuestionSelectorProps {
   classes: Class[]
+  mode: AssignmentMode
 }
 
 // =====================================================
 // Main Component
 // =====================================================
 
-export function QuestionSelector({ classes }: QuestionSelectorProps) {
+export function QuestionSelector({ classes, mode }: QuestionSelectorProps) {
   const router = useRouter()
 
   // Question Bank State
@@ -181,6 +180,7 @@ export function QuestionSelector({ classes }: QuestionSelectorProps) {
         {
           dueDate: dueDate || undefined,
           status: "draft",
+          mode: mode,
         }
       )
 
@@ -236,12 +236,6 @@ export function QuestionSelector({ classes }: QuestionSelectorProps) {
       <div className="w-1/2 border-r border-border flex flex-col h-full">
         <div className="p-4 border-b border-border space-y-4">
           <div className="flex items-center gap-2">
-            <Link href="/dashboard">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="w-4 h-4 mr-1" />
-                Back
-              </Button>
-            </Link>
             <h2 className="font-bold text-lg">Question Bank</h2>
             <Badge variant="outline" className="ml-auto">
               {questions.length} questions
