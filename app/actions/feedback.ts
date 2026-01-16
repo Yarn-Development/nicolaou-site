@@ -1000,6 +1000,7 @@ export interface StudentDashboardData {
     maxMarks: number
     percentage: number | null
     feedbackReleased: boolean
+    submissionId: string | null
   }[]
   topicMastery: {
     topic: string
@@ -1048,8 +1049,8 @@ export async function getStudentDashboardData(): Promise<{
       return { success: false, error: "Profile not found" }
     }
 
-    // Get enrolled classes
-    const { data: enrollments } = await supabase
+    // Get enrolled classes (simpler query without nested profile join)
+    const { data: enrollments, error: enrollError } = await supabase
       .from("enrollments")
       .select(`
         class_id,
@@ -1057,21 +1058,37 @@ export async function getStudentDashboardData(): Promise<{
           id,
           name,
           subject,
-          teacher_id,
-          profiles!classes_teacher_id_fkey(full_name, email)
+          teacher_id
         )
       `)
       .eq("student_id", user.id)
 
+    if (enrollError) {
+      console.error("Enrollment query error:", enrollError)
+    }
+
     const enrolledClasses: StudentDashboardData["enrolledClasses"] = []
     const classIds: string[] = []
 
-    if (enrollments) {
+    if (enrollments && enrollments.length > 0) {
+      // Get teacher IDs to fetch their profiles separately
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const teacherIds = [...new Set(enrollments.map((e: any) => e.classes.teacher_id))]
+      
+      // Fetch teacher profiles
+      const { data: teachers } = await supabase
+        .from("profiles")
+        .select("id, full_name, email")
+        .in("id", teacherIds)
+
+      const teacherMap = new Map(
+        (teachers || []).map(t => [t.id, t])
+      )
+
       for (const e of enrollments) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const cls = e.classes as any
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const teacher = cls.profiles as any
+        const teacher = teacherMap.get(cls.teacher_id)
         
         enrolledClasses.push({
           id: cls.id,
@@ -1108,7 +1125,7 @@ export async function getStudentDashboardData(): Promise<{
         const assignmentIds = classAssignments.map(a => a.id)
         const { data: submissions } = await supabase
           .from("submissions")
-          .select("assignment_id, score, status, grading_data, feedback_released")
+          .select("id, assignment_id, score, status, grading_data, feedback_released")
           .eq("student_id", user.id)
           .in("assignment_id", assignmentIds)
 
@@ -1128,7 +1145,7 @@ export async function getStudentDashboardData(): Promise<{
           if (questionIds.length > 0) {
             const { data: questionData } = await supabase
               .from("questions")
-              .select("id, marks, topic")
+              .select("id, marks, topic, sub_topic")
               .in("id", questionIds)
 
             if (questionData) {
@@ -1139,7 +1156,10 @@ export async function getStudentDashboardData(): Promise<{
                 const gradingData = (submission.grading_data || {}) as Record<string, { score: number }>
                 
                 for (const q of questionData) {
-                  const key = q.topic
+                  // Use sub_topic for more granular tracking, fallback to topic
+                  const key = q.sub_topic || q.topic || "General"
+                  if (!key) continue // Skip if no topic info
+                  
                   const earned = gradingData[q.id]?.score || 0
                   const total = q.marks || 1
 
@@ -1160,7 +1180,8 @@ export async function getStudentDashboardData(): Promise<{
               ? "graded" 
               : "submitted"
 
-          const percentage = submission?.score && maxMarks > 0 
+          // Calculate percentage - handle 0 scores correctly (not falsy)
+          const percentage = submission?.score !== undefined && submission?.score !== null && maxMarks > 0 
             ? Math.round((submission.score / maxMarks) * 100) 
             : null
 
@@ -1170,10 +1191,11 @@ export async function getStudentDashboardData(): Promise<{
             className: cls.name,
             dueDate: a.due_date,
             status,
-            score: submission?.score || null,
+            score: submission?.score ?? null,
             maxMarks,
             percentage,
             feedbackReleased: submission?.feedback_released || false,
+            submissionId: submission?.id || null,
           })
         }
       }
