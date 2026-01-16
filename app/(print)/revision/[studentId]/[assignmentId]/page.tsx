@@ -1,5 +1,6 @@
 import { getStudentAssignmentFeedback } from "@/app/actions/feedback"
 import { LatexPreview } from "@/components/latex-preview"
+import Image from "next/image"
 
 interface Props {
   params: Promise<{
@@ -133,12 +134,16 @@ export default async function RevisionPrintPage({ params }: Props) {
                 <div className="mb-6">
                   {question.imageUrl ? (
                     <div className="flex justify-center">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img 
-                        src={question.imageUrl} 
-                        alt={`Question ${index + 1}`}
-                        className="max-w-full max-h-64 border border-gray-200"
-                      />
+                      <div className="relative w-full max-w-lg">
+                        <Image
+                          src={question.imageUrl}
+                          alt={`Question ${index + 1}`}
+                          width={512}
+                          height={384}
+                          className="w-full h-auto border border-gray-200"
+                          style={{ maxWidth: "100%", height: "auto", maxHeight: "256px", objectFit: "contain" }}
+                        />
+                      </div>
                     </div>
                   ) : (
                     <div className="text-base leading-relaxed">

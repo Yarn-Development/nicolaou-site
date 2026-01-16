@@ -36,6 +36,7 @@ import {
   Image as ImageIcon,
   Scissors,
 } from "lucide-react"
+import Image from "next/image"
 import { 
   uploadSnippetImage, 
   ingestQuestion,
@@ -409,11 +410,14 @@ export function IngestClient() {
                 ) : (
                   // Image viewer
                   <div className="p-4 flex items-center justify-center min-h-full">
-                    <img
+                    <Image
                       src={pdfUrl}
                       alt="Document"
-                      style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
+                      width={800}
+                      height={1100}
                       className="max-w-full"
+                      style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}
+                      unoptimized
                     />
                   </div>
                 )}
@@ -483,10 +487,14 @@ export function IngestClient() {
             {snippetPreview ? (
               <div className="space-y-3">
                 <div className="border-2 border-swiss-ink p-2 bg-white">
-                  <img
+                  <Image
                     src={snippetPreview}
                     alt="Question snippet"
-                    className="max-h-48 mx-auto"
+                    width={400}
+                    height={300}
+                    className="mx-auto"
+                    style={{ maxHeight: "192px", width: "auto", height: "auto" }}
+                    unoptimized
                   />
                 </div>
                 <div className="flex gap-2">

@@ -28,6 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import Image from "next/image"
 
 // =====================================================
 // Types
@@ -297,12 +298,16 @@ export function WorksheetPlayer({
                 <div className="border-2 border-swiss-ink bg-swiss-paper p-6 mb-6">
                   {currentQuestion.content_type === "image_ocr" && currentQuestion.image_url ? (
                     <div className="flex justify-center">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={currentQuestion.image_url}
-                        alt={`Question ${currentQuestionIndex + 1}`}
-                        className="max-w-full h-auto border border-swiss-ink/20"
-                      />
+                      <div className="relative w-full max-w-2xl">
+                        <Image
+                          src={currentQuestion.image_url}
+                          alt={`Question ${currentQuestionIndex + 1}`}
+                          width={800}
+                          height={600}
+                          className="w-full h-auto border border-swiss-ink/20"
+                          style={{ maxWidth: "100%", height: "auto" }}
+                        />
+                      </div>
                     </div>
                   ) : currentQuestion.question_latex ? (
                     <LatexPreview 

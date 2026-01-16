@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Image from "next/image"
 import { LatexPreview } from "@/components/latex-preview"
 import type { 
   StudentFeedbackData, 
@@ -152,12 +153,16 @@ function RevisionQuestionCard({ question, index, showAnswer }: RevisionQuestionC
       <div className="p-4">
         {question.contentType === "image_ocr" && question.imageUrl ? (
           <div className="flex justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={question.imageUrl}
-              alt={`Revision question ${index + 1}`}
-              className="max-w-full h-auto border border-swiss-ink/20"
-            />
+            <div className="relative w-full max-w-xl">
+              <Image
+                src={question.imageUrl}
+                alt={`Revision question ${index + 1}`}
+                width={600}
+                height={450}
+                className="w-full h-auto border border-swiss-ink/20"
+                style={{ maxWidth: "100%", height: "auto" }}
+              />
+            </div>
           </div>
         ) : question.questionLatex ? (
           <div className="text-swiss-ink">
@@ -350,8 +355,15 @@ export function StudentFeedbackSheet({ feedback, schoolLogo }: StudentFeedbackSh
               </div>
               {schoolLogo && (
                 <div className="hidden print:block">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={schoolLogo} alt="School Logo" className="h-16 w-auto" />
+                  <Image
+                    src={schoolLogo}
+                    alt="School Logo"
+                    width={64}
+                    height={64}
+                    className="h-16 w-auto"
+                    style={{ height: "64px", width: "auto" }}
+                    unoptimized
+                  />
                 </div>
               )}
             </div>
