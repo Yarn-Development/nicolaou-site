@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
   Search,
@@ -78,7 +77,6 @@ type WizardStep = "builder" | "configuration" | "success"
 // =====================================================
 
 export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps) {
-  const router = useRouter()
 
   // Wizard State
   const [currentStep, setCurrentStep] = useState<WizardStep>("builder")
