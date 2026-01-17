@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache"
 /**
  * Type definitions for Question system
  */
-export type QuestionContentType = "generated_text" | "image_ocr"
+export type QuestionContentType = "generated_text" | "image_ocr" | "official_past_paper" | "synthetic_image"
 export type QuestionDifficulty = "Foundation" | "Higher"
 export type QuestionType = "Fluency" | "Problem Solving" | "Reasoning/Proof"
 
@@ -21,7 +21,7 @@ export interface QuestionAnswerKey {
 export interface CreateQuestionInput {
   content_type: QuestionContentType
   question_latex: string
-  image_url?: string
+  image_url?: string | null
   curriculum_level: string
   topic: string
   sub_topic: string
@@ -45,6 +45,8 @@ export interface Question extends CreateQuestionInput {
   avg_score?: number | null
   meta_tags?: string[]
   verification_notes?: string | null
+  // Helper property for diagram questions
+  is_diagram_question?: boolean
 }
 
 /**

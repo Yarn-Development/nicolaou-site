@@ -12,7 +12,7 @@ export interface WorksheetQuestion {
   marks: number
   question_latex: string | null
   image_url: string | null
-  content_type: "generated_text" | "image_ocr"
+  content_type: "generated_text" | "image_ocr" | "official_past_paper" | "synthetic_image"
   topic: string
   sub_topic: string | null
   calculator_allowed: boolean

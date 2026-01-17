@@ -413,7 +413,7 @@ async function insertGeometryQuestion(params: {
 
   const questionData = {
     // Content
-    content_type: 'synthetic_diagram' as const,
+    content_type: 'synthetic_image' as const,
     question_latex: question.question_latex,
     image_url: imageUrl,
 

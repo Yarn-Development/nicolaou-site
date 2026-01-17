@@ -8,7 +8,7 @@ export type AssessmentStatus = 'draft' | 'published' | 'archived'
 export type AssessmentTier = 'foundation' | 'higher'
 export type QuestionType = 'multiple_choice' | 'short_answer' | 'long_answer' | 'calculation'
 export type GradingStatus = 'pending' | 'in_progress' | 'completed'
-export type ContentType = 'image_ocr' | 'generated_text'
+export type ContentType = 'image_ocr' | 'generated_text' | 'official_past_paper' | 'synthetic_image'
 export type DifficultyTier = 'Foundation' | 'Higher'
 
 // Answer key structure for questions
@@ -128,6 +128,8 @@ export interface Question {
   question_type: 'Fluency' | 'Problem Solving' | 'Reasoning/Proof' | null
   marks: number | null
   calculator_allowed: boolean | null
+  // Helper property for diagram questions
+  is_diagram_question?: boolean
 }
 
 export interface Database {

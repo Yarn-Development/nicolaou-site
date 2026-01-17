@@ -286,7 +286,9 @@ export default function QuestionBrowserClient() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs uppercase tracking-wider">
-                        {question.content_type === 'image_ocr' ? 'OCR' : 'AI Gen'}
+                        {question.content_type === 'image_ocr' ? 'OCR' : 
+                         question.content_type === 'synthetic_image' ? 'AI Diagram' : 
+                         question.content_type === 'official_past_paper' ? 'Past Paper' : 'AI Gen'}
                       </TableCell>
                       <TableCell>
                         <button
@@ -398,8 +400,8 @@ export default function QuestionBrowserClient() {
                   </div>
                 </div>
 
-                {/* Image (if OCR) */}
-                {selectedQuestion.content_type === 'image_ocr' && selectedQuestion.image_url && (
+                {/* Image (if OCR or synthetic_image) */}
+                {(selectedQuestion.content_type === 'image_ocr' || selectedQuestion.content_type === 'official_past_paper') && selectedQuestion.image_url && (
                   <div className="space-y-2">
                     <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
                       Original Image
@@ -411,6 +413,30 @@ export default function QuestionBrowserClient() {
                         width={700}
                         height={500}
                         className="w-full h-auto"
+                        style={{ maxWidth: "100%", height: "auto" }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Synthetic Image: Show text first, then diagram */}
+                {selectedQuestion.content_type === 'synthetic_image' && selectedQuestion.image_url && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
+                        AI Generated Diagram
+                      </label>
+                      <Badge variant="outline" className="border-2 border-swiss-signal text-swiss-signal text-[10px]">
+                        AI Diagram
+                      </Badge>
+                    </div>
+                    <div className="border-2 border-swiss-ink p-2 bg-white">
+                      <Image
+                        src={selectedQuestion.image_url}
+                        alt="AI generated diagram"
+                        width={500}
+                        height={400}
+                        className="w-full max-w-md mx-auto h-auto"
                         style={{ maxWidth: "100%", height: "auto" }}
                       />
                     </div>
@@ -487,7 +513,9 @@ export default function QuestionBrowserClient() {
                       Content Type
                     </p>
                     <p className="text-sm font-bold uppercase">
-                      {selectedQuestion.content_type === 'image_ocr' ? 'Image OCR' : 'AI Generated'}
+                      {selectedQuestion.content_type === 'image_ocr' ? 'Image OCR' : 
+                       selectedQuestion.content_type === 'synthetic_image' ? 'AI Diagram' :
+                       selectedQuestion.content_type === 'official_past_paper' ? 'Past Paper' : 'AI Generated'}
                     </p>
                   </div>
                   <div>

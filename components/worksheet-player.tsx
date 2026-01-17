@@ -296,7 +296,8 @@ export function WorksheetPlayer({
 
                 {/* Question Content */}
                 <div className="border-2 border-swiss-ink bg-swiss-paper p-6 mb-6">
-                  {currentQuestion.content_type === "image_ocr" && currentQuestion.image_url ? (
+                  {/* Image-only display for OCR and past papers */}
+                  {(currentQuestion.content_type === "image_ocr" || currentQuestion.content_type === "official_past_paper") && currentQuestion.image_url ? (
                     <div className="flex justify-center">
                       <div className="relative w-full max-w-2xl">
                         <Image
@@ -308,6 +309,38 @@ export function WorksheetPlayer({
                           style={{ maxWidth: "100%", height: "auto" }}
                         />
                       </div>
+                    </div>
+                  ) : currentQuestion.content_type === "synthetic_image" ? (
+                    /* Synthetic image: Show text first, then diagram */
+                    <div className="space-y-4">
+                      {/* AI Diagram Badge */}
+                      <div className="flex justify-end">
+                        <span className="text-[10px] px-2 py-1 border-2 border-swiss-signal text-swiss-signal font-bold uppercase tracking-wider">
+                          AI Diagram
+                        </span>
+                      </div>
+                      {/* Question Text */}
+                      {currentQuestion.question_latex && (
+                        <LatexPreview 
+                          latex={currentQuestion.question_latex} 
+                          className="text-lg"
+                        />
+                      )}
+                      {/* Diagram Image */}
+                      {currentQuestion.image_url && (
+                        <div className="flex justify-center mt-4">
+                          <div className="relative w-full max-w-md mx-auto">
+                            <Image
+                              src={currentQuestion.image_url}
+                              alt={`Diagram for Question ${currentQuestionIndex + 1}`}
+                              width={500}
+                              height={400}
+                              className="w-full h-auto border border-swiss-ink/20"
+                              style={{ maxWidth: "100%", height: "auto" }}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : currentQuestion.question_latex ? (
                     <LatexPreview 
