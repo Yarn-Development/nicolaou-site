@@ -20,10 +20,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Search, Filter, Eye, Trash2, CheckCircle2, Circle, Loader2 } from 'lucide-react'
+import { Search, Filter, Eye, Trash2, CheckCircle2, Circle, Loader2, Triangle, ImageIcon } from 'lucide-react'
 import Image from 'next/image'
 import { createClient } from '@/lib/supabase/client'
-import type { Question, DifficultyTier } from '@/lib/types/database'
+import type { Question, DifficultyTier, ContentType } from '@/lib/types/database'
 import { LatexPreview } from '@/components/latex-preview'
 
 const TOPICS = [
@@ -47,6 +47,8 @@ export default function QuestionBrowserClient() {
   const [selectedTopic, setSelectedTopic] = useState('All Topics')
   const [selectedTier, setSelectedTier] = useState<'All' | DifficultyTier>('All')
   const [verifiedFilter, setVerifiedFilter] = useState<'all' | 'verified' | 'unverified'>('all')
+  const [sourceFilter, setSourceFilter] = useState<'all' | ContentType>('all')
+  const [hasDiagramFilter, setHasDiagramFilter] = useState(false)
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null)
 
   // Fetch questions
@@ -74,6 +76,16 @@ export default function QuestionBrowserClient() {
       query = query.eq('is_verified', false)
     }
 
+    // Source filter
+    if (sourceFilter !== 'all') {
+      query = query.eq('content_type', sourceFilter)
+    }
+
+    // Has diagram filter - questions with non-null image_url
+    if (hasDiagramFilter) {
+      query = query.not('image_url', 'is', null)
+    }
+
     const { data, error } = await query
 
     if (error) {
@@ -83,7 +95,7 @@ export default function QuestionBrowserClient() {
     }
 
     setLoading(false)
-  }, [selectedTopic, selectedTier, verifiedFilter])
+  }, [selectedTopic, selectedTier, verifiedFilter, sourceFilter, hasDiagramFilter])
 
   useEffect(() => {
     fetchQuestions()
@@ -153,9 +165,9 @@ export default function QuestionBrowserClient() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
               {/* Search */}
-              <div className="space-y-2">
+              <div className="space-y-2 md:col-span-2">
                 <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
                   Search
                 </label>
@@ -204,6 +216,25 @@ export default function QuestionBrowserClient() {
                 </Select>
               </div>
 
+              {/* Source Filter */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
+                  Source
+                </label>
+                <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as 'all' | ContentType)}>
+                  <SelectTrigger className="border-2 border-swiss-ink">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sources</SelectItem>
+                    <SelectItem value="official_past_paper">Official Past Papers</SelectItem>
+                    <SelectItem value="generated_text">AI Generated (Text)</SelectItem>
+                    <SelectItem value="synthetic_image">AI Generated (Diagrams)</SelectItem>
+                    <SelectItem value="image_ocr">Image OCR</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               {/* Verified Filter */}
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
@@ -220,6 +251,28 @@ export default function QuestionBrowserClient() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            {/* Has Diagram Toggle */}
+            <div className="mt-4 pt-4 border-t border-swiss-concrete">
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={hasDiagramFilter}
+                    onChange={(e) => setHasDiagramFilter(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-6 bg-swiss-concrete border-2 border-swiss-ink rounded-full peer-checked:bg-swiss-signal transition-colors"></div>
+                  <div className="absolute left-1 top-1 w-4 h-4 bg-white border border-swiss-ink rounded-full transition-transform peer-checked:translate-x-4"></div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-swiss-lead group-hover:text-swiss-ink transition-colors" />
+                  <span className="text-sm font-bold uppercase tracking-wider text-swiss-lead group-hover:text-swiss-ink transition-colors">
+                    Has Diagram
+                  </span>
+                </div>
+              </label>
             </div>
           </CardContent>
         </Card>
@@ -286,9 +339,19 @@ export default function QuestionBrowserClient() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs uppercase tracking-wider">
-                        {question.content_type === 'image_ocr' ? 'OCR' : 
-                         question.content_type === 'synthetic_image' ? 'AI Diagram' : 
-                         question.content_type === 'official_past_paper' ? 'Past Paper' : 'AI Gen'}
+                        <div className="flex items-center gap-1">
+                          {question.content_type === 'synthetic_image' && (
+                            <Triangle className="w-3 h-3 text-swiss-signal fill-swiss-signal" />
+                          )}
+                          {question.image_url && question.content_type !== 'synthetic_image' && (
+                            <ImageIcon className="w-3 h-3 text-swiss-lead" />
+                          )}
+                          <span>
+                            {question.content_type === 'image_ocr' ? 'OCR' : 
+                             question.content_type === 'synthetic_image' ? 'AI Diagram' : 
+                             question.content_type === 'official_past_paper' ? 'Past Paper' : 'AI Gen'}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell>
                         <button

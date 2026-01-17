@@ -23,6 +23,8 @@ import {
   ClipboardList,
   GripVertical,
   BookOpen,
+  Triangle,
+  ImageIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -90,6 +92,8 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
     topic: "All",
     difficulty: "All",
     calculatorAllowed: "All",
+    source: "All",
+    hasDiagram: false,
   })
   const [selectedQuestions, setSelectedQuestions] = useState<SelectedQuestion[]>([])
 
@@ -391,6 +395,21 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 </select>
 
                 <select
+                  value={filters.source || "All"}
+                  onChange={(e) => setFilters((prev) => ({
+                    ...prev,
+                    source: e.target.value as "All" | "generated_text" | "image_ocr" | "official_past_paper" | "synthetic_image",
+                  }))}
+                  className="px-3 py-1.5 text-sm border-2 border-swiss-ink bg-swiss-paper font-bold"
+                >
+                  <option value="All">All Sources</option>
+                  <option value="official_past_paper">Official Past Papers</option>
+                  <option value="generated_text">AI Generated (Text)</option>
+                  <option value="synthetic_image">AI Generated (Diagrams)</option>
+                  <option value="image_ocr">Image OCR</option>
+                </select>
+
+                <select
                   value={
                     filters.calculatorAllowed === "All"
                       ? "All"
@@ -409,6 +428,21 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                   <option value="yes">Calculator: Yes</option>
                   <option value="no">Calculator: No</option>
                 </select>
+
+                {/* Has Diagram Toggle */}
+                <label className="flex items-center gap-2 px-3 py-1.5 text-sm border-2 border-swiss-ink bg-swiss-paper cursor-pointer hover:bg-swiss-concrete transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={filters.hasDiagram || false}
+                    onChange={(e) => setFilters((prev) => ({
+                      ...prev,
+                      hasDiagram: e.target.checked,
+                    }))}
+                    className="w-4 h-4 accent-swiss-signal"
+                  />
+                  <ImageIcon className="w-3.5 h-3.5 text-swiss-lead" />
+                  <span className="font-bold">Has Diagram</span>
+                </label>
               </div>
             </div>
 
@@ -457,6 +491,17 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                             </Badge>
                             {question.calculator_allowed && (
                               <Calculator className="w-3.5 h-3.5 text-swiss-lead" />
+                            )}
+                            {/* Synthetic Image Badge */}
+                            {question.content_type === "synthetic_image" && (
+                              <Badge variant="outline" className="text-xs border-swiss-signal text-swiss-signal font-bold flex items-center gap-1">
+                                <Triangle className="w-3 h-3 fill-swiss-signal" />
+                                Diagram
+                              </Badge>
+                            )}
+                            {/* Image indicator for other types */}
+                            {question.image_url && question.content_type !== "synthetic_image" && (
+                              <ImageIcon className="w-3.5 h-3.5 text-swiss-lead" />
                             )}
                           </div>
 

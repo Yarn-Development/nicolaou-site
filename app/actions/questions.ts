@@ -401,6 +401,8 @@ export interface QuestionBankFilters {
   difficulty?: QuestionDifficulty | "All"
   calculatorAllowed?: boolean | "All"
   isVerified?: boolean | "All"
+  source?: QuestionContentType | "All"
+  hasDiagram?: boolean
   limit?: number
   offset?: number
 }
@@ -435,6 +437,8 @@ export async function getQuestionBankQuestions(
     difficulty = "All",
     calculatorAllowed = "All",
     isVerified = "All",
+    source = "All",
+    hasDiagram = false,
     limit = 50,
     offset = 0
   } = filters
@@ -472,6 +476,16 @@ export async function getQuestionBankQuestions(
     // Apply verified filter
     if (isVerified !== "All" && typeof isVerified === "boolean") {
       query = query.eq("is_verified", isVerified)
+    }
+
+    // Apply source/content_type filter
+    if (source && source !== "All") {
+      query = query.eq("content_type", source)
+    }
+
+    // Apply has diagram filter
+    if (hasDiagram) {
+      query = query.not("image_url", "is", null)
     }
 
     // Apply pagination and ordering
