@@ -23,7 +23,6 @@ import {
   ClipboardList,
   GripVertical,
   BookOpen,
-  Triangle,
   ImageIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -31,6 +30,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { LatexPreview } from "@/components/latex-preview"
+import { SourceBadge } from "@/components/question-display"
 import {
   getQuestionBankQuestions,
   type Question,
@@ -492,25 +492,36 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                             {question.calculator_allowed && (
                               <Calculator className="w-3.5 h-3.5 text-swiss-lead" />
                             )}
-                            {/* Synthetic Image Badge */}
-                            {question.content_type === "synthetic_image" && (
-                              <Badge variant="outline" className="text-xs border-swiss-signal text-swiss-signal font-bold flex items-center gap-1">
-                                <Triangle className="w-3 h-3 fill-swiss-signal" />
-                                Diagram
-                              </Badge>
-                            )}
-                            {/* Image indicator for other types */}
-                            {question.image_url && question.content_type !== "synthetic_image" && (
-                              <ImageIcon className="w-3.5 h-3.5 text-swiss-lead" />
-                            )}
+                            {/* Content Type Badge */}
+                            <SourceBadge contentType={question.content_type} />
                           </div>
 
-                          {/* Question preview */}
-                          <div className="text-sm line-clamp-3 overflow-hidden">
-                            <LatexPreview
-                              latex={question.question_latex || ""}
-                              className="text-sm"
-                            />
+                          {/* Question preview - Text + Image for hybrid questions */}
+                          <div className="text-sm space-y-2">
+                            {/* Text content */}
+                            {question.question_latex && (
+                              <div className="line-clamp-2 overflow-hidden">
+                                <LatexPreview
+                                  latex={question.question_latex}
+                                  className="text-sm"
+                                  showSkeleton={false}
+                                />
+                              </div>
+                            )}
+                            
+                            {/* Image thumbnail for questions with images */}
+                            {question.image_url && (
+                              <div className="flex items-center gap-2 mt-2">
+                                <img
+                                  src={question.image_url}
+                                  alt="Question diagram"
+                                  className="w-16 h-12 object-cover rounded border border-swiss-ink/20 bg-white"
+                                />
+                                <span className="text-xs text-swiss-lead italic">
+                                  {question.content_type === 'synthetic_image' ? 'AI Diagram' : 'Image'}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -600,8 +611,23 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                           {question.marks} marks
                         </Badge>
                       </div>
-                      <div className="text-sm line-clamp-2 overflow-hidden">
-                        <LatexPreview latex={question.question_latex} className="text-sm" />
+                      <div className="flex items-start gap-2">
+                        {/* Image thumbnail if present */}
+                        {question.image_url && (
+                          <img
+                            src={question.image_url}
+                            alt="Question diagram"
+                            className="w-12 h-10 object-cover rounded border border-swiss-ink/20 bg-white shrink-0"
+                          />
+                        )}
+                        {/* Text content */}
+                        <div className="text-sm line-clamp-2 overflow-hidden flex-1">
+                          <LatexPreview 
+                            latex={question.question_latex} 
+                            className="text-sm" 
+                            showSkeleton={false}
+                          />
+                        </div>
                       </div>
                     </div>
 

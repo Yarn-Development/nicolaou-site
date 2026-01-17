@@ -20,10 +20,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Search, Filter, Eye, Trash2, CheckCircle2, Circle, Loader2, Triangle, ImageIcon } from 'lucide-react'
-import Image from 'next/image'
+import { Search, Filter, Eye, Trash2, CheckCircle2, Circle, Loader2, ImageIcon } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { Question, DifficultyTier, ContentType } from '@/lib/types/database'
+import { QuestionDisplay, QuestionDisplayCompact, SourceBadge } from '@/components/question-display'
 import { LatexPreview } from '@/components/latex-preview'
 
 const TOPICS = [
@@ -319,9 +319,9 @@ export default function QuestionBrowserClient() {
                 </TableHeader>
                 <TableBody>
                   {filteredQuestions.map((question) => (
-                    <TableRow key={question.id} className="border-b border-swiss-concrete">
-                      <TableCell className="font-mono text-sm max-w-md truncate">
-                        {question.question_latex || 'No LaTeX'}
+                    <TableRow key={question.id} className="border-b border-swiss-concrete hover:bg-swiss-paper/50">
+                      <TableCell className="max-w-md">
+                        <QuestionDisplayCompact question={question} />
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="border-2 border-swiss-ink">
@@ -338,20 +338,8 @@ export default function QuestionBrowserClient() {
                           {question.difficulty}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs uppercase tracking-wider">
-                        <div className="flex items-center gap-1">
-                          {question.content_type === 'synthetic_image' && (
-                            <Triangle className="w-3 h-3 text-swiss-signal fill-swiss-signal" />
-                          )}
-                          {question.image_url && question.content_type !== 'synthetic_image' && (
-                            <ImageIcon className="w-3 h-3 text-swiss-lead" />
-                          )}
-                          <span>
-                            {question.content_type === 'image_ocr' ? 'OCR' : 
-                             question.content_type === 'synthetic_image' ? 'AI Diagram' : 
-                             question.content_type === 'official_past_paper' ? 'Past Paper' : 'AI Gen'}
-                          </span>
-                        </div>
+                      <TableCell>
+                        <SourceBadge contentType={question.content_type} />
                       </TableCell>
                       <TableCell>
                         <button
@@ -443,68 +431,19 @@ export default function QuestionBrowserClient() {
                 </div>
               </CardHeader>
               <CardContent className="pt-6 space-y-6">
-                {/* Question Display */}
+                {/* Question Display - Using QuestionDisplay for clean rendering */}
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
-                    Question
+                    Question Preview
                   </label>
-                  <div className="border-2 border-swiss-ink bg-white p-4">
-                    <LatexPreview latex={selectedQuestion.question_latex || ''} />
-                  </div>
+                  <QuestionDisplay
+                    question={selectedQuestion}
+                    variant="preview"
+                    showSourceBadge={false}
+                    showTopicInfo={true}
+                    enableZoom={true}
+                  />
                 </div>
-
-                {/* Raw LaTeX */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
-                    Raw LaTeX
-                  </label>
-                  <div className="border-2 border-swiss-ink bg-swiss-concrete p-4 font-mono text-sm overflow-x-auto">
-                    {selectedQuestion.question_latex}
-                  </div>
-                </div>
-
-                {/* Image (if OCR or synthetic_image) */}
-                {(selectedQuestion.content_type === 'image_ocr' || selectedQuestion.content_type === 'official_past_paper') && selectedQuestion.image_url && (
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
-                      Original Image
-                    </label>
-                    <div className="border-2 border-swiss-ink p-2 bg-white">
-                      <Image
-                        src={selectedQuestion.image_url}
-                        alt="Original question"
-                        width={700}
-                        height={500}
-                        className="w-full h-auto"
-                        style={{ maxWidth: "100%", height: "auto" }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Synthetic Image: Show text first, then diagram */}
-                {selectedQuestion.content_type === 'synthetic_image' && selectedQuestion.image_url && (
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
-                        AI Generated Diagram
-                      </label>
-                      <Badge variant="outline" className="border-2 border-swiss-signal text-swiss-signal text-[10px]">
-                        AI Diagram
-                      </Badge>
-                    </div>
-                    <div className="border-2 border-swiss-ink p-2 bg-white">
-                      <Image
-                        src={selectedQuestion.image_url}
-                        alt="AI generated diagram"
-                        width={500}
-                        height={400}
-                        className="w-full max-w-md mx-auto h-auto"
-                        style={{ maxWidth: "100%", height: "auto" }}
-                      />
-                    </div>
-                  </div>
-                )}
 
                 {/* Answer Key (if available) */}
                 {selectedQuestion.answer_key && (
@@ -515,7 +454,7 @@ export default function QuestionBrowserClient() {
                         <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
                           Answer
                         </label>
-                        <div className="border-2 border-swiss-ink bg-swiss-concrete p-3">
+                        <div className="border-2 border-swiss-ink bg-green-50 p-3">
                           <LatexPreview 
                             latex={selectedQuestion.answer_key.answer} 
                             className="text-sm font-medium"
@@ -551,20 +490,6 @@ export default function QuestionBrowserClient() {
                           </span>
                         </div>
                       </div>
-                    )}
-
-                    {/* Curriculum Info (if available) */}
-                    {selectedQuestion.answer_key.curriculum && (
-                      <details className="space-y-2">
-                        <summary className="text-xs font-bold uppercase tracking-widest text-swiss-lead cursor-pointer hover:text-swiss-ink transition-colors">
-                          Curriculum Metadata (Click to expand)
-                        </summary>
-                        <div className="border-2 border-swiss-ink bg-swiss-concrete p-3 mt-2">
-                          <pre className="text-xs whitespace-pre-wrap font-mono">
-                            {JSON.stringify(selectedQuestion.answer_key.curriculum, null, 2)}
-                          </pre>
-                        </div>
-                      </details>
                     )}
                   </div>
                 )}
