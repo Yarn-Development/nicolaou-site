@@ -23,12 +23,14 @@ import {
   ClipboardList,
   GripVertical,
   BookOpen,
+  ImageIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { LatexPreview } from "@/components/latex-preview"
+import { SourceBadge } from "@/components/question-display"
 import {
   getQuestionBankQuestions,
   type Question,
@@ -90,6 +92,8 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
     topic: "All",
     difficulty: "All",
     calculatorAllowed: "All",
+    source: "All",
+    hasDiagram: false,
   })
   const [selectedQuestions, setSelectedQuestions] = useState<SelectedQuestion[]>([])
 
@@ -391,6 +395,21 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 </select>
 
                 <select
+                  value={filters.source || "All"}
+                  onChange={(e) => setFilters((prev) => ({
+                    ...prev,
+                    source: e.target.value as "All" | "generated_text" | "image_ocr" | "official_past_paper" | "synthetic_image",
+                  }))}
+                  className="px-3 py-1.5 text-sm border-2 border-swiss-ink bg-swiss-paper font-bold"
+                >
+                  <option value="All">All Sources</option>
+                  <option value="official_past_paper">Official Past Papers</option>
+                  <option value="generated_text">AI Generated (Text)</option>
+                  <option value="synthetic_image">AI Generated (Diagrams)</option>
+                  <option value="image_ocr">Image OCR</option>
+                </select>
+
+                <select
                   value={
                     filters.calculatorAllowed === "All"
                       ? "All"
@@ -409,6 +428,21 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                   <option value="yes">Calculator: Yes</option>
                   <option value="no">Calculator: No</option>
                 </select>
+
+                {/* Has Diagram Toggle */}
+                <label className="flex items-center gap-2 px-3 py-1.5 text-sm border-2 border-swiss-ink bg-swiss-paper cursor-pointer hover:bg-swiss-concrete transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={filters.hasDiagram || false}
+                    onChange={(e) => setFilters((prev) => ({
+                      ...prev,
+                      hasDiagram: e.target.checked,
+                    }))}
+                    className="w-4 h-4 accent-swiss-signal"
+                  />
+                  <ImageIcon className="w-3.5 h-3.5 text-swiss-lead" />
+                  <span className="font-bold">Has Diagram</span>
+                </label>
               </div>
             </div>
 
@@ -458,14 +492,36 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                             {question.calculator_allowed && (
                               <Calculator className="w-3.5 h-3.5 text-swiss-lead" />
                             )}
+                            {/* Content Type Badge */}
+                            <SourceBadge contentType={question.content_type} />
                           </div>
 
-                          {/* Question preview */}
-                          <div className="text-sm line-clamp-3 overflow-hidden">
-                            <LatexPreview
-                              latex={question.question_latex || ""}
-                              className="text-sm"
-                            />
+                          {/* Question preview - Text + Image for hybrid questions */}
+                          <div className="text-sm space-y-2">
+                            {/* Text content */}
+                            {question.question_latex && (
+                              <div className="line-clamp-2 overflow-hidden">
+                                <LatexPreview
+                                  latex={question.question_latex}
+                                  className="text-sm"
+                                  showSkeleton={false}
+                                />
+                              </div>
+                            )}
+                            
+                            {/* Image thumbnail for questions with images */}
+                            {question.image_url && (
+                              <div className="flex items-center gap-2 mt-2">
+                                <img
+                                  src={question.image_url}
+                                  alt="Question diagram"
+                                  className="w-16 h-12 object-cover rounded border border-swiss-ink/20 bg-white"
+                                />
+                                <span className="text-xs text-swiss-lead italic">
+                                  {question.content_type === 'synthetic_image' ? 'AI Diagram' : 'Image'}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -555,8 +611,23 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                           {question.marks} marks
                         </Badge>
                       </div>
-                      <div className="text-sm line-clamp-2 overflow-hidden">
-                        <LatexPreview latex={question.question_latex} className="text-sm" />
+                      <div className="flex items-start gap-2">
+                        {/* Image thumbnail if present */}
+                        {question.image_url && (
+                          <img
+                            src={question.image_url}
+                            alt="Question diagram"
+                            className="w-12 h-10 object-cover rounded border border-swiss-ink/20 bg-white shrink-0"
+                          />
+                        )}
+                        {/* Text content */}
+                        <div className="text-sm line-clamp-2 overflow-hidden flex-1">
+                          <LatexPreview 
+                            latex={question.question_latex} 
+                            className="text-sm" 
+                            showSkeleton={false}
+                          />
+                        </div>
                       </div>
                     </div>
 

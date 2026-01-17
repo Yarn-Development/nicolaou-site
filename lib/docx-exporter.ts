@@ -2,7 +2,11 @@
  * Word Document Exporter for Exam Builder
  * 
  * Exports exam questions to a .docx file using the docx library.
- * Handles both image_ocr and generated_text content types.
+ * Handles all content types:
+ *   - image_ocr: Scanned past paper images with optional OCR text
+ *   - generated_text: AI-generated text-only questions
+ *   - synthetic_image: AI-generated questions with diagrams (text + image)
+ *   - official_past_paper: Official exam board questions
  * Converts LaTeX to readable Unicode math notation for Word.
  */
 
@@ -25,7 +29,7 @@ import { saveAs } from "file-saver"
 
 export interface ExamQuestion {
   id: string
-  content_type: "image_ocr" | "generated_text"
+  content_type: "image_ocr" | "generated_text" | "synthetic_image" | "official_past_paper"
   question_latex: string | null
   image_url: string | null
   topic: string
@@ -629,37 +633,79 @@ export async function exportExamToWord(
     docChildren.push(createQuestionNumber(questionNum, question.marks))
 
     // Question content based on type
-    if (question.content_type === "image_ocr" && question.image_url) {
-      // Try to fetch and embed the image
-      const imageBuffer = await fetchImageAsBuffer(question.image_url)
+    if (question.content_type === "synthetic_image") {
+      // For synthetic_image: render text FIRST, then the diagram image below
+      if (question.question_latex) {
+        const contentParagraphs = createQuestionContent(question.question_latex, preserveLatex)
+        docChildren.push(...contentParagraphs)
+      }
       
-      if (imageBuffer) {
-        try {
+      // Then render the diagram image
+      if (question.image_url) {
+        const imageBuffer = await fetchImageAsBuffer(question.image_url)
+        if (imageBuffer) {
+          try {
+            docChildren.push(
+              new Paragraph({
+                children: [
+                  new ImageRun({
+                    data: imageBuffer,
+                    transformation: {
+                      width: 350,
+                      height: 280,
+                    },
+                    type: "png",
+                  }),
+                ],
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 200, after: 200 },
+              })
+            )
+          } catch (imgError) {
+            console.error("Error adding diagram to document:", imgError)
+            docChildren.push(
+              createQuestionText(`[Diagram: ${question.image_url}]`)
+            )
+          }
+        } else {
           docChildren.push(
-            new Paragraph({
-              children: [
-                new ImageRun({
-                  data: imageBuffer,
-                  transformation: {
-                    width: 400,
-                    height: 300,
-                  },
-                  type: "png",
-                }),
-              ],
-              spacing: { after: 200 },
-            })
-          )
-        } catch (imgError) {
-          console.error("Error adding image to document:", imgError)
-          docChildren.push(
-            createQuestionText(`[Image: ${question.image_url}]`)
+            createQuestionText(`[Diagram could not be loaded: ${question.image_url}]`)
           )
         }
-      } else {
-        docChildren.push(
-          createQuestionText(`[Image could not be loaded: ${question.image_url}]`)
-        )
+      }
+    } else if (question.content_type === "image_ocr" || question.content_type === "official_past_paper") {
+      // For image_ocr and official_past_paper: show image first, then optional text
+      if (question.image_url) {
+        const imageBuffer = await fetchImageAsBuffer(question.image_url)
+        
+        if (imageBuffer) {
+          try {
+            docChildren.push(
+              new Paragraph({
+                children: [
+                  new ImageRun({
+                    data: imageBuffer,
+                    transformation: {
+                      width: 400,
+                      height: 300,
+                    },
+                    type: "png",
+                  }),
+                ],
+                spacing: { after: 200 },
+              })
+            )
+          } catch (imgError) {
+            console.error("Error adding image to document:", imgError)
+            docChildren.push(
+              createQuestionText(`[Image: ${question.image_url}]`)
+            )
+          }
+        } else {
+          docChildren.push(
+            createQuestionText(`[Image could not be loaded: ${question.image_url}]`)
+          )
+        }
       }
       
       // Also include LaTeX text if available
@@ -668,7 +714,7 @@ export async function exportExamToWord(
         docChildren.push(...contentParagraphs)
       }
     } else if (question.question_latex) {
-      // Render LaTeX content
+      // generated_text: Render LaTeX content only
       const contentParagraphs = createQuestionContent(question.question_latex, preserveLatex)
       docChildren.push(...contentParagraphs)
     } else {

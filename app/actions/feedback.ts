@@ -589,7 +589,7 @@ export interface RevisionQuestionData {
   id: string
   questionLatex: string
   imageUrl: string | null
-  contentType: "generated_text" | "image_ocr"
+  contentType: "generated_text" | "image_ocr" | "synthetic_image" | "official_past_paper"
   marks: number
   topic: string
   subTopic: string

@@ -1,7 +1,19 @@
-import { Question } from "@/components/question-card"
-
-// Re-export the Question type for convenience
-export type { Question }
+/**
+ * Legacy Question type for mock data
+ * Note: This is used by the exam-builder which is currently deprecated/orphaned
+ */
+export interface Question {
+  id: string
+  questionText: string
+  markSchemeText: string
+  tier: "Higher" | "Foundation"
+  level: "GCSE" | "A-Level"
+  topic: string
+  learningObjective: string
+  calculatorAllowed: boolean
+  difficulty: number
+  marks: number
+}
 
 export const mockQuestions: Question[] = [
   {

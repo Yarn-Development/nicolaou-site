@@ -20,10 +20,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Search, Filter, Eye, Trash2, CheckCircle2, Circle, Loader2 } from 'lucide-react'
-import Image from 'next/image'
+import { Search, Filter, Eye, Trash2, CheckCircle2, Circle, Loader2, ImageIcon } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import type { Question, DifficultyTier } from '@/lib/types/database'
+import type { Question, DifficultyTier, ContentType } from '@/lib/types/database'
+import { QuestionDisplay, QuestionDisplayCompact, SourceBadge } from '@/components/question-display'
 import { LatexPreview } from '@/components/latex-preview'
 
 const TOPICS = [
@@ -47,6 +47,8 @@ export default function QuestionBrowserClient() {
   const [selectedTopic, setSelectedTopic] = useState('All Topics')
   const [selectedTier, setSelectedTier] = useState<'All' | DifficultyTier>('All')
   const [verifiedFilter, setVerifiedFilter] = useState<'all' | 'verified' | 'unverified'>('all')
+  const [sourceFilter, setSourceFilter] = useState<'all' | ContentType>('all')
+  const [hasDiagramFilter, setHasDiagramFilter] = useState(false)
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null)
 
   // Fetch questions
@@ -74,6 +76,16 @@ export default function QuestionBrowserClient() {
       query = query.eq('is_verified', false)
     }
 
+    // Source filter
+    if (sourceFilter !== 'all') {
+      query = query.eq('content_type', sourceFilter)
+    }
+
+    // Has diagram filter - questions with non-null image_url
+    if (hasDiagramFilter) {
+      query = query.not('image_url', 'is', null)
+    }
+
     const { data, error } = await query
 
     if (error) {
@@ -83,7 +95,7 @@ export default function QuestionBrowserClient() {
     }
 
     setLoading(false)
-  }, [selectedTopic, selectedTier, verifiedFilter])
+  }, [selectedTopic, selectedTier, verifiedFilter, sourceFilter, hasDiagramFilter])
 
   useEffect(() => {
     fetchQuestions()
@@ -153,9 +165,9 @@ export default function QuestionBrowserClient() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
               {/* Search */}
-              <div className="space-y-2">
+              <div className="space-y-2 md:col-span-2">
                 <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
                   Search
                 </label>
@@ -204,6 +216,25 @@ export default function QuestionBrowserClient() {
                 </Select>
               </div>
 
+              {/* Source Filter */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
+                  Source
+                </label>
+                <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as 'all' | ContentType)}>
+                  <SelectTrigger className="border-2 border-swiss-ink">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sources</SelectItem>
+                    <SelectItem value="official_past_paper">Official Past Papers</SelectItem>
+                    <SelectItem value="generated_text">AI Generated (Text)</SelectItem>
+                    <SelectItem value="synthetic_image">AI Generated (Diagrams)</SelectItem>
+                    <SelectItem value="image_ocr">Image OCR</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               {/* Verified Filter */}
               <div className="space-y-2">
                 <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
@@ -220,6 +251,28 @@ export default function QuestionBrowserClient() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            {/* Has Diagram Toggle */}
+            <div className="mt-4 pt-4 border-t border-swiss-concrete">
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    checked={hasDiagramFilter}
+                    onChange={(e) => setHasDiagramFilter(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-10 h-6 bg-swiss-concrete border-2 border-swiss-ink rounded-full peer-checked:bg-swiss-signal transition-colors"></div>
+                  <div className="absolute left-1 top-1 w-4 h-4 bg-white border border-swiss-ink rounded-full transition-transform peer-checked:translate-x-4"></div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-swiss-lead group-hover:text-swiss-ink transition-colors" />
+                  <span className="text-sm font-bold uppercase tracking-wider text-swiss-lead group-hover:text-swiss-ink transition-colors">
+                    Has Diagram
+                  </span>
+                </div>
+              </label>
             </div>
           </CardContent>
         </Card>
@@ -266,9 +319,9 @@ export default function QuestionBrowserClient() {
                 </TableHeader>
                 <TableBody>
                   {filteredQuestions.map((question) => (
-                    <TableRow key={question.id} className="border-b border-swiss-concrete">
-                      <TableCell className="font-mono text-sm max-w-md truncate">
-                        {question.question_latex || 'No LaTeX'}
+                    <TableRow key={question.id} className="border-b border-swiss-concrete hover:bg-swiss-paper/50">
+                      <TableCell className="max-w-md">
+                        <QuestionDisplayCompact question={question} />
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="border-2 border-swiss-ink">
@@ -285,8 +338,8 @@ export default function QuestionBrowserClient() {
                           {question.difficulty}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs uppercase tracking-wider">
-                        {question.content_type === 'image_ocr' ? 'OCR' : 'AI Gen'}
+                      <TableCell>
+                        <SourceBadge contentType={question.content_type} />
                       </TableCell>
                       <TableCell>
                         <button
@@ -378,44 +431,19 @@ export default function QuestionBrowserClient() {
                 </div>
               </CardHeader>
               <CardContent className="pt-6 space-y-6">
-                {/* Question Display */}
+                {/* Question Display - Using QuestionDisplay for clean rendering */}
                 <div className="space-y-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
-                    Question
+                    Question Preview
                   </label>
-                  <div className="border-2 border-swiss-ink bg-white p-4">
-                    <LatexPreview latex={selectedQuestion.question_latex || ''} />
-                  </div>
+                  <QuestionDisplay
+                    question={selectedQuestion}
+                    variant="preview"
+                    showSourceBadge={false}
+                    showTopicInfo={true}
+                    enableZoom={true}
+                  />
                 </div>
-
-                {/* Raw LaTeX */}
-                <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
-                    Raw LaTeX
-                  </label>
-                  <div className="border-2 border-swiss-ink bg-swiss-concrete p-4 font-mono text-sm overflow-x-auto">
-                    {selectedQuestion.question_latex}
-                  </div>
-                </div>
-
-                {/* Image (if OCR) */}
-                {selectedQuestion.content_type === 'image_ocr' && selectedQuestion.image_url && (
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
-                      Original Image
-                    </label>
-                    <div className="border-2 border-swiss-ink p-2 bg-white">
-                      <Image
-                        src={selectedQuestion.image_url}
-                        alt="Original question"
-                        width={700}
-                        height={500}
-                        className="w-full h-auto"
-                        style={{ maxWidth: "100%", height: "auto" }}
-                      />
-                    </div>
-                  </div>
-                )}
 
                 {/* Answer Key (if available) */}
                 {selectedQuestion.answer_key && (
@@ -426,7 +454,7 @@ export default function QuestionBrowserClient() {
                         <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
                           Answer
                         </label>
-                        <div className="border-2 border-swiss-ink bg-swiss-concrete p-3">
+                        <div className="border-2 border-swiss-ink bg-green-50 p-3">
                           <LatexPreview 
                             latex={selectedQuestion.answer_key.answer} 
                             className="text-sm font-medium"
@@ -463,20 +491,6 @@ export default function QuestionBrowserClient() {
                         </div>
                       </div>
                     )}
-
-                    {/* Curriculum Info (if available) */}
-                    {selectedQuestion.answer_key.curriculum && (
-                      <details className="space-y-2">
-                        <summary className="text-xs font-bold uppercase tracking-widest text-swiss-lead cursor-pointer hover:text-swiss-ink transition-colors">
-                          Curriculum Metadata (Click to expand)
-                        </summary>
-                        <div className="border-2 border-swiss-ink bg-swiss-concrete p-3 mt-2">
-                          <pre className="text-xs whitespace-pre-wrap font-mono">
-                            {JSON.stringify(selectedQuestion.answer_key.curriculum, null, 2)}
-                          </pre>
-                        </div>
-                      </details>
-                    )}
                   </div>
                 )}
 
@@ -487,7 +501,9 @@ export default function QuestionBrowserClient() {
                       Content Type
                     </p>
                     <p className="text-sm font-bold uppercase">
-                      {selectedQuestion.content_type === 'image_ocr' ? 'Image OCR' : 'AI Generated'}
+                      {selectedQuestion.content_type === 'image_ocr' ? 'Image OCR' : 
+                       selectedQuestion.content_type === 'synthetic_image' ? 'AI Diagram' :
+                       selectedQuestion.content_type === 'official_past_paper' ? 'Past Paper' : 'AI Generated'}
                     </p>
                   </div>
                   <div>

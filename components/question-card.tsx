@@ -1,101 +1,207 @@
 "use client"
 
-import { Plus } from "lucide-react"
+import { Plus, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
-
-export interface Question {
-  id: string
-  questionText: string
-  markSchemeText: string
-  tier: "Higher" | "Foundation"
-  level: "GCSE" | "A-Level"
-  topic: string
-  learningObjective: string
-  calculatorAllowed: boolean
-  difficulty: number // 1-5
-  marks: number
-}
+import { QuestionDisplay, SourceBadge } from "@/components/question-display"
+import type { Question } from "@/lib/types/database"
 
 interface QuestionCardProps {
   question: Question
   onAdd: (question: Question) => void
   disabled?: boolean
   isAdded?: boolean
+  /** Show full question preview or compact view */
+  variant?: 'full' | 'compact'
 }
 
-export function QuestionCard({ question, onAdd, disabled, isAdded }: QuestionCardProps) {
+/**
+ * QuestionCard - Professional question card for the question bank
+ * 
+ * Uses QuestionDisplay internally for consistent rendering.
+ * Never shows raw LaTeX - always rendered through LatexPreview.
+ */
+export function QuestionCard({ 
+  question, 
+  onAdd, 
+  disabled, 
+  isAdded,
+  variant = 'compact'
+}: QuestionCardProps) {
   return (
-    <div className="border-2 border-swiss-ink bg-swiss-paper p-4 hover:bg-swiss-concrete transition-colors group">
+    <div className={`
+      border-2 border-swiss-ink bg-swiss-paper
+      hover:bg-swiss-concrete transition-colors group
+      ${isAdded ? 'ring-2 ring-green-500 ring-offset-2' : ''}
+    `}>
       {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-black uppercase tracking-widest text-swiss-signal">
-              {question.id}
-            </span>
-            <span className="text-xs font-bold uppercase tracking-wider px-2 py-1 bg-swiss-ink text-white">
-              {question.marks} {question.marks === 1 ? "Mark" : "Marks"}
-            </span>
+      <div className="p-4 border-b border-swiss-ink/10">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            {/* Source Badge & Marks */}
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <SourceBadge contentType={question.content_type} />
+              {question.marks && (
+                <span className="text-xs font-bold uppercase tracking-wider px-2 py-1 bg-swiss-ink text-white">
+                  {question.marks} {question.marks === 1 ? "Mark" : "Marks"}
+                </span>
+              )}
+              {question.calculator_allowed !== null && (
+                <span className="text-xs font-bold uppercase tracking-wider px-2 py-1 border border-swiss-ink/30 text-swiss-ink">
+                  {question.calculator_allowed ? "Calculator" : "Non-Calc"}
+                </span>
+              )}
+            </div>
+
+            {/* Topic Info */}
+            {(question.topic_name || question.sub_topic_name) && (
+              <div className="flex items-center gap-2 text-xs text-swiss-lead">
+                {question.topic_name && (
+                  <span className="font-bold">{question.topic_name}</span>
+                )}
+                {question.sub_topic_name && (
+                  <>
+                    <span className="text-swiss-ink/30">/</span>
+                    <span>{question.sub_topic_name}</span>
+                  </>
+                )}
+              </div>
+            )}
           </div>
-          <p className="text-sm font-medium leading-relaxed text-swiss-ink line-clamp-2 mb-3">
-            {question.questionText}
-          </p>
+
+          {/* Add Button */}
+          <Button
+            onClick={() => onAdd(question)}
+            disabled={disabled || isAdded}
+            className={`
+              font-bold uppercase tracking-wider text-xs px-4 py-2
+              transition-colors duration-200 flex-shrink-0
+              ${isAdded 
+                ? "bg-green-500 text-white border-2 border-green-600 hover:bg-green-500" 
+                : "bg-swiss-signal text-white hover:bg-swiss-ink"
+              }
+              disabled:opacity-50 disabled:cursor-not-allowed
+            `}
+          >
+            {isAdded ? (
+              <>
+                <Check className="h-4 w-4 mr-1" />
+                Added
+              </>
+            ) : (
+              <>
+                <Plus className="h-4 w-4 mr-1" />
+                Add
+              </>
+            )}
+          </Button>
         </div>
       </div>
 
-      {/* Tags */}
-      <div className="flex flex-wrap gap-2 mb-3">
-        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 border border-swiss-ink">
-          {question.tier}
-        </span>
-        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 border border-swiss-ink">
-          {question.level}
-        </span>
-        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 border border-swiss-ink">
-          {question.topic}
-        </span>
-        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 border border-swiss-ink">
-          {question.calculatorAllowed ? "Calculator" : "Non-Calc"}
-        </span>
+      {/* Question Content */}
+      <div className="p-4">
+        <QuestionDisplay
+          question={question}
+          variant="inline"
+          showSourceBadge={false}
+          showTopicInfo={false}
+          enableZoom={true}
+          maxHeight={variant === 'compact' ? '200px' : undefined}
+        />
       </div>
 
-      {/* Difficulty */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          {[...Array(5)].map((_, i) => (
-            <div
-              key={i}
-              className={`w-3 h-3 ${
-                i < question.difficulty ? "bg-swiss-signal" : "bg-swiss-concrete border border-swiss-ink"
-              }`}
-            />
-          ))}
-          <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead ml-2">
-            Difficulty
+      {/* Footer - Metadata */}
+      <div className="px-4 pb-4">
+        <div className="flex flex-wrap gap-2 pt-3 border-t border-swiss-ink/10">
+          {/* Difficulty */}
+          <span className={`
+            text-[10px] font-bold uppercase tracking-wider px-2 py-1 border
+            ${question.difficulty === 'Higher' 
+              ? 'border-purple-500 text-purple-700 bg-purple-50' 
+              : 'border-blue-500 text-blue-700 bg-blue-50'
+            }
+          `}>
+            {question.difficulty}
           </span>
+
+          {/* Question Type */}
+          {question.question_type && (
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 border border-swiss-ink/30 text-swiss-ink">
+              {question.question_type}
+            </span>
+          )}
+
+          {/* Curriculum Level */}
+          {question.curriculum_level && (
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 border border-swiss-ink/30 text-swiss-ink">
+              {question.curriculum_level}
+            </span>
+          )}
+
+          {/* Usage Stats */}
+          {question.times_used > 0 && (
+            <span className="text-[10px] font-medium text-swiss-lead ml-auto">
+              Used {question.times_used}x
+            </span>
+          )}
         </div>
+      </div>
+    </div>
+  )
+}
 
-        {/* Add Button */}
-        <Button
-          onClick={() => onAdd(question)}
-          disabled={disabled || isAdded}
-          className={`${
-            isAdded 
-              ? "bg-swiss-ink/20 text-swiss-ink border-2 border-swiss-ink/40" 
-              : "bg-swiss-signal text-white hover:bg-swiss-ink"
-          } font-bold uppercase tracking-wider text-xs px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200`}
-        >
-          <Plus className="h-4 w-4 mr-1" />
-          {isAdded ? "Added" : "Add"}
-        </Button>
+/**
+ * QuestionCardCompact - Minimal card for lists and tables
+ */
+export function QuestionCardCompact({
+  question,
+  onAdd,
+  isAdded,
+  disabled,
+}: QuestionCardProps) {
+  return (
+    <div className={`
+      flex items-center gap-4 p-3
+      border border-swiss-ink/20 bg-white
+      hover:bg-swiss-paper transition-colors
+      ${isAdded ? 'ring-1 ring-green-500' : ''}
+    `}>
+      {/* Source indicator */}
+      <SourceBadge contentType={question.content_type} />
+
+      {/* Content preview */}
+      <div className="flex-1 min-w-0">
+        <QuestionDisplay
+          question={question}
+          variant="inline"
+          showSourceBadge={false}
+          enableZoom={false}
+          maxHeight="60px"
+          className="text-sm"
+        />
       </div>
 
-      {/* Learning Objective */}
-      <div className="mt-3 pt-3 border-t border-swiss-ink">
-        <p className="text-xs text-swiss-lead font-medium line-clamp-1">
-          {question.learningObjective}
-        </p>
-      </div>
+      {/* Marks */}
+      {question.marks && (
+        <span className="text-xs font-bold text-swiss-lead flex-shrink-0">
+          {question.marks}m
+        </span>
+      )}
+
+      {/* Add button */}
+      <Button
+        size="sm"
+        onClick={() => onAdd(question)}
+        disabled={disabled || isAdded}
+        className={`
+          flex-shrink-0 text-xs
+          ${isAdded 
+            ? "bg-green-100 text-green-700 hover:bg-green-100" 
+            : "bg-swiss-signal text-white hover:bg-swiss-ink"
+          }
+        `}
+      >
+        {isAdded ? <Check className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+      </Button>
     </div>
   )
 }

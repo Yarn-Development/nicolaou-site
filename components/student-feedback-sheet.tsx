@@ -151,18 +151,49 @@ function RevisionQuestionCard({ question, index, showAnswer }: RevisionQuestionC
 
       {/* Question Content */}
       <div className="p-4">
-        {question.contentType === "image_ocr" && question.imageUrl ? (
-          <div className="flex justify-center">
-            <div className="relative w-full max-w-xl">
-              <Image
-                src={question.imageUrl}
-                alt={`Revision question ${index + 1}`}
-                width={600}
-                height={450}
-                className="w-full h-auto border border-swiss-ink/20"
-                style={{ maxWidth: "100%", height: "auto" }}
-              />
+        {question.contentType === "synthetic_image" ? (
+          // For synthetic_image: text first, then diagram image
+          <div className="space-y-4">
+            {question.questionLatex && (
+              <div className="text-swiss-ink">
+                <LatexPreview latex={question.questionLatex} className="text-base" />
+              </div>
+            )}
+            {question.imageUrl && (
+              <div className="flex justify-center">
+                <div className="relative w-full max-w-md">
+                  <Image
+                    src={question.imageUrl}
+                    alt={`Diagram for question ${index + 1}`}
+                    width={400}
+                    height={320}
+                    className="w-full h-auto border border-swiss-ink/20"
+                    style={{ maxWidth: "100%", height: "auto" }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (question.contentType === "image_ocr" || question.contentType === "official_past_paper") && question.imageUrl ? (
+          // For image_ocr and official_past_paper: image first, then optional text
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <div className="relative w-full max-w-xl">
+                <Image
+                  src={question.imageUrl}
+                  alt={`Revision question ${index + 1}`}
+                  width={600}
+                  height={450}
+                  className="w-full h-auto border border-swiss-ink/20"
+                  style={{ maxWidth: "100%", height: "auto" }}
+                />
+              </div>
             </div>
+            {question.questionLatex && (
+              <div className="text-swiss-ink">
+                <LatexPreview latex={question.questionLatex} className="text-base" />
+              </div>
+            )}
           </div>
         ) : question.questionLatex ? (
           <div className="text-swiss-ink">
