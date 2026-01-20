@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { BarChart, FileText, LayoutDashboard, Settings, Sparkles, Users, ChevronLeft, ChevronRight, Database, ClipboardList, ClipboardCheck, PlusCircle } from "lucide-react"
+import { BarChart, FileText, LayoutDashboard, Settings, Users, ChevronLeft, ChevronRight, Database, ClipboardList, ClipboardCheck, PlusCircle, Upload } from "lucide-react"
 
 export function DashboardSidebar() {
   const pathname = usePathname()
@@ -61,9 +61,9 @@ export function DashboardSidebar() {
       number: "08"
     },
     {
-      title: "Create Question",
-      href: "/dashboard/questions",
-      icon: <Sparkles className="h-5 w-5" />,
+      title: "Upload Paper",
+      href: "/dashboard/assignments/external",
+      icon: <Upload className="h-5 w-5" />,
       number: "09"
     },
   ]
