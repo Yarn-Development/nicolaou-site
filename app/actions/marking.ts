@@ -14,6 +14,9 @@ export interface QuestionForMarking {
   topic: string
   sub_topic: string
   difficulty: string
+  // Ghost question fields (for external paper uploads)
+  is_ghost?: boolean
+  custom_question_number?: string | null
 }
 
 export interface StudentForMarking {
@@ -37,6 +40,9 @@ export interface AssignmentMarkingData {
     due_date: string | null
     status: string
     mode: "online" | "paper"
+    // External paper fields
+    source_type: "bank_builder" | "external_upload"
+    resource_url: string | null
   }
   questions: QuestionForMarking[]
   students: StudentForMarking[]
@@ -82,6 +88,8 @@ export async function getAssignmentMarkingData(assignmentId: string): Promise<{
         status,
         mode,
         content,
+        source_type,
+        resource_url,
         classes!inner(
           id,
           name,
@@ -121,6 +129,7 @@ export async function getAssignmentMarkingData(assignmentId: string): Promise<{
 
     if (!junctionError && junctionQuestions && junctionQuestions.length > 0) {
       // Use junction table data (maintains proper order)
+      // Now supports both bank questions and ghost questions (external papers)
       questions = junctionQuestions.map((q: {
         question_id: string
         question_latex: string
@@ -128,6 +137,8 @@ export async function getAssignmentMarkingData(assignmentId: string): Promise<{
         topic: string
         sub_topic: string
         difficulty: string
+        custom_question_number: string | null
+        is_ghost: boolean
       }) => ({
         id: q.question_id,
         question_latex: q.question_latex,
@@ -135,6 +146,8 @@ export async function getAssignmentMarkingData(assignmentId: string): Promise<{
         topic: q.topic,
         sub_topic: q.sub_topic,
         difficulty: q.difficulty,
+        is_ghost: q.is_ghost || false,
+        custom_question_number: q.custom_question_number,
       }))
     } else {
       // Fallback to JSONB content.question_ids
@@ -241,6 +254,8 @@ export async function getAssignmentMarkingData(assignmentId: string): Promise<{
           due_date: assignment.due_date,
           status: assignment.status,
           mode: (assignment.mode as "online" | "paper") || "online",
+          source_type: (assignment.source_type as "bank_builder" | "external_upload") || "bank_builder",
+          resource_url: assignment.resource_url || null,
         },
         questions,
         students,

@@ -11,6 +11,10 @@ export type GradingStatus = 'pending' | 'in_progress' | 'completed'
 export type ContentType = 'image_ocr' | 'generated_text' | 'official_past_paper' | 'synthetic_image'
 export type DifficultyTier = 'Foundation' | 'Higher'
 
+// External Paper Mapper types
+export type AssignmentSourceType = 'bank_builder' | 'external_upload'
+export type AssignmentMode = 'online' | 'paper'
+
 // Answer key structure for questions
 export interface QuestionAnswerKey {
   answer?: string
@@ -132,6 +136,77 @@ export interface Question {
   is_diagram_question?: boolean
 }
 
+// =====================================================
+// Assignment types (for assignments table)
+// =====================================================
+
+export interface Assignment {
+  id: string
+  class_id: string
+  title: string
+  due_date: string | null
+  status: 'draft' | 'published'
+  mode: AssignmentMode
+  source_type: AssignmentSourceType
+  resource_url: string | null
+  content: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+// =====================================================
+// Assignment Questions types (ghost question support)
+// =====================================================
+
+export interface AssignmentQuestionItem {
+  id: string
+  assignment_id: string
+  question_id: string | null  // Nullable for ghost questions
+  order_index: number
+  custom_marks: number | null
+  // Ghost question fields (used when question_id is null)
+  custom_question_number: string | null
+  custom_topic: string | null
+  custom_sub_topic: string | null
+  created_at: string
+}
+
+/**
+ * Result from get_assignment_questions RPC function
+ * Supports both bank questions and ghost questions (external papers)
+ */
+export interface AssignmentQuestionResult {
+  question_id: string
+  order_index: number
+  marks: number
+  question_latex: string
+  topic: string
+  sub_topic: string
+  difficulty: string
+  question_type: string
+  calculator_allowed: boolean
+  answer_key: Record<string, unknown>
+  custom_question_number: string | null
+  is_ghost: boolean
+}
+
+// =====================================================
+// Submission types
+// =====================================================
+
+export interface Submission {
+  id: string
+  assignment_id: string
+  student_id: string
+  score: number | null
+  status: 'submitted' | 'graded' | 'in_progress'
+  answers: Record<string, unknown>
+  grading_data: Record<string, { score: number }> | null
+  submitted_at: string
+  graded_at: string | null
+  feedback_released: boolean
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -165,6 +240,21 @@ export interface Database {
         Insert: Omit<Question, 'id' | 'created_at' | 'updated_at' | 'times_used' | 'avg_score'>
         Update: Partial<Omit<Question, 'id' | 'created_at'>>
       }
+      assignments: {
+        Row: Assignment
+        Insert: Omit<Assignment, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<Assignment, 'id' | 'created_at'>>
+      }
+      assignment_questions: {
+        Row: AssignmentQuestionItem
+        Insert: Omit<AssignmentQuestionItem, 'id' | 'created_at'>
+        Update: Partial<Omit<AssignmentQuestionItem, 'id' | 'assignment_id' | 'created_at'>>
+      }
+      submissions: {
+        Row: Submission
+        Insert: Omit<Submission, 'id' | 'submitted_at'>
+        Update: Partial<Omit<Submission, 'id' | 'assignment_id' | 'student_id' | 'submitted_at'>>
+      }
     }
     Enums: {
       user_role: UserRole
@@ -174,6 +264,8 @@ export interface Database {
       grading_status: GradingStatus
       content_type: ContentType
       difficulty_tier: DifficultyTier
+      assignment_source_type: AssignmentSourceType
+      assignment_mode: AssignmentMode
     }
   }
 }
