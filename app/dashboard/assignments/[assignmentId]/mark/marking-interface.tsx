@@ -286,9 +286,27 @@ function PaperMarkingGrid({ data }: MarkingInterfaceProps) {
               <p className="text-sm text-swiss-lead font-bold uppercase tracking-wider mt-1">
                 {assignment.class_name} • {assignment.subject}
               </p>
-              <Badge className="mt-2 bg-blue-600 text-white font-bold uppercase">
-                Paper Mode - Rapid Entry
-              </Badge>
+              <div className="flex items-center gap-2 mt-2">
+                <Badge className="bg-blue-600 text-white font-bold uppercase">
+                  Paper Mode - Rapid Entry
+                </Badge>
+                {assignment.source_type === "external_upload" && (
+                  <Badge variant="outline" className="border-purple-600 text-purple-600 font-bold uppercase">
+                    External Paper
+                  </Badge>
+                )}
+                {assignment.resource_url && (
+                  <a
+                    href={assignment.resource_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline font-bold uppercase flex items-center gap-1"
+                  >
+                    <FileText className="h-3 w-3" />
+                    View PDF
+                  </a>
+                )}
+              </div>
             </div>
           </div>
 
@@ -429,7 +447,7 @@ function PaperMarkingGrid({ data }: MarkingInterfaceProps) {
                       <th key={q.id} className="px-2 py-2 text-center min-w-[60px] border-r border-swiss-ink/20">
                         <div className="flex flex-col items-center gap-0.5">
                           <span className="text-xs font-black uppercase tracking-widest">
-                            Q{index + 1}
+                            {q.custom_question_number || `Q${index + 1}`}
                           </span>
                           <span className="text-xs text-swiss-lead font-bold">
                             /{q.marks}
@@ -1024,7 +1042,7 @@ function OnlineMarkingInterface({ data }: MarkingInterfaceProps) {
                       <th key={q.id} className="px-3 py-3 text-center min-w-[80px]">
                         <div className="flex flex-col items-center gap-1">
                           <span className="text-xs font-black uppercase tracking-widest">
-                            Q{index + 1}
+                            {q.custom_question_number || `Q${index + 1}`}
                           </span>
                           <span className="text-xs text-swiss-lead font-bold">
                             /{q.marks}

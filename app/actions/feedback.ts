@@ -122,9 +122,11 @@ export async function generateFeedback(assignmentId: string): Promise<{
       topic: string
       sub_topic: string | null
       difficulty: string
+      is_ghost?: boolean
     }[] = []
 
     if (junctionQuestions && junctionQuestions.length > 0) {
+      // Now supports both bank questions and ghost questions (external papers)
       questions = junctionQuestions.map((q: {
         question_id: string
         question_latex: string
@@ -132,6 +134,7 @@ export async function generateFeedback(assignmentId: string): Promise<{
         topic: string
         sub_topic: string
         difficulty: string
+        is_ghost?: boolean
       }) => ({
         id: q.question_id,
         question_latex: q.question_latex,
@@ -139,6 +142,7 @@ export async function generateFeedback(assignmentId: string): Promise<{
         topic: q.topic,
         sub_topic: q.sub_topic,
         difficulty: q.difficulty,
+        is_ghost: q.is_ghost || false,
       }))
     } else {
       // Fallback to JSONB
@@ -268,13 +272,21 @@ export async function generateFeedback(assignmentId: string): Promise<{
         const weakTopicNames = weakTopics.map(t => t.topic)
         
         // Get questions from question bank that match weak topics
-        // Exclude questions already in this assignment
-        const { data: revisionQs } = await supabase
+        // Only exclude non-ghost questions (ghost questions use assignment_question IDs)
+        const realQuestionIds = questions.filter(q => !q.is_ghost).map(q => q.id)
+        
+        let query = supabase
           .from("questions")
           .select("id, question_latex, image_url, marks, topic, sub_topic, difficulty")
           .in("topic", weakTopicNames)
-          .not("id", "in", `(${questions.map(q => `"${q.id}"`).join(",")})`)
           .limit(10)
+        
+        // Only add exclusion filter if there are real questions to exclude
+        if (realQuestionIds.length > 0) {
+          query = query.not("id", "in", `(${realQuestionIds.map(id => `"${id}"`).join(",")})`)
+        }
+        
+        const { data: revisionQs } = await query
 
         if (revisionQs) {
           for (const q of revisionQs) {
@@ -752,6 +764,7 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
     }
 
     // Build questions array with all metadata
+    // Now supports both bank questions and ghost questions (external papers)
     interface QuestionData {
       id: string
       questionLatex: string
@@ -761,6 +774,8 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
       difficulty: string
       imageUrl: string | null
       contentType: string
+      isGhost: boolean
+      customQuestionNumber: string | null
     }
 
     const questions: QuestionData[] = (junctionQuestions || []).map((q: {
@@ -770,8 +785,11 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
       topic: string
       sub_topic: string
       difficulty: string
+      is_ghost?: boolean
+      custom_question_number?: string | null
     }) => {
-      const details = questionDetails[q.question_id]
+      const isGhost = q.is_ghost || false
+      const details = isGhost ? null : questionDetails[q.question_id]
       return {
         id: q.question_id,
         questionLatex: q.question_latex || "",
@@ -779,8 +797,10 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
         topic: q.topic || "General",
         subTopic: q.sub_topic || q.topic || "General",
         difficulty: details?.difficulty || q.difficulty || "Foundation",
-        imageUrl: details?.image_url || null,
-        contentType: details?.content_type || "generated_text",
+        imageUrl: isGhost ? null : (details?.image_url || null),
+        contentType: isGhost ? "ghost" : (details?.content_type || "generated_text"),
+        isGhost,
+        customQuestionNumber: q.custom_question_number || null,
       }
     })
 
@@ -860,12 +880,18 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
     // =========================================================
 
     const revisionPack: RevisionQuestionData[] = []
-    const assignmentQuestionIds = questions.map(q => q.id)
+    // Only exclude real questions (not ghost questions) from revision pack
+    // Ghost questions use assignment_question IDs, not real question IDs
+    const assignmentQuestionIds = questions.filter(q => !q.isGhost).map(q => q.id)
 
     for (const weak of weakSubTopics) {
       // Query for 1-2 NEW questions matching sub_topic and difficulty
-      // Exclude questions already in the assignment
-      const { data: revisionQs } = await supabase
+      // Exclude questions already in the assignment (only non-ghost ones)
+      const excludeClause = assignmentQuestionIds.length > 0 
+        ? `.not("id", "in", "(${assignmentQuestionIds.map(id => `"${id}"`).join(",")})")`
+        : ""
+      
+      let query = supabase
         .from("questions")
         .select(`
           id,
@@ -880,8 +906,14 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
         `)
         .eq("sub_topic", weak.subTopic)
         .eq("difficulty", weak.difficulty)
-        .not("id", "in", `(${assignmentQuestionIds.map(id => `"${id}"`).join(",")})`)
         .limit(2)
+      
+      // Only add exclusion filter if there are real questions to exclude
+      if (assignmentQuestionIds.length > 0) {
+        query = query.not("id", "in", `(${assignmentQuestionIds.map(id => `"${id}"`).join(",")})`)
+      }
+      
+      const { data: revisionQs } = await query
 
       if (revisionQs && revisionQs.length > 0) {
         for (const q of revisionQs) {
@@ -905,7 +937,7 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
 
       // If no exact sub_topic match, try topic-level match
       if (!revisionQs || revisionQs.length === 0) {
-        const { data: topicQs } = await supabase
+        let topicQuery = supabase
           .from("questions")
           .select(`
             id,
@@ -920,8 +952,14 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
           `)
           .eq("topic", weak.topic)
           .eq("difficulty", weak.difficulty)
-          .not("id", "in", `(${assignmentQuestionIds.map(id => `"${id}"`).join(",")})`)
           .limit(1)
+        
+        // Only add exclusion filter if there are real questions to exclude
+        if (assignmentQuestionIds.length > 0) {
+          topicQuery = topicQuery.not("id", "in", `(${assignmentQuestionIds.map(id => `"${id}"`).join(",")})`)
+        }
+        
+        const { data: topicQs } = await topicQuery
 
         if (topicQs && topicQs.length > 0) {
           for (const q of topicQs) {
