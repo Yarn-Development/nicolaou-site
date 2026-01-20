@@ -7,7 +7,6 @@ import {
   FileUp, 
   Loader2, 
   Check,
-  ChevronDown,
   AlertCircle,
   FileText,
   GripVertical,
@@ -27,8 +26,6 @@ import {
 import { 
   getTopicNames, 
   getSubTopicsForTopic,
-  type Topic,
-  gcseMathsTopics,
 } from "@/lib/topic-taxonomy"
 
 // =====================================================

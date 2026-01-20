@@ -887,10 +887,6 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
     for (const weak of weakSubTopics) {
       // Query for 1-2 NEW questions matching sub_topic and difficulty
       // Exclude questions already in the assignment (only non-ghost ones)
-      const excludeClause = assignmentQuestionIds.length > 0 
-        ? `.not("id", "in", "(${assignmentQuestionIds.map(id => `"${id}"`).join(",")})")`
-        : ""
-      
       let query = supabase
         .from("questions")
         .select(`
