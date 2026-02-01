@@ -49,34 +49,42 @@ export function QuestionDisplay({
   const hasImage = !!image_url
   const hasText = !!question_latex
 
+  // Determine container classes based on variant
+  const containerClasses = variant === 'card' 
+    ? 'exam-paper-card' 
+    : variant === 'preview' 
+      ? 'bg-background p-4' 
+      : ''
+
   return (
     <div 
-      className={`
-        question-display
-        ${variant === 'card' ? 'bg-white border border-swiss-ink/10 rounded-lg p-4' : ''}
-        ${variant === 'preview' ? 'bg-swiss-paper p-4' : ''}
-        ${className}
-      `}
+      className={`question-display ${containerClasses} ${className}`}
       style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}
     >
-      {/* Source Badge */}
-      {showSourceBadge && (
-        <div className="mb-3">
-          <SourceBadge contentType={content_type} />
-        </div>
-      )}
+      {/* Header Row - Badges at top, separated by divider */}
+      {(showSourceBadge || showTopicInfo) && (
+        <div className="exam-paper-header">
+          {/* Source Badge */}
+          {showSourceBadge && (
+            <SourceBadge contentType={content_type} />
+          )}
 
-      {/* Topic Info */}
-      {showTopicInfo && (question.topic_name || question.sub_topic_name) && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {question.topic_name && (
-            <span className="text-xs font-bold uppercase tracking-wider px-2 py-1 bg-swiss-concrete text-swiss-ink border border-swiss-ink/20">
+          {/* Topic Info */}
+          {showTopicInfo && question.topic_name && (
+            <span className="text-xs font-bold uppercase tracking-wider px-2 py-1 bg-muted text-foreground border border-border/20">
               {question.topic_name}
             </span>
           )}
-          {question.sub_topic_name && (
-            <span className="text-xs font-medium text-swiss-lead">
+          {showTopicInfo && question.sub_topic_name && (
+            <span className="text-xs font-medium text-muted-foreground">
               / {question.sub_topic_name}
+            </span>
+          )}
+
+          {/* Marks Badge - Always show if available */}
+          {question.marks && (
+            <span className="ml-auto text-xs font-bold uppercase tracking-wider px-2 py-1 bg-muted text-foreground border border-border/20">
+              {question.marks} {question.marks === 1 ? 'mark' : 'marks'}
             </span>
           )}
         </div>
@@ -87,17 +95,17 @@ export function QuestionDisplay({
         <div className="space-y-4">
           {/* Text Layer */}
           {hasText && (
-            <div className="question-text">
+            <div className="exam-paper-content">
               <LatexPreview 
                 latex={question_latex} 
-                className="text-swiss-ink leading-relaxed"
+                className="text-foreground"
               />
             </div>
           )}
 
-          {/* Diagram Layer */}
+          {/* Diagram Layer - Framed container */}
           {hasImage && (
-            <div className="question-diagram flex justify-center my-4">
+            <div className="exam-paper-diagram">
               {enableZoom ? (
                 <ImageLightbox
                   src={image_url}
@@ -107,7 +115,7 @@ export function QuestionDisplay({
                   className="max-w-md w-full"
                 />
               ) : (
-                <div className="border border-swiss-ink/20 rounded-lg overflow-hidden bg-white max-w-md w-full">
+                <div className="max-w-md w-full">
                   <img
                     src={image_url}
                     alt={`Diagram for question`}
@@ -124,9 +132,9 @@ export function QuestionDisplay({
       {/* Content Rendering - Image First Layout (image_ocr, official_past_paper) */}
       {!isTextFirst && (
         <div className="space-y-4">
-          {/* Image Layer */}
+          {/* Image Layer - Framed container */}
           {hasImage && (
-            <div className="question-image flex justify-center">
+            <div className="exam-paper-diagram">
               {enableZoom ? (
                 <ImageLightbox
                   src={image_url}
@@ -136,7 +144,7 @@ export function QuestionDisplay({
                   className="max-w-lg w-full"
                 />
               ) : (
-                <div className="border border-swiss-ink/20 rounded-lg overflow-hidden bg-white max-w-lg w-full">
+                <div className="max-w-lg w-full">
                   <img
                     src={image_url}
                     alt={`Question image`}
@@ -150,13 +158,13 @@ export function QuestionDisplay({
 
           {/* Optional Text Layer (OCR text) */}
           {hasText && (
-            <div className="question-text mt-4 pt-4 border-t border-swiss-ink/10">
-              <p className="text-xs font-bold uppercase tracking-wider text-swiss-lead mb-2">
+            <div className="mt-4 pt-4 border-t border-border/20">
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
                 Extracted Text
               </p>
               <LatexPreview 
                 latex={question_latex} 
-                className="text-swiss-ink text-sm"
+                className="text-foreground text-sm"
               />
             </div>
           )}
@@ -165,7 +173,7 @@ export function QuestionDisplay({
 
       {/* Fallback for no content */}
       {!hasText && !hasImage && (
-        <div className="text-swiss-lead italic text-sm py-4 text-center">
+        <div className="text-muted-foreground italic text-sm py-4 text-center">
           Question content not available
         </div>
       )}

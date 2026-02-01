@@ -15,12 +15,15 @@ import {
   Copy,
   Printer,
   ExternalLink,
+  Sparkles,
+  BookOpen,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -29,13 +32,17 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ExternalMapper, type MappedQuestion } from "@/components/assignment-wizard/external-mapper"
+import { QuestionExtractor } from "@/components/assignment-wizard/question-extractor"
+import { SimilarGenerator } from "@/components/assignment-wizard/similar-generator"
 import { 
   uploadExamPaper, 
   createExternalAssignment,
   type ExternalAssignment 
 } from "@/app/actions/external-assignment"
+import { createRevisionListWithQuestions } from "@/app/actions/revision-lists"
 import { type Class } from "@/app/actions/classes"
 import { toast } from "sonner"
+import type { ExtractedQuestion, GeneratedSimilarQuestion } from "@/lib/types/database"
 
 // =====================================================
 // Types
@@ -45,7 +52,71 @@ interface ExternalPaperWizardProps {
   classes: Class[]
 }
 
-type WizardStep = "upload" | "mapping" | "configuration" | "success"
+type WizardStep = 
+  | "upload" 
+  | "extract"      // NEW: AI extraction of questions
+  | "generate"     // NEW: Generate similar questions
+  | "mapping" 
+  | "configuration" 
+  | "success"
+
+// =====================================================
+// Step indicator component
+// =====================================================
+
+interface StepIndicatorProps {
+  currentStep: WizardStep
+  enableRevisionFlow: boolean
+}
+
+function StepIndicator({ currentStep, enableRevisionFlow }: StepIndicatorProps) {
+  const allSteps: WizardStep[] = enableRevisionFlow 
+    ? ["upload", "extract", "generate", "mapping", "configuration", "success"]
+    : ["upload", "mapping", "configuration", "success"]
+  
+  const stepLabels: Record<WizardStep, string> = {
+    upload: "Upload",
+    extract: "Extract",
+    generate: "Generate",
+    mapping: "Map Topics",
+    configuration: "Configure",
+    success: "Done",
+  }
+
+  const currentIndex = allSteps.indexOf(currentStep)
+
+  return (
+    <div className="flex items-center gap-2">
+      {allSteps.map((step, index) => (
+        <div key={step} className="flex items-center">
+          <div className={`
+            w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm
+            ${index < currentIndex 
+              ? "bg-green-600 text-white" 
+              : index === currentIndex 
+                ? "bg-swiss-signal text-white" 
+                : "bg-swiss-lead/20 text-swiss-lead"
+            }
+          `}>
+            {index < currentIndex ? <Check className="h-4 w-4" /> : index + 1}
+          </div>
+          <span className={`
+            ml-2 text-xs font-bold uppercase tracking-wider hidden md:inline
+            ${index === currentIndex ? "text-swiss-ink" : "text-swiss-lead"}
+          `}>
+            {stepLabels[step]}
+          </span>
+          {index < allSteps.length - 1 && (
+            <div className={`
+              w-8 h-0.5 mx-2
+              ${index < currentIndex ? "bg-green-600" : "bg-swiss-lead/20"}
+            `} />
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 // =====================================================
 // Main Component
@@ -54,6 +125,9 @@ type WizardStep = "upload" | "mapping" | "configuration" | "success"
 export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
   // Wizard state
   const [currentStep, setCurrentStep] = useState<WizardStep>("upload")
+  
+  // Feature flag: enable revision flow (extract + generate)
+  const [enableRevisionFlow, setEnableRevisionFlow] = useState(true)
 
   // Step 1: Upload state
   const [file, setFile] = useState<File | null>(null)
@@ -61,16 +135,27 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
 
-  // Step 2: Mapping state
+  // Step 2: Extract state (NEW)
+  const [extractedQuestions, setExtractedQuestions] = useState<ExtractedQuestion[]>([])
+
+  // Step 3: Generate state (NEW)
+  const [generatedQuestions, setGeneratedQuestions] = useState<GeneratedSimilarQuestion[]>([])
+
+  // Step 4: Mapping state
   const [mappedQuestions, setMappedQuestions] = useState<MappedQuestion[]>([])
 
-  // Step 3: Configuration state
+  // Step 5: Configuration state
   const [title, setTitle] = useState("")
   const [selectedClassId, setSelectedClassId] = useState("")
   const [dueDate, setDueDate] = useState("")
+  const [createRevisionList, setCreateRevisionList] = useState(true)
 
-  // Step 4: Success state
+  // Step 6: Success state
   const [createdAssignment, setCreatedAssignment] = useState<ExternalAssignment | null>(null)
+  const [revisionListCreated, setRevisionListCreated] = useState<{
+    questionCount: number
+    studentsAllocated: number
+  } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
 
@@ -112,7 +197,9 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
       }
 
       setUploadedUrl(result.data?.url || null)
-      setCurrentStep("mapping")
+      
+      // Go to extract step if revision flow is enabled, otherwise mapping
+      setCurrentStep(enableRevisionFlow ? "extract" : "mapping")
       toast.success("PDF uploaded successfully!")
     } catch (err) {
       console.error("Upload error:", err)
@@ -120,7 +207,28 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
     } finally {
       setUploading(false)
     }
-  }, [file])
+  }, [file, enableRevisionFlow])
+
+  const handleExtractComplete = useCallback((questions: ExtractedQuestion[]) => {
+    setExtractedQuestions(questions)
+    
+    // Also pre-populate mapped questions from extracted data
+    const prePopulatedMapped: MappedQuestion[] = questions.map((q, index) => ({
+      id: `mapped_${index}`,
+      questionNumber: q.questionNumber,
+      topic: q.suggestedTopic,
+      subTopic: q.suggestedSubTopic,
+      marks: q.suggestedMarks,
+    }))
+    setMappedQuestions(prePopulatedMapped)
+    
+    setCurrentStep("generate")
+  }, [])
+
+  const handleGenerateComplete = useCallback((questions: GeneratedSimilarQuestion[]) => {
+    setGeneratedQuestions(questions)
+    setCurrentStep("mapping")
+  }, [])
 
   const handleMappingComplete = useCallback((questions: MappedQuestion[]) => {
     setMappedQuestions(questions)
@@ -135,6 +243,7 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
     setSubmitting(true)
 
     try {
+      // 1. Create the assignment
       const result = await createExternalAssignment({
         classId: selectedClassId,
         title,
@@ -150,6 +259,29 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
       }
 
       setCreatedAssignment(result.data || null)
+
+      // 2. Create revision list if enabled and we have generated questions
+      if (createRevisionList && generatedQuestions.length > 0 && result.data) {
+        const revisionResult = await createRevisionListWithQuestions({
+          assignmentId: result.data.id,
+          title: `Revision: ${title}`,
+          description: `Practice questions generated from ${title}`,
+          generatedQuestions,
+          classId: selectedClassId,
+        })
+
+        if (revisionResult.success && revisionResult.data) {
+          setRevisionListCreated({
+            questionCount: revisionResult.data.questionCount,
+            studentsAllocated: revisionResult.data.studentsAllocated,
+          })
+          toast.success("Revision list created and allocated to students!")
+        } else {
+          console.error("Failed to create revision list:", revisionResult.error)
+          toast.warning("Assignment created, but revision list failed to create")
+        }
+      }
+
       setCurrentStep("success")
       toast.success("Assignment created!")
     } catch (err) {
@@ -158,7 +290,7 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
     } finally {
       setSubmitting(false)
     }
-  }, [uploadedUrl, mappedQuestions, title, selectedClassId, dueDate])
+  }, [uploadedUrl, mappedQuestions, title, selectedClassId, dueDate, createRevisionList, generatedQuestions])
 
   const handleCopyLink = useCallback(async () => {
     if (!createdAssignment) return
@@ -171,6 +303,11 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
   }, [createdAssignment])
 
   const totalMarks = mappedQuestions.reduce((sum, q) => sum + q.marks, 0)
+  const totalSteps = enableRevisionFlow ? 6 : 4
+  const _currentStepNum = enableRevisionFlow
+    ? ["upload", "extract", "generate", "mapping", "configuration", "success"].indexOf(currentStep) + 1
+    : ["upload", "mapping", "configuration", "success"].indexOf(currentStep) + 1
+  void _currentStepNum // Available for step indicator if needed
 
   // =====================================================
   // Step 1: Upload
@@ -181,20 +318,23 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
       <div className="min-h-[calc(100vh-4rem)] flex flex-col">
         {/* Header */}
         <div className="border-b-2 border-swiss-ink bg-swiss-concrete px-6 py-4">
-          <div className="flex items-center gap-4">
-            <Link href="/dashboard/assignments">
-              <Button variant="outline" size="icon" className="border-2 border-swiss-ink">
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            </Link>
-            <div>
-              <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
-                Step 1 of 4
-              </p>
-              <h1 className="text-2xl font-black uppercase tracking-tight">
-                Upload Exam Paper
-              </h1>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Link href="/dashboard/assignments">
+                <Button variant="outline" size="icon" className="border-2 border-swiss-ink">
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+              </Link>
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
+                  Step 1 of {totalSteps}
+                </p>
+                <h1 className="text-2xl font-black uppercase tracking-tight">
+                  Upload Exam Paper
+                </h1>
+              </div>
             </div>
+            <StepIndicator currentStep={currentStep} enableRevisionFlow={enableRevisionFlow} />
           </div>
         </div>
 
@@ -206,7 +346,7 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
                 Upload PDF
               </CardTitle>
               <CardDescription>
-                Upload an exam paper created in Exam Wizard or any other tool
+                Upload an exam paper to extract questions and generate revision materials
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-6">
@@ -258,6 +398,23 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
                 </div>
               )}
 
+              {/* Revision flow toggle */}
+              <div className="flex items-center justify-between p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <p className="font-bold text-blue-900">Generate Revision Questions</p>
+                    <p className="text-xs text-blue-700">
+                      AI will extract questions and generate similar practice questions
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={enableRevisionFlow}
+                  onCheckedChange={setEnableRevisionFlow}
+                />
+              </div>
+
               {/* Upload button */}
               <Button
                 onClick={handleUpload}
@@ -282,9 +439,15 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
                 <h4 className="font-black uppercase tracking-wider text-sm">How it works</h4>
                 <ol className="text-sm space-y-1 text-swiss-lead">
                   <li>1. Upload your exam paper PDF</li>
-                  <li>2. Map each question to topics for analytics</li>
-                  <li>3. Assign to a class and set due date</li>
-                  <li>4. Mark submissions and generate feedback</li>
+                  {enableRevisionFlow && (
+                    <>
+                      <li>2. AI extracts questions from the paper</li>
+                      <li>3. Generate similar revision questions</li>
+                    </>
+                  )}
+                  <li>{enableRevisionFlow ? "4" : "2"}. Map questions to topics for analytics</li>
+                  <li>{enableRevisionFlow ? "5" : "3"}. Assign to a class and configure</li>
+                  <li>{enableRevisionFlow ? "6" : "4"}. Revision list auto-allocated to students</li>
                 </ol>
               </div>
             </CardContent>
@@ -295,10 +458,10 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
   }
 
   // =====================================================
-  // Step 2: Mapping
+  // Step 2: Extract (NEW)
   // =====================================================
 
-  if (currentStep === "mapping") {
+  if (currentStep === "extract") {
     return (
       <div className="h-[calc(100vh-4rem)] flex flex-col">
         {/* Header */}
@@ -315,13 +478,104 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
               </Button>
               <div>
                 <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
-                  Step 2 of 4
+                  Step 2 of {totalSteps}
+                </p>
+                <h1 className="text-2xl font-black uppercase tracking-tight">
+                  Extract Questions
+                </h1>
+              </div>
+            </div>
+            <StepIndicator currentStep={currentStep} enableRevisionFlow={enableRevisionFlow} />
+          </div>
+        </div>
+
+        {/* Question Extractor */}
+        <div className="flex-1 overflow-hidden p-6">
+          <QuestionExtractor
+            pdfUrl={uploadedUrl}
+            onExtractComplete={handleExtractComplete}
+            onBack={() => setCurrentStep("upload")}
+            initialQuestions={extractedQuestions.length > 0 ? extractedQuestions : undefined}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // =====================================================
+  // Step 3: Generate (NEW)
+  // =====================================================
+
+  if (currentStep === "generate") {
+    return (
+      <div className="h-[calc(100vh-4rem)] flex flex-col">
+        {/* Header */}
+        <div className="border-b-2 border-swiss-ink bg-swiss-concrete px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button 
+                variant="outline" 
+                size="icon" 
+                className="border-2 border-swiss-ink"
+                onClick={() => setCurrentStep("extract")}
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
+                  Step 3 of {totalSteps}
+                </p>
+                <h1 className="text-2xl font-black uppercase tracking-tight">
+                  Generate Similar Questions
+                </h1>
+              </div>
+            </div>
+            <StepIndicator currentStep={currentStep} enableRevisionFlow={enableRevisionFlow} />
+          </div>
+        </div>
+
+        {/* Similar Generator */}
+        <div className="flex-1 overflow-hidden">
+          <SimilarGenerator
+            extractedQuestions={extractedQuestions}
+            onGenerateComplete={handleGenerateComplete}
+            onBack={() => setCurrentStep("extract")}
+            initialGeneratedQuestions={generatedQuestions.length > 0 ? generatedQuestions : undefined}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // =====================================================
+  // Step 4: Mapping
+  // =====================================================
+
+  if (currentStep === "mapping") {
+    return (
+      <div className="h-[calc(100vh-4rem)] flex flex-col">
+        {/* Header */}
+        <div className="border-b-2 border-swiss-ink bg-swiss-concrete px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button 
+                variant="outline" 
+                size="icon" 
+                className="border-2 border-swiss-ink"
+                onClick={() => setCurrentStep(enableRevisionFlow ? "generate" : "upload")}
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
+                  Step {enableRevisionFlow ? 4 : 2} of {totalSteps}
                 </p>
                 <h1 className="text-2xl font-black uppercase tracking-tight">
                   Map Questions to Topics
                 </h1>
               </div>
             </div>
+            <StepIndicator currentStep={currentStep} enableRevisionFlow={enableRevisionFlow} />
           </div>
         </div>
 
@@ -330,7 +584,7 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
           <ExternalMapper
             pdfUrl={uploadedUrl}
             onMappingComplete={handleMappingComplete}
-            onBack={() => setCurrentStep("upload")}
+            onBack={() => setCurrentStep(enableRevisionFlow ? "generate" : "upload")}
             initialQuestions={mappedQuestions.length > 0 ? mappedQuestions : undefined}
           />
         </div>
@@ -339,7 +593,7 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
   }
 
   // =====================================================
-  // Step 3: Configuration
+  // Step 5: Configuration
   // =====================================================
 
   if (currentStep === "configuration") {
@@ -359,7 +613,7 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
               </Button>
               <div>
                 <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
-                  Step 3 of 4
+                  Step {enableRevisionFlow ? 5 : 3} of {totalSteps}
                 </p>
                 <h1 className="text-2xl font-black uppercase tracking-tight">
                   Assignment Details
@@ -370,6 +624,7 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
               <Badge variant="outline" className="border-2 border-swiss-ink font-bold">
                 {mappedQuestions.length} Questions / {totalMarks} Marks
               </Badge>
+              <StepIndicator currentStep={currentStep} enableRevisionFlow={enableRevisionFlow} />
             </div>
           </div>
         </div>
@@ -438,6 +693,25 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
                 />
               </div>
 
+              {/* Revision list toggle (if questions were generated) */}
+              {generatedQuestions.length > 0 && (
+                <div className="flex items-center justify-between p-4 bg-green-50 border-2 border-green-200 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <BookOpen className="h-5 w-5 text-green-600" />
+                    <div>
+                      <p className="font-bold text-green-900">Create Revision List</p>
+                      <p className="text-xs text-green-700">
+                        {generatedQuestions.length} questions will be saved and allocated to students
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={createRevisionList}
+                    onCheckedChange={setCreateRevisionList}
+                  />
+                </div>
+              )}
+
               {/* Summary */}
               <div className="bg-swiss-concrete border-2 border-swiss-ink p-4 space-y-2">
                 <h4 className="font-black uppercase tracking-wider text-sm">Summary</h4>
@@ -445,6 +719,11 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
                   <li>• {mappedQuestions.length} questions mapped</li>
                   <li>• {totalMarks} total marks</li>
                   <li>• Mode: Paper-based (mark after collection)</li>
+                  {generatedQuestions.length > 0 && createRevisionList && (
+                    <li className="text-green-700">
+                      • {generatedQuestions.length} revision questions to be created
+                    </li>
+                  )}
                 </ul>
               </div>
 
@@ -474,7 +753,7 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
   }
 
   // =====================================================
-  // Step 4: Success
+  // Step 6: Success
   // =====================================================
 
   return (
@@ -487,7 +766,7 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
           </div>
           <div className="text-white">
             <p className="text-xs font-black uppercase tracking-widest opacity-75">
-              Step 4 of 4
+              Step {totalSteps} of {totalSteps}
             </p>
             <h1 className="text-2xl font-black uppercase tracking-tight">
               Assignment Created!
@@ -519,6 +798,22 @@ export function ExternalPaperWizard({ classes }: ExternalPaperWizardProps) {
                 <p className="text-xs font-bold uppercase tracking-wider text-swiss-lead">Marks</p>
               </div>
             </div>
+
+            {/* Revision list created notice */}
+            {revisionListCreated && (
+              <div className="bg-green-50 border-2 border-green-500 rounded-lg p-4">
+                <div className="flex items-center gap-3">
+                  <BookOpen className="h-6 w-6 text-green-600" />
+                  <div>
+                    <p className="font-bold text-green-900">Revision List Created!</p>
+                    <p className="text-sm text-green-700">
+                      {revisionListCreated.questionCount} revision questions saved and 
+                      allocated to {revisionListCreated.studentsAllocated} students
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Actions */}
             <div className="space-y-3">

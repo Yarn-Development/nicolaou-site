@@ -11,6 +11,8 @@ import {
   Loader2,
   Calculator,
   CheckCircle,
+  CheckCircle2,
+  Circle,
   ArrowLeft,
   ArrowRight,
   Laptop,
@@ -24,30 +26,50 @@ import {
   GripVertical,
   BookOpen,
   ImageIcon,
+  Filter,
+  Eye,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { LatexPreview } from "@/components/latex-preview"
-import { SourceBadge } from "@/components/question-display"
+import { QuestionDisplayCompact, QuestionDisplay, SourceBadge } from "@/components/question-display"
+import type { Question as DatabaseQuestion } from "@/lib/types/database"
 import {
   getQuestionBankQuestions,
   type Question,
   type QuestionBankFilters,
+  type QuestionContentType,
 } from "@/app/actions/questions"
-import { 
-  createAssignmentWithQuestions, 
+import {
+  createAssignmentWithQuestions,
   type AssignmentMode,
-  type Assignment 
+  type Assignment
 } from "@/app/actions/assignments"
 import { type Class } from "@/app/actions/classes"
-import { 
-  exportExamToWord, 
+import {
+  exportExamToWord,
   exportExamWithMarkScheme,
-  type ExamQuestion 
+  type ExamQuestion
 } from "@/lib/docx-exporter"
 import { toast } from "sonner"
+import { Stepper } from "@/components/ui/stepper"
 
 // =====================================================
 // Types
@@ -66,6 +88,7 @@ interface SelectedQuestion {
   difficulty: string
   calculator_allowed: boolean
   image_url?: string | null
+  content_type?: string
   answer_key?: {
     answer?: string
     explanation?: string
@@ -73,6 +96,48 @@ interface SelectedQuestion {
 }
 
 type WizardStep = "builder" | "configuration" | "success"
+
+// Wizard steps configuration for stepper
+const WIZARD_STEPS = [
+  { id: "builder", title: "Select Questions", number: 1 },
+  { id: "configuration", title: "Configure", number: 2 },
+  { id: "success", title: "Publish", number: 3 },
+]
+
+// Topics list matching the question bank
+const TOPICS = [
+  'Algebra',
+  'Geometry',
+  'Statistics',
+  'Number',
+  'Ratio & Proportion',
+  'Probability',
+  'Trigonometry',
+  'Mensuration',
+  'Graphs',
+  'Transformations'
+]
+
+// Helper to convert action Question to database Question for display components
+function toDisplayQuestion(q: Question): DatabaseQuestion {
+  return {
+    ...q,
+    question_latex: q.question_latex ?? null,
+    image_url: q.image_url ?? null,
+    topic: q.topic ?? q.topic_name ?? "Unknown",
+    meta_tags: q.meta_tags ?? [],
+    answer_key: q.answer_key ?? null,
+    curriculum_level: q.curriculum_level ?? null,
+    topic_name: q.topic_name ?? null,
+    sub_topic_name: q.sub_topic_name ?? null,
+    question_type: q.question_type ?? null,
+    marks: q.marks ?? null,
+    calculator_allowed: q.calculator_allowed ?? null,
+    times_used: q.times_used ?? 0,
+    avg_score: q.avg_score ?? null,
+    verification_notes: q.verification_notes ?? null,
+  } as DatabaseQuestion
+}
 
 // =====================================================
 // Main Component
@@ -85,17 +150,18 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
 
   // Step 1: Builder State
   const [questions, setQuestions] = useState<Question[]>([])
-  const [topics, setTopics] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [filters, setFilters] = useState<QuestionBankFilters>({
     topic: "All",
     difficulty: "All",
     calculatorAllowed: "All",
+    isVerified: "All",
     source: "All",
     hasDiagram: false,
   })
   const [selectedQuestions, setSelectedQuestions] = useState<SelectedQuestion[]>([])
+  const [previewQuestion, setPreviewQuestion] = useState<Question | null>(null)
 
   // Step 2: Configuration State
   const [title, setTitle] = useState("")
@@ -125,9 +191,6 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
 
       if (result.success && result.data) {
         setQuestions(result.data.questions)
-        if (result.data.topics.length > 0) {
-          setTopics(result.data.topics)
-        }
       }
     } catch (err) {
       console.error("Error fetching questions:", err)
@@ -161,6 +224,7 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
         difficulty: question.difficulty,
         calculator_allowed: question.calculator_allowed,
         image_url: question.image_url,
+        content_type: question.content_type,
         answer_key: question.answer_key as SelectedQuestion["answer_key"],
       },
     ])
@@ -271,7 +335,7 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
     }
   }
 
-  const handleCopyLink = async () => {
+  const handleCopyLink = useCallback(async () => {
     if (!createdAssignment) return
 
     const url = `${window.location.origin}/student-dashboard/assignments/${createdAssignment.id}/take`
@@ -279,7 +343,7 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
     setLinkCopied(true)
     toast.success("Link copied to clipboard!")
     setTimeout(() => setLinkCopied(false), 3000)
-  }
+  }, [createdAssignment])
 
   // =====================================================
   // Computed Values
@@ -307,6 +371,10 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
       <div className="h-[calc(100vh-4rem)] flex flex-col">
         {/* Header */}
         <div className="border-b-2 border-swiss-ink bg-swiss-concrete px-6 py-4">
+          {/* Stepper */}
+          <div className="mb-4">
+            <Stepper steps={WIZARD_STEPS} currentStep={currentStep} />
+          </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <Link href="/dashboard/assignments">
@@ -315,29 +383,26 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 </Button>
               </Link>
               <div>
-                <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
-                  Step 1 of 3
-                </p>
-                <h1 className="text-2xl font-black uppercase tracking-tight">
+                <h1 className="text-2xl font-bold text-foreground">
                   Select Questions
                 </h1>
               </div>
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
+                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
                   Selected
                 </p>
-                <p className="text-lg font-black">
+                <p className="text-lg font-bold">
                   {selectedQuestions.length} questions / {totalMarks} marks
                 </p>
               </div>
               <Button
                 onClick={() => setCurrentStep("configuration")}
                 disabled={selectedQuestions.length === 0}
-                className="bg-swiss-signal hover:bg-swiss-ink text-white font-bold uppercase tracking-wider"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-md"
               >
-                Next: Details
+                Next: Configure
                 <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
             </div>
@@ -347,18 +412,19 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
         {/* Split Screen Content */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left Panel - Question Bank */}
-          <div className="w-1/2 border-r-2 border-swiss-ink flex flex-col bg-swiss-paper">
-            {/* Search & Filters */}
-            <div className="p-4 border-b-2 border-swiss-ink/20 space-y-3">
-              <div className="flex items-center gap-2">
+          <div className="w-3/5 border-r-2 border-swiss-ink flex flex-col bg-swiss-paper">
+            {/* Filters Header */}
+            <div className="p-4 border-b-2 border-swiss-ink bg-swiss-concrete">
+              <div className="flex items-center gap-2 mb-4">
+                <Filter className="w-5 h-5" />
                 <h2 className="font-black uppercase tracking-wider">Question Bank</h2>
                 <Badge variant="outline" className="ml-auto border-2 border-swiss-ink font-bold">
-                  {questions.length} available
+                  {questions.length} questions
                 </Badge>
               </div>
 
               {/* Search */}
-              <div className="relative">
+              <div className="relative mb-4">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-swiss-lead" />
                 <Input
                   placeholder="Search questions..."
@@ -368,193 +434,298 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 />
               </div>
 
-              {/* Filters */}
-              <div className="flex gap-2 flex-wrap">
-                <select
-                  value={filters.topic || "All"}
-                  onChange={(e) => setFilters((prev) => ({ ...prev, topic: e.target.value }))}
-                  className="px-3 py-1.5 text-sm border-2 border-swiss-ink bg-swiss-paper font-bold"
-                >
-                  <option value="All">All Topics</option>
-                  {topics.map((topic) => (
-                    <option key={topic} value={topic}>{topic}</option>
-                  ))}
-                </select>
+              {/* Filters Row 1 */}
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                {/* Topic Filter */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-swiss-lead">
+                    Topic
+                  </label>
+                  <Select
+                    value={filters.topic || "All"}
+                    onValueChange={(v) => setFilters((prev) => ({ ...prev, topic: v }))}
+                  >
+                    <SelectTrigger className="border-2 border-swiss-ink h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">All Topics</SelectItem>
+                      {TOPICS.map((topic) => (
+                        <SelectItem key={topic} value={topic}>
+                          {topic}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                <select
-                  value={filters.difficulty || "All"}
-                  onChange={(e) => setFilters((prev) => ({
-                    ...prev,
-                    difficulty: e.target.value as "All" | "Foundation" | "Higher",
-                  }))}
-                  className="px-3 py-1.5 text-sm border-2 border-swiss-ink bg-swiss-paper font-bold"
-                >
-                  <option value="All">All Tiers</option>
-                  <option value="Foundation">Foundation</option>
-                  <option value="Higher">Higher</option>
-                </select>
+                {/* Difficulty Filter */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-swiss-lead">
+                    Tier
+                  </label>
+                  <Select
+                    value={filters.difficulty as string}
+                    onValueChange={(v) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        difficulty: v as "All" | "Foundation" | "Higher",
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="border-2 border-swiss-ink h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">All Tiers</SelectItem>
+                      <SelectItem value="Foundation">Foundation</SelectItem>
+                      <SelectItem value="Higher">Higher</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                <select
-                  value={filters.source || "All"}
-                  onChange={(e) => setFilters((prev) => ({
-                    ...prev,
-                    source: e.target.value as "All" | "generated_text" | "image_ocr" | "official_past_paper" | "synthetic_image",
-                  }))}
-                  className="px-3 py-1.5 text-sm border-2 border-swiss-ink bg-swiss-paper font-bold"
-                >
-                  <option value="All">All Sources</option>
-                  <option value="official_past_paper">Official Past Papers</option>
-                  <option value="generated_text">AI Generated (Text)</option>
-                  <option value="synthetic_image">AI Generated (Diagrams)</option>
-                  <option value="image_ocr">Image OCR</option>
-                </select>
+                {/* Source Filter */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-swiss-lead">
+                    Source
+                  </label>
+                  <Select
+                    value={filters.source as string}
+                    onValueChange={(v) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        source: v as "All" | QuestionContentType,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="border-2 border-swiss-ink h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">All Sources</SelectItem>
+                      <SelectItem value="official_past_paper">Past Papers</SelectItem>
+                      <SelectItem value="generated_text">AI (Text)</SelectItem>
+                      <SelectItem value="synthetic_image">AI (Diagrams)</SelectItem>
+                      <SelectItem value="image_ocr">Image OCR</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
 
-                <select
-                  value={
-                    filters.calculatorAllowed === "All"
-                      ? "All"
-                      : filters.calculatorAllowed ? "yes" : "no"
-                  }
-                  onChange={(e) => {
-                    const val = e.target.value
-                    setFilters((prev) => ({
-                      ...prev,
-                      calculatorAllowed: val === "All" ? "All" : val === "yes",
-                    }))
-                  }}
-                  className="px-3 py-1.5 text-sm border-2 border-swiss-ink bg-swiss-paper font-bold"
-                >
-                  <option value="All">Calculator: Any</option>
-                  <option value="yes">Calculator: Yes</option>
-                  <option value="no">Calculator: No</option>
-                </select>
+              {/* Filters Row 2 */}
+              <div className="grid grid-cols-3 gap-3">
+                {/* Calculator Filter */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-swiss-lead">
+                    Calculator
+                  </label>
+                  <Select
+                    value={
+                      filters.calculatorAllowed === "All"
+                        ? "All"
+                        : filters.calculatorAllowed
+                        ? "yes"
+                        : "no"
+                    }
+                    onValueChange={(v) => {
+                      setFilters((prev) => ({
+                        ...prev,
+                        calculatorAllowed:
+                          v === "All" ? "All" : v === "yes" ? true : false,
+                      }))
+                    }}
+                  >
+                    <SelectTrigger className="border-2 border-swiss-ink h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">Any</SelectItem>
+                      <SelectItem value="yes">Allowed</SelectItem>
+                      <SelectItem value="no">Not Allowed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Verified Filter */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-swiss-lead">
+                    Status
+                  </label>
+                  <Select
+                    value={
+                      filters.isVerified === "All"
+                        ? "All"
+                        : filters.isVerified
+                        ? "verified"
+                        : "unverified"
+                    }
+                    onValueChange={(v) => {
+                      setFilters((prev) => ({
+                        ...prev,
+                        isVerified:
+                          v === "All" ? "All" : v === "verified" ? true : false,
+                      }))
+                    }}
+                  >
+                    <SelectTrigger className="border-2 border-swiss-ink h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="All">All Questions</SelectItem>
+                      <SelectItem value="verified">Verified Only</SelectItem>
+                      <SelectItem value="unverified">Unverified Only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 {/* Has Diagram Toggle */}
-                <label className="flex items-center gap-2 px-3 py-1.5 text-sm border-2 border-swiss-ink bg-swiss-paper cursor-pointer hover:bg-swiss-concrete transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={filters.hasDiagram || false}
-                    onChange={(e) => setFilters((prev) => ({
-                      ...prev,
-                      hasDiagram: e.target.checked,
-                    }))}
-                    className="w-4 h-4 accent-swiss-signal"
-                  />
-                  <ImageIcon className="w-3.5 h-3.5 text-swiss-lead" />
-                  <span className="font-bold">Has Diagram</span>
-                </label>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-swiss-lead">
+                    Diagrams
+                  </label>
+                  <label className="flex items-center gap-2 h-9 cursor-pointer group">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        checked={filters.hasDiagram || false}
+                        onChange={(e) =>
+                          setFilters((prev) => ({ ...prev, hasDiagram: e.target.checked }))
+                        }
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-swiss-concrete border-2 border-swiss-ink rounded-full peer-checked:bg-swiss-signal transition-colors"></div>
+                      <div className="absolute left-0.5 top-0.5 w-4 h-4 bg-white border border-swiss-ink rounded-full transition-transform peer-checked:translate-x-4"></div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <ImageIcon className="w-3.5 h-3.5 text-swiss-lead" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">
+                        Has Diagram
+                      </span>
+                    </div>
+                  </label>
+                </div>
               </div>
             </div>
 
-            {/* Question List */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {/* Questions Table */}
+            <div className="flex-1 overflow-auto">
               {loading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-swiss-signal" />
                 </div>
               ) : questions.length === 0 ? (
-                <div className="text-center py-12 text-swiss-lead">
-                  <FileText className="w-12 h-12 mx-auto mb-4 opacity-40" />
-                  <p className="font-bold uppercase tracking-wider">No questions found</p>
-                  <p className="text-sm mt-1">Try adjusting your filters</p>
+                <div className="text-center py-12">
+                  <FileText className="w-12 h-12 mx-auto mb-4 opacity-40 text-swiss-lead" />
+                  <p className="text-swiss-lead font-bold uppercase tracking-wider">
+                    No questions found
+                  </p>
+                  <p className="text-sm text-swiss-lead mt-1">
+                    Try adjusting your filters
+                  </p>
                 </div>
               ) : (
-                questions.map((question) => {
-                  const isSelected = selectedIds.has(question.id)
-                  return (
-                    <div
-                      key={question.id}
-                      className={`border-2 p-4 transition-all ${
-                        isSelected
-                          ? "border-swiss-signal bg-swiss-signal/5"
-                          : "border-swiss-ink hover:border-swiss-lead"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          {/* Meta badges */}
-                          <div className="flex items-center gap-2 mb-2 flex-wrap">
-                            <Badge variant="outline" className="text-xs border-swiss-ink font-bold">
-                              {question.topic_name || question.topic || "General"}
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-b-2 border-swiss-ink bg-swiss-concrete/50">
+                      <TableHead className="font-black uppercase text-swiss-ink text-xs">Question</TableHead>
+                      <TableHead className="font-black uppercase text-swiss-ink text-xs">Topic</TableHead>
+                      <TableHead className="font-black uppercase text-swiss-ink text-xs">Tier</TableHead>
+                      <TableHead className="font-black uppercase text-swiss-ink text-xs">Source</TableHead>
+                      <TableHead className="font-black uppercase text-swiss-ink text-xs">Status</TableHead>
+                      <TableHead className="font-black uppercase text-swiss-ink text-xs text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {questions.map((question) => {
+                      const isSelected = selectedIds.has(question.id)
+                      return (
+                        <TableRow
+                          key={question.id}
+                          className={`border-b border-swiss-concrete hover:bg-swiss-paper/50 ${
+                            isSelected ? "bg-swiss-signal/10" : ""
+                          }`}
+                        >
+                          <TableCell className="max-w-xs">
+                            <QuestionDisplayCompact question={toDisplayQuestion(question)} />
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="border-2 border-swiss-ink text-xs">
+                              {question.topic_name || question.topic}
                             </Badge>
+                          </TableCell>
+                          <TableCell>
                             <Badge
-                              className={`text-xs font-bold ${
+                              variant="outline"
+                              className={`text-xs ${
                                 question.difficulty === "Higher"
-                                  ? "bg-swiss-signal text-white"
-                                  : "bg-swiss-concrete text-swiss-ink"
+                                  ? "border-2 border-swiss-signal text-swiss-signal"
+                                  : "border-2 border-swiss-ink"
                               }`}
                             >
                               {question.difficulty}
                             </Badge>
-                            <Badge variant="outline" className="text-xs border-swiss-ink font-bold">
-                              {question.marks} marks
-                            </Badge>
-                            {question.calculator_allowed && (
-                              <Calculator className="w-3.5 h-3.5 text-swiss-lead" />
-                            )}
-                            {/* Content Type Badge */}
+                          </TableCell>
+                          <TableCell>
                             <SourceBadge contentType={question.content_type} />
-                          </div>
-
-                          {/* Question preview - Text + Image for hybrid questions */}
-                          <div className="text-sm space-y-2">
-                            {/* Text content */}
-                            {question.question_latex && (
-                              <div className="line-clamp-2 overflow-hidden">
-                                <LatexPreview
-                                  latex={question.question_latex}
-                                  className="text-sm"
-                                  showSkeleton={false}
-                                />
-                              </div>
-                            )}
-                            
-                            {/* Image thumbnail for questions with images */}
-                            {question.image_url && (
-                              <div className="flex items-center gap-2 mt-2">
-                                <img
-                                  src={question.image_url}
-                                  alt="Question diagram"
-                                  className="w-16 h-12 object-cover rounded border border-swiss-ink/20 bg-white"
-                                />
-                                <span className="text-xs text-swiss-lead italic">
-                                  {question.content_type === 'synthetic_image' ? 'AI Diagram' : 'Image'}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Add button */}
-                        <Button
-                          size="sm"
-                          onClick={() => addQuestion(question)}
-                          disabled={isSelected}
-                          className={`shrink-0 font-bold uppercase text-xs ${
-                            isSelected
-                              ? "bg-swiss-ink/20 text-swiss-ink border-2 border-swiss-ink/40"
-                              : "bg-swiss-signal text-white hover:bg-swiss-ink"
-                          }`}
-                        >
-                          {isSelected ? (
-                            <CheckCircle className="w-4 h-4" />
-                          ) : (
-                            <>
-                              <Plus className="w-4 h-4 mr-1" />
-                              Add
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  )
-                })
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1 text-xs font-bold uppercase tracking-wider">
+                              {question.is_verified ? (
+                                <>
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-swiss-signal" />
+                                  <span className="text-swiss-signal">Verified</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Circle className="w-3.5 h-3.5 text-swiss-lead" />
+                                  <span className="text-swiss-lead">Unverified</span>
+                                </>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setPreviewQuestion(question)}
+                                className="border-2 border-swiss-ink h-8 w-8 p-0"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={isSelected ? "secondary" : "default"}
+                                onClick={() => addQuestion(question)}
+                                disabled={isSelected}
+                                className={`h-8 ${
+                                  isSelected
+                                    ? "bg-swiss-signal/20 text-swiss-signal"
+                                    : "bg-swiss-signal text-white hover:bg-swiss-ink"
+                                }`}
+                              >
+                                {isSelected ? (
+                                  <CheckCircle className="w-4 h-4" />
+                                ) : (
+                                  <>
+                                    <Plus className="w-4 h-4 mr-1" />
+                                    Add
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
               )}
             </div>
           </div>
 
           {/* Right Panel - Selected Questions */}
-          <div className="w-1/2 flex flex-col bg-swiss-concrete">
+          <div className="w-2/5 flex flex-col bg-swiss-concrete">
             {/* Header */}
             <div className="px-4 py-3 border-b-2 border-swiss-ink/20 flex items-center justify-between bg-swiss-paper">
               <div>
@@ -578,11 +749,15 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
             {/* Selected Questions List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
               {selectedQuestions.length === 0 ? (
-                <div className="h-full flex items-center justify-center text-swiss-lead">
-                  <div className="text-center">
-                    <Plus className="w-12 h-12 mx-auto mb-2 opacity-30" />
-                    <p className="font-bold uppercase tracking-wider">No questions selected</p>
-                    <p className="text-sm mt-1">Add questions from the bank on the left</p>
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  <div className="text-center max-w-xs">
+                    <div className="w-16 h-16 mx-auto mb-4 bg-muted/50 border-2 border-dashed border-muted-foreground/30 flex items-center justify-center">
+                      <FileText className="w-8 h-8 opacity-50" />
+                    </div>
+                    <p className="font-bold text-foreground mb-1">Build Your Paper</p>
+                    <p className="text-sm">
+                      Click the <span className="font-semibold text-primary">+ Add</span> button on questions from the bank to build your exam paper.
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -603,31 +778,23 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
 
                     {/* Question info */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <Badge variant="outline" className="text-xs border-swiss-ink font-bold">
                           {question.topic}
                         </Badge>
                         <Badge variant="outline" className="text-xs border-swiss-ink font-bold">
                           {question.marks} marks
                         </Badge>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        {/* Image thumbnail if present */}
-                        {question.image_url && (
-                          <img
-                            src={question.image_url}
-                            alt="Question diagram"
-                            className="w-12 h-10 object-cover rounded border border-swiss-ink/20 bg-white shrink-0"
-                          />
+                        {question.calculator_allowed && (
+                          <Calculator className="w-3.5 h-3.5 text-swiss-lead" />
                         )}
-                        {/* Text content */}
-                        <div className="text-sm line-clamp-2 overflow-hidden flex-1">
-                          <LatexPreview 
-                            latex={question.question_latex} 
-                            className="text-sm" 
-                            showSkeleton={false}
-                          />
-                        </div>
+                      </div>
+                      <div className="text-sm line-clamp-2 overflow-hidden">
+                        <LatexPreview
+                          latex={question.question_latex}
+                          className="text-sm"
+                          showSkeleton={false}
+                        />
                       </div>
                     </div>
 
@@ -684,6 +851,161 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
             )}
           </div>
         </div>
+
+        {/* Question Preview Modal */}
+        {previewQuestion && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <Card className="border-4 border-swiss-ink max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+              <CardHeader className="border-b-2 border-swiss-ink">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <CardTitle className="text-2xl font-black uppercase tracking-wider text-swiss-ink">
+                      Question Preview
+                    </CardTitle>
+                    <CardDescription className="flex gap-2 mt-2 flex-wrap">
+                      <Badge variant="outline" className="border-2 border-swiss-ink">
+                        {previewQuestion.topic_name || previewQuestion.topic}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className={
+                          previewQuestion.difficulty === "Higher"
+                            ? "border-2 border-swiss-signal text-swiss-signal"
+                            : "border-2 border-swiss-ink"
+                        }
+                      >
+                        {previewQuestion.difficulty}
+                      </Badge>
+                      <Badge variant="outline" className="border-2 border-swiss-ink">
+                        {previewQuestion.marks} marks
+                      </Badge>
+                      {previewQuestion.is_verified && (
+                        <Badge className="bg-swiss-signal text-white border-0">
+                          <CheckCircle2 className="w-3 h-3 mr-1" />
+                          Verified
+                        </Badge>
+                      )}
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPreviewQuestion(null)}
+                    className="border-2 border-swiss-ink"
+                  >
+                    ✕
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-6 space-y-6">
+                {/* Question Display */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
+                    Question
+                  </label>
+                  <QuestionDisplay
+                    question={toDisplayQuestion(previewQuestion)}
+                    variant="preview"
+                    showSourceBadge={true}
+                    showTopicInfo={false}
+                    enableZoom={true}
+                  />
+                </div>
+
+                {/* Answer Key */}
+                {previewQuestion.answer_key && (
+                  <div className="space-y-4">
+                    {previewQuestion.answer_key.answer && (
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
+                          Answer
+                        </label>
+                        <div className="border-2 border-swiss-ink bg-green-50 p-3">
+                          <LatexPreview
+                            latex={previewQuestion.answer_key.answer}
+                            className="text-sm font-medium"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {previewQuestion.answer_key.explanation && (
+                      <div className="space-y-2">
+                        <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
+                          Explanation
+                        </label>
+                        <div className="border-2 border-swiss-ink bg-swiss-concrete p-3 max-h-[12rem] overflow-auto">
+                          <LatexPreview
+                            latex={previewQuestion.answer_key.explanation}
+                            className="text-sm"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Metadata */}
+                <div className="grid grid-cols-3 gap-4 border-t-2 border-swiss-ink pt-4">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-widest text-swiss-lead">
+                      Source
+                    </p>
+                    <p className="text-sm font-bold uppercase">
+                      {previewQuestion.content_type === "image_ocr"
+                        ? "Image OCR"
+                        : previewQuestion.content_type === "synthetic_image"
+                        ? "AI Diagram"
+                        : previewQuestion.content_type === "official_past_paper"
+                        ? "Past Paper"
+                        : "AI Generated"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-widest text-swiss-lead">
+                      Calculator
+                    </p>
+                    <p className="text-sm font-bold uppercase">
+                      {previewQuestion.calculator_allowed ? "Allowed" : "Not Allowed"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-widest text-swiss-lead">
+                      Times Used
+                    </p>
+                    <p className="text-sm font-bold uppercase">
+                      {previewQuestion.times_used || 0}x
+                    </p>
+                  </div>
+                </div>
+
+                {/* Add to Assignment Button */}
+                <div className="border-t-2 border-swiss-ink pt-4">
+                  <Button
+                    onClick={() => {
+                      addQuestion(previewQuestion)
+                      setPreviewQuestion(null)
+                    }}
+                    disabled={selectedIds.has(previewQuestion.id)}
+                    className="w-full bg-swiss-signal hover:bg-swiss-ink text-white font-bold uppercase tracking-wider"
+                  >
+                    {selectedIds.has(previewQuestion.id) ? (
+                      <>
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        Already Added
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4 mr-2" />
+                        Add to Assignment
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
       </div>
     )
   }
@@ -694,6 +1016,10 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
       <div className="h-[calc(100vh-4rem)] flex flex-col">
         {/* Header */}
         <div className="border-b-2 border-swiss-ink bg-swiss-concrete px-6 py-4">
+          {/* Stepper */}
+          <div className="mb-4">
+            <Stepper steps={WIZARD_STEPS} currentStep={currentStep} />
+          </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <Button
@@ -705,19 +1031,16 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 <ArrowLeft className="h-4 w-4" />
               </Button>
               <div>
-                <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
-                  Step 2 of 3
-                </p>
-                <h1 className="text-2xl font-black uppercase tracking-tight">
+                <h1 className="text-2xl font-bold text-foreground">
                   Assignment Details
                 </h1>
               </div>
             </div>
             <div className="text-right">
-              <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
+              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
                 Selected
               </p>
-              <p className="text-lg font-black">
+              <p className="text-lg font-bold">
                 {selectedQuestions.length} questions / {totalMarks} marks
               </p>
             </div>
@@ -749,11 +1072,10 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 {/* Online Mode Card */}
                 <button
                   onClick={() => setMode("online")}
-                  className={`border-2 p-6 text-left transition-all ${
-                    mode === "online"
-                      ? "border-swiss-signal bg-swiss-signal/5"
-                      : "border-swiss-ink hover:border-swiss-lead"
-                  }`}
+                  className={`border-2 p-6 text-left transition-all ${mode === "online"
+                    ? "border-swiss-signal bg-swiss-signal/5"
+                    : "border-swiss-ink hover:border-swiss-lead"
+                    }`}
                 >
                   <div className="flex items-start gap-4">
                     <div className={`p-3 ${mode === "online" ? "bg-swiss-signal text-white" : "bg-swiss-concrete"}`}>
@@ -777,11 +1099,10 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 {/* Paper Mode Card */}
                 <button
                   onClick={() => setMode("paper")}
-                  className={`border-2 p-6 text-left transition-all ${
-                    mode === "paper"
-                      ? "border-swiss-signal bg-swiss-signal/5"
-                      : "border-swiss-ink hover:border-swiss-lead"
-                  }`}
+                  className={`border-2 p-6 text-left transition-all ${mode === "paper"
+                    ? "border-swiss-signal bg-swiss-signal/5"
+                    : "border-swiss-ink hover:border-swiss-lead"
+                    }`}
                 >
                   <div className="flex items-start gap-4">
                     <div className={`p-3 ${mode === "paper" ? "bg-swiss-signal text-white" : "bg-swiss-concrete"}`}>

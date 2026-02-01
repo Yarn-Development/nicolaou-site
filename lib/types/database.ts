@@ -8,12 +8,13 @@ export type AssessmentStatus = 'draft' | 'published' | 'archived'
 export type AssessmentTier = 'foundation' | 'higher'
 export type QuestionType = 'multiple_choice' | 'short_answer' | 'long_answer' | 'calculation'
 export type GradingStatus = 'pending' | 'in_progress' | 'completed'
-export type ContentType = 'image_ocr' | 'generated_text' | 'official_past_paper' | 'synthetic_image'
+export type ContentType = 'image_ocr' | 'generated_text' | 'official_past_paper' | 'synthetic_image' | 'revision_generated'
 export type DifficultyTier = 'Foundation' | 'Higher'
 
 // External Paper Mapper types
 export type AssignmentSourceType = 'bank_builder' | 'external_upload'
 export type AssignmentMode = 'online' | 'paper'
+export type RevisionAllocationStatus = 'pending' | 'in_progress' | 'completed'
 
 // Answer key structure for questions
 export interface QuestionAnswerKey {
@@ -266,7 +267,110 @@ export interface Database {
       difficulty_tier: DifficultyTier
       assignment_source_type: AssignmentSourceType
       assignment_mode: AssignmentMode
+      revision_allocation_status: RevisionAllocationStatus
     }
   }
+}
+
+// =====================================================
+// Revision List types
+// =====================================================
+
+export interface RevisionList {
+  id: string
+  assignment_id: string | null
+  title: string
+  description: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface RevisionListQuestion {
+  id: string
+  revision_list_id: string
+  question_id: string
+  source_question_number: string | null
+  source_question_latex: string | null
+  order_index: number
+  created_at: string
+}
+
+export interface StudentRevisionAllocation {
+  id: string
+  revision_list_id: string
+  student_id: string
+  status: RevisionAllocationStatus
+  allocated_at: string
+  started_at: string | null
+  completed_at: string | null
+  progress: Record<string, { completed: boolean; completed_at?: string }>
+}
+
+// Result type from get_student_revision_lists function
+export interface StudentRevisionListResult {
+  revision_list_id: string
+  title: string
+  description: string | null
+  assignment_id: string | null
+  assignment_title: string | null
+  class_name: string | null
+  status: RevisionAllocationStatus
+  allocated_at: string
+  total_questions: number
+  completed_questions: number
+  created_at: string
+}
+
+// Result type from get_revision_list_questions function
+export interface RevisionListQuestionResult {
+  question_id: string
+  order_index: number
+  source_question_number: string | null
+  source_question_latex: string | null
+  question_latex: string | null
+  image_url: string | null
+  topic: string
+  sub_topic: string | null
+  difficulty: string
+  marks: number | null
+  answer_key: QuestionAnswerKey | null
+  calculator_allowed: boolean | null
+}
+
+// =====================================================
+// Extracted Question type (for PDF extraction step)
+// =====================================================
+
+export interface ExtractedQuestion {
+  id: string // temporary client-side ID
+  questionNumber: string // e.g., "1a", "2", "3b(ii)"
+  questionLatex: string
+  suggestedTopic: string
+  suggestedSubTopic: string
+  suggestedMarks: number
+  suggestedDifficulty: DifficultyTier
+  pageNumber: number
+  included: boolean // whether to include in generation
+}
+
+// =====================================================
+// Generated Similar Question type
+// =====================================================
+
+export interface GeneratedSimilarQuestion {
+  id: string // temporary client-side ID
+  sourceQuestionNumber: string // which original it came from
+  sourceQuestionLatex: string
+  questionLatex: string
+  answerKey: {
+    answer: string
+    explanation: string
+  }
+  topic: string
+  subTopic: string
+  difficulty: DifficultyTier
+  marks: number
+  included: boolean // whether to save to bank
 }
 
