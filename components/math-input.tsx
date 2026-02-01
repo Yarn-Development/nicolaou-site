@@ -134,7 +134,7 @@ export function MathInput({
           <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead mr-2 hidden sm:inline">
             Math:
           </span>
-          
+
           {/* Common Symbols */}
           {commonSymbols.map((symbol) => (
             <SymbolButton
@@ -219,7 +219,7 @@ export function MathInput({
         <p className="text-xs text-swiss-lead">
           Use toolbar buttons or type LaTeX directly (e.g., $\frac{"{1}{2}"}$ for fractions)
         </p>
-        
+
         {hasLatex && (
           <button
             type="button"
@@ -264,12 +264,12 @@ function SymbolButton({ symbol, onClick, disabled }: SymbolButtonProps) {
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "px-2 py-1 border border-swiss-ink/30 bg-swiss-paper",
+        "px-2 py-1.5 border border-border bg-background",
         "text-sm font-medium transition-all duration-150",
-        "hover:bg-swiss-signal/10 hover:border-swiss-signal",
-        "active:bg-swiss-signal/20",
-        "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-swiss-paper disabled:hover:border-swiss-ink/30",
-        "focus:outline-none focus:ring-1 focus:ring-swiss-signal"
+        "shadow-sm hover:shadow hover:bg-accent hover:border-primary/50",
+        "active:shadow-none active:scale-95 active:bg-primary/10",
+        "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:border-border disabled:hover:shadow-sm",
+        "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:ring-offset-1"
       )}
       title={symbol.label}
     >
@@ -320,7 +320,7 @@ export function CompactMathInput({
 
     const newValue = text.substring(0, start) + symbol.latex + text.substring(end)
     const newCursorPos = start + symbol.latex.length - (symbol.cursorOffset || 0)
-    
+
     onChange(newValue)
 
     requestAnimationFrame(() => {

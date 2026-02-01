@@ -16,7 +16,7 @@
     --accent: 0 0% 33%; /* Lead (#555555) for accents */
     --accent-foreground: 0 0% 100%;
     --muted: 0 0% 96%; /* Concrete background */
-    --muted-foreground: 0 0% 33%; /* Lead text */
+    --muted-foreground: 0 0% 40%; /* Improved contrast for WCAG AA */
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
     --border: 0 0% 0%; /* Pure black borders */
@@ -47,7 +47,7 @@
     --accent: 0 0% 67%; /* Lighter grey for accents */
     --accent-foreground: 0 0% 0%;
     --muted: 0 0% 7%;
-    --muted-foreground: 0 0% 67%;
+    --muted-foreground: 0 0% 75%; /* Improved contrast for WCAG AA */
     --destructive: 0 84% 65%;
     --destructive-foreground: 0 0% 100%;
     --border: 0 0% 100%; /* White borders in dark mode */
@@ -212,6 +212,44 @@
 
 .swiss-card:hover {
   border-color: hsl(var(--primary));
+}
+
+/* Exam Paper Card - Clean EdTech aesthetic for questions */
+.exam-paper-card {
+  background-color: hsl(var(--background));
+  border: 1px solid hsl(var(--border) / 0.3);
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05);
+  padding: 1.5rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.exam-paper-card:hover {
+  border-color: hsl(var(--border) / 0.5);
+  box-shadow: 0 2px 4px 0 rgb(0 0 0 / 0.08);
+}
+
+.exam-paper-card .exam-paper-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid hsl(var(--border) / 0.2);
+}
+
+.exam-paper-card .exam-paper-content {
+  font-size: 1.125rem;
+  line-height: 1.75;
+}
+
+.exam-paper-card .exam-paper-diagram {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: hsl(var(--background));
+  border: 1px solid hsl(var(--border) / 0.15);
 }
 
 /* Dividers - Horizontal Rules */
