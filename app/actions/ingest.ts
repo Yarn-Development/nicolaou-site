@@ -137,10 +137,33 @@ export async function uploadSnippetImage(formData: FormData): Promise<{
     })
 
   if (uploadError) {
-    console.error("Error uploading snippet:", uploadError)
+    console.error("Error uploading snippet:", {
+      message: uploadError.message,
+      name: uploadError.name,
+    })
+    
+    // Provide specific error messages based on the error type
+    let userMessage = `Failed to upload image: ${uploadError.message}`
+    
+    if (uploadError.message?.includes("Payload too large") || 
+        uploadError.message?.includes("size") ||
+        uploadError.message?.includes("exceeded")) {
+      userMessage = "Image file is too large. Please use a smaller image (max 10MB)."
+    } else if (uploadError.message?.includes("policy") || 
+               uploadError.message?.includes("permission") ||
+               uploadError.message?.includes("RLS")) {
+      userMessage = "Permission denied. Storage policy violation - please contact support."
+    } else if (uploadError.message?.includes("timeout") || 
+               uploadError.message?.includes("network")) {
+      userMessage = "Upload timed out. Please check your connection and try again."
+    } else if (uploadError.message?.includes("bucket") || 
+               uploadError.message?.includes("not found")) {
+      userMessage = "Storage bucket not configured. Please contact support."
+    }
+    
     return {
       success: false,
-      error: `Failed to upload image: ${uploadError.message}`
+      error: userMessage
     }
   }
 
