@@ -98,8 +98,37 @@ export async function uploadExamPaper(formData: FormData): Promise<{
       })
 
     if (uploadError) {
-      console.error("Upload error:", uploadError)
-      return { success: false, error: "Failed to upload file" }
+      console.error("Upload error details:", {
+        message: uploadError.message,
+        name: uploadError.name,
+      })
+      
+      // Provide specific error messages based on the error type
+      let userMessage = "Failed to upload file"
+      
+      if (uploadError.message?.includes("Payload too large") || 
+          uploadError.message?.includes("size") ||
+          uploadError.message?.includes("exceeded")) {
+        userMessage = "File size exceeds the storage limit. Please use a smaller file (max 10MB)."
+      } else if (uploadError.message?.includes("policy") || 
+                 uploadError.message?.includes("permission") ||
+                 uploadError.message?.includes("RLS")) {
+        userMessage = "Permission denied. Storage policy violation - please contact support."
+      } else if (uploadError.message?.includes("timeout") || 
+                 uploadError.message?.includes("network")) {
+        userMessage = "Upload timed out. Please check your connection and try again."
+      } else if (uploadError.message?.includes("bucket") || 
+                 uploadError.message?.includes("not found")) {
+        userMessage = "Storage bucket not configured. Please contact support."
+      } else if (uploadError.message?.includes("duplicate") || 
+                 uploadError.message?.includes("already exists")) {
+        userMessage = "A file with this name already exists. Please rename and try again."
+      } else if (uploadError.message) {
+        // Return the actual error message for debugging
+        userMessage = `Upload failed: ${uploadError.message}`
+      }
+      
+      return { success: false, error: userMessage }
     }
 
     // Get public URL
@@ -116,7 +145,8 @@ export async function uploadExamPaper(formData: FormData): Promise<{
     }
   } catch (error) {
     console.error("Error in uploadExamPaper:", error)
-    return { success: false, error: "An unexpected error occurred" }
+    const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred"
+    return { success: false, error: `Upload error: ${errorMessage}` }
   }
 }
 
