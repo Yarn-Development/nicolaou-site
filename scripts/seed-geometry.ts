@@ -298,7 +298,7 @@ Generate the question now.`
 
       return parsed
     } catch (parseError) {
-      console.error('   ❌ Failed to parse JSON response')
+      console.error('   ❌ Failed to parse JSON response', parseError)
       console.error('   Raw content:', content.substring(0, 500))
       return null
     }
@@ -325,7 +325,7 @@ async function executePythonCode(pythonCode: string): Promise<boolean> {
 
   try {
     // Execute Python script
-    const { stdout, stderr } = await execAsync(`python "${TEMP_PYTHON_FILE}"`, {
+    const { stderr } = await execAsync(`python "${TEMP_PYTHON_FILE}"`, {
       timeout: 30000, // 30 second timeout
     })
 

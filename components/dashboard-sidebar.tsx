@@ -76,8 +76,8 @@ export function DashboardSidebar() {
       number: "08"
     },
     {
-      title: "Upload Paper",
-      href: "/dashboard/assignments/external",
+      title: "Digitize Paper",
+      href: "/dashboard/ingest?mode=digitize",
       icon: <Upload className="h-5 w-5" />,
       number: "09"
     },
