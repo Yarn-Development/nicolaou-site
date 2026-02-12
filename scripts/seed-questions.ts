@@ -393,7 +393,7 @@ function shuffleArray<T>(array: T[]): void {
 // =====================================================
 
 interface GeneratedQuestion {
-  question_content: string // Updated to match DB Schema
+  question_latex: string // Updated to match DB Schema
   answer: string
   explanation: string
   marks: number
@@ -430,7 +430,7 @@ ${level.includes('A-Level') || level === 'GCSE Higher' ? '- Use advanced LaTeX n
 
 **Output Format (JSON):**
 {
-  "question_content": "Question text with LaTeX ($...$)",
+  "question_latex": "Question text with LaTeX ($...$)",
   "answer": "Final answer",
   "explanation": "Step-by-step solution",
   "marks": ${marks}
@@ -486,7 +486,7 @@ async function insertQuestion(params: {
   const questionData = {
     // 1. Content Type & Core Content
     content_type: 'generated_text' as const,
-    question_latex: generatedData.question_content, // Renamed from question_latex
+    question_latex: generatedData.question_latex, // Renamed from question_latex
     
     // 2. Curriculum Metadata
     curriculum_level: level,

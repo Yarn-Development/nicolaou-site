@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import Link from "next/link"
+import Image from "next/image"
 import {
   Search,
   Plus,
@@ -28,6 +29,10 @@ import {
   ImageIcon,
   Filter,
   Eye,
+  Monitor,
+  FileDown,
+  HelpCircle,
+  ScrollText,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -48,6 +53,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 import { LatexPreview } from "@/components/latex-preview"
 import { QuestionDisplayCompact, QuestionDisplay, SourceBadge } from "@/components/question-display"
 import type { Question as DatabaseQuestion } from "@/lib/types/database"
@@ -62,7 +76,7 @@ import {
   type AssignmentMode,
   type Assignment
 } from "@/app/actions/assignments"
-import { type Class } from "@/app/actions/classes"
+import { createClass, type Class } from "@/app/actions/classes"
 import {
   exportExamToWord,
   exportExamWithMarkScheme,
@@ -168,6 +182,14 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
   const [mode, setMode] = useState<AssignmentMode>("online")
   const [selectedClassId, setSelectedClassId] = useState("")
   const [dueDate, setDueDate] = useState("")
+  const [generateFeedbackSheets, setGenerateFeedbackSheets] = useState(true)
+  const [previewMode, setPreviewMode] = useState<"screen" | "print">("screen")
+  
+  // Quick Create Class State
+  const [showCreateClassDialog, setShowCreateClassDialog] = useState(false)
+  const [newClassName, setNewClassName] = useState("")
+  const [creatingClass, setCreatingClass] = useState(false)
+  const [availableClasses, setAvailableClasses] = useState<Class[]>(classes)
 
   // Step 3: Success State
   const [createdAssignment, setCreatedAssignment] = useState<Assignment | null>(null)
@@ -345,6 +367,29 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
     setTimeout(() => setLinkCopied(false), 3000)
   }, [createdAssignment])
 
+  const handleCreateClass = async () => {
+    if (!newClassName.trim()) return
+
+    setCreatingClass(true)
+    try {
+      const result = await createClass(newClassName.trim(), "Maths")
+      if (result.success && result.data) {
+        setAvailableClasses((prev) => [...prev, result.data!])
+        setSelectedClassId(result.data.id)
+        setShowCreateClassDialog(false)
+        setNewClassName("")
+        toast.success(`Class "${result.data.name}" created!`)
+      } else {
+        toast.error(result.error || "Failed to create class")
+      }
+    } catch (err) {
+      console.error("Error creating class:", err)
+      toast.error("An unexpected error occurred")
+    } finally {
+      setCreatingClass(false)
+    }
+  }
+
   // =====================================================
   // Computed Values
   // =====================================================
@@ -359,7 +404,7 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
     [selectedQuestions]
   )
 
-  const selectedClass = classes.find((c) => c.id === selectedClassId)
+  const selectedClass = availableClasses.find((c) => c.id === selectedClassId)
 
   // =====================================================
   // Render Steps
@@ -1036,168 +1081,446 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 </h1>
               </div>
             </div>
-            <div className="text-right">
-              <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                Selected
-              </p>
-              <p className="text-lg font-bold">
-                {selectedQuestions.length} questions / {totalMarks} marks
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Form Content */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-2xl mx-auto p-8 space-y-8">
-            {/* Title */}
-            <div>
-              <label className="block text-xs font-black uppercase tracking-widest text-swiss-lead mb-2">
-                Assignment Title *
-              </label>
-              <Input
-                placeholder="e.g. Week 5 - Algebra Practice"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="border-2 border-swiss-ink text-lg font-bold"
-              />
-            </div>
-
-            {/* Mode Selection */}
-            <div>
-              <label className="block text-xs font-black uppercase tracking-widest text-swiss-lead mb-3">
-                Assignment Mode *
-              </label>
-              <div className="grid grid-cols-2 gap-4">
-                {/* Online Mode Card */}
-                <button
-                  onClick={() => setMode("online")}
-                  className={`border-2 p-6 text-left transition-all ${mode === "online"
-                    ? "border-swiss-signal bg-swiss-signal/5"
-                    : "border-swiss-ink hover:border-swiss-lead"
-                    }`}
-                >
-                  <div className="flex items-start gap-4">
-                    <div className={`p-3 ${mode === "online" ? "bg-swiss-signal text-white" : "bg-swiss-concrete"}`}>
-                      <Laptop className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-black uppercase tracking-wider mb-1">Online</h3>
-                      <p className="text-sm text-swiss-lead">
-                        Students take this on their device. Auto-save and instant submission.
-                      </p>
-                    </div>
-                  </div>
-                  {mode === "online" && (
-                    <div className="mt-4 flex items-center gap-2 text-swiss-signal">
-                      <CheckCircle className="w-4 h-4" />
-                      <span className="text-xs font-bold uppercase tracking-wider">Selected</span>
-                    </div>
-                  )}
-                </button>
-
-                {/* Paper Mode Card */}
-                <button
-                  onClick={() => setMode("paper")}
-                  className={`border-2 p-6 text-left transition-all ${mode === "paper"
-                    ? "border-swiss-signal bg-swiss-signal/5"
-                    : "border-swiss-ink hover:border-swiss-lead"
-                    }`}
-                >
-                  <div className="flex items-start gap-4">
-                    <div className={`p-3 ${mode === "paper" ? "bg-swiss-signal text-white" : "bg-swiss-concrete"}`}>
-                      <Printer className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-black uppercase tracking-wider mb-1">Paper</h3>
-                      <p className="text-sm text-swiss-lead">
-                        Print a paper exam. Mark manually and enter scores digitally.
-                      </p>
-                    </div>
-                  </div>
-                  {mode === "paper" && (
-                    <div className="mt-4 flex items-center gap-2 text-swiss-signal">
-                      <CheckCircle className="w-4 h-4" />
-                      <span className="text-xs font-bold uppercase tracking-wider">Selected</span>
-                    </div>
-                  )}
-                </button>
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                  Selected
+                </p>
+                <p className="text-lg font-bold">
+                  {selectedQuestions.length} questions / {totalMarks} marks
+                </p>
               </div>
-            </div>
-
-            {/* Class Selection */}
-            <div>
-              <label className="block text-xs font-black uppercase tracking-widest text-swiss-lead mb-2">
-                <Users className="w-4 h-4 inline mr-2" />
-                Assign to Class *
-              </label>
-              <select
-                value={selectedClassId}
-                onChange={(e) => setSelectedClassId(e.target.value)}
-                className="w-full px-4 py-3 text-base border-2 border-swiss-ink bg-swiss-paper font-bold"
+              <Button
+                onClick={handleCreateAssignment}
+                disabled={submitting || !title.trim() || !selectedClassId}
+                className="bg-swiss-signal hover:bg-swiss-ink text-white font-bold uppercase tracking-wider"
               >
-                <option value="">Select a class...</option>
-                {classes.map((cls) => (
-                  <option key={cls.id} value={cls.id}>
-                    {cls.name} ({cls.subject})
-                  </option>
-                ))}
-              </select>
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Create Assignment
+                  </>
+                )}
+              </Button>
             </div>
+          </div>
+        </div>
 
-            {/* Due Date */}
-            <div>
-              <label className="block text-xs font-black uppercase tracking-widest text-swiss-lead mb-2">
-                <Calendar className="w-4 h-4 inline mr-2" />
-                Due Date (Optional)
-              </label>
-              <Input
-                type="datetime-local"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="border-2 border-swiss-ink"
-              />
-            </div>
-
-            {/* Error Message */}
-            {error && (
-              <div className="p-4 bg-red-50 border-2 border-red-500 text-red-700 font-bold">
-                {error}
+        {/* Split Screen Content */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left Panel - Configuration Form */}
+          <div className="w-1/2 border-r-2 border-swiss-ink flex flex-col bg-swiss-paper">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Title */}
+              <div>
+                <label className="block text-xs font-black uppercase tracking-widest text-swiss-lead mb-2">
+                  Assignment Title *
+                </label>
+                <Input
+                  placeholder="e.g. Week 5 - Algebra Practice"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="border-2 border-swiss-ink text-lg font-bold"
+                />
               </div>
-            )}
+
+              {/* Mode Selection */}
+              <div>
+                <label className="block text-xs font-black uppercase tracking-widest text-swiss-lead mb-3">
+                  Assignment Mode *
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Online Mode Card */}
+                  <button
+                    onClick={() => setMode("online")}
+                    className={`border-2 p-4 text-left transition-all ${mode === "online"
+                      ? "border-swiss-signal bg-swiss-signal/5"
+                      : "border-swiss-ink hover:border-swiss-lead"
+                      }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`p-2 ${mode === "online" ? "bg-swiss-signal text-white" : "bg-swiss-concrete"}`}>
+                        <Laptop className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-black uppercase tracking-wider text-sm mb-1">Online</h3>
+                        <p className="text-xs text-swiss-lead">
+                          Students take on device
+                        </p>
+                      </div>
+                    </div>
+                    {mode === "online" && (
+                      <div className="mt-3 flex items-center gap-2 text-swiss-signal">
+                        <CheckCircle className="w-3 h-3" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Selected</span>
+                      </div>
+                    )}
+                  </button>
+
+                  {/* Paper Mode Card */}
+                  <button
+                    onClick={() => setMode("paper")}
+                    className={`border-2 p-4 text-left transition-all ${mode === "paper"
+                      ? "border-swiss-signal bg-swiss-signal/5"
+                      : "border-swiss-ink hover:border-swiss-lead"
+                      }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`p-2 ${mode === "paper" ? "bg-swiss-signal text-white" : "bg-swiss-concrete"}`}>
+                        <Printer className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-black uppercase tracking-wider text-sm mb-1">Paper</h3>
+                        <p className="text-xs text-swiss-lead">
+                          Print and mark manually
+                        </p>
+                      </div>
+                    </div>
+                    {mode === "paper" && (
+                      <div className="mt-3 flex items-center gap-2 text-swiss-signal">
+                        <CheckCircle className="w-3 h-3" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Selected</span>
+                      </div>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Class Selection with Create New */}
+              <div>
+                <label className="block text-xs font-black uppercase tracking-widest text-swiss-lead mb-2">
+                  <Users className="w-4 h-4 inline mr-2" />
+                  Assign to Class *
+                </label>
+                <Select value={selectedClassId} onValueChange={setSelectedClassId}>
+                  <SelectTrigger className="border-2 border-swiss-ink bg-swiss-paper font-bold">
+                    <SelectValue placeholder="Select a class..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableClasses.map((cls) => (
+                      <SelectItem key={cls.id} value={cls.id}>
+                        {cls.name} ({cls.subject})
+                      </SelectItem>
+                    ))}
+                    <div className="border-t border-swiss-ink/20 mt-1 pt-1">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setShowCreateClassDialog(true)
+                        }}
+                        className="w-full px-2 py-2 text-left text-sm font-bold text-swiss-signal hover:bg-swiss-signal/10 flex items-center gap-2"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Create New Class
+                      </button>
+                    </div>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Due Date */}
+              <div>
+                <label className="block text-xs font-black uppercase tracking-widest text-swiss-lead mb-2">
+                  <Calendar className="w-4 h-4 inline mr-2" />
+                  Due Date (Optional)
+                </label>
+                <Input
+                  type="datetime-local"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                  className="border-2 border-swiss-ink"
+                />
+              </div>
+
+              {/* Generate Student Feedback Sheets Toggle */}
+              <div className="border-2 border-swiss-ink bg-swiss-concrete p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <ScrollText className="w-4 h-4 text-swiss-ink" />
+                      <span className="font-black uppercase tracking-wider text-sm">
+                        Generate Student Feedback Sheets
+                      </span>
+                      <div className="relative group">
+                        <HelpCircle className="w-4 h-4 text-swiss-lead cursor-help" />
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-swiss-ink text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                          <p>When enabled, personalized revision lists will be generated for each student based on their performance, highlighting topics they need to review.</p>
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-swiss-ink"></div>
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-xs text-swiss-lead">
+                      Creates personalized revision lists based on student performance
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={generateFeedbackSheets}
+                      onChange={(e) => setGenerateFeedbackSheets(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-swiss-lead/30 peer-checked:bg-swiss-signal rounded-full transition-colors"></div>
+                    <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white border border-swiss-ink rounded-full transition-transform peer-checked:translate-x-5"></div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Error Message */}
+              {error && (
+                <div className="p-4 bg-red-50 border-2 border-red-500 text-red-700 font-bold">
+                  {error}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="border-t-2 border-swiss-ink bg-swiss-paper px-6 py-4">
+              <Button
+                variant="outline"
+                onClick={() => setCurrentStep("builder")}
+                className="border-2 border-swiss-ink font-bold uppercase tracking-wider"
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Questions
+              </Button>
+            </div>
+          </div>
+
+          {/* Right Panel - Live Preview */}
+          <div className="w-1/2 flex flex-col bg-swiss-concrete">
+            {/* Preview Header */}
+            <div className="px-4 py-3 border-b-2 border-swiss-ink/20 flex items-center justify-between bg-swiss-paper">
+              <div className="flex items-center gap-2">
+                <Eye className="w-5 h-5" />
+                <h3 className="font-black uppercase tracking-wider">Preview</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Screen/Print Mode Toggle */}
+                <div className="flex border-2 border-swiss-ink">
+                  <button
+                    onClick={() => setPreviewMode("screen")}
+                    className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors ${
+                      previewMode === "screen"
+                        ? "bg-swiss-ink text-white"
+                        : "bg-swiss-paper text-swiss-ink hover:bg-swiss-concrete"
+                    }`}
+                  >
+                    <Monitor className="w-3.5 h-3.5" />
+                    Screen
+                  </button>
+                  <button
+                    onClick={() => setPreviewMode("print")}
+                    className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 transition-colors ${
+                      previewMode === "print"
+                        ? "bg-swiss-ink text-white"
+                        : "bg-swiss-paper text-swiss-ink hover:bg-swiss-concrete"
+                    }`}
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Print
+                  </button>
+                </div>
+                {/* Download Buttons */}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleExportExam(false)}
+                  disabled={isExporting || selectedQuestions.length === 0}
+                  className="border-2 border-swiss-ink text-xs font-bold uppercase"
+                >
+                  <FileDown className="w-3.5 h-3.5 mr-1" />
+                  Word
+                </Button>
+              </div>
+            </div>
+
+            {/* Preview Content */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {previewMode === "screen" ? (
+                /* Screen Mode - Scrollable List */
+                <div className="space-y-4">
+                  {selectedQuestions.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-muted-foreground py-20">
+                      <div className="text-center">
+                        <FileText className="w-12 h-12 mx-auto mb-4 opacity-40" />
+                        <p className="font-bold">No questions selected</p>
+                        <p className="text-sm">Go back to add questions to preview</p>
+                      </div>
+                    </div>
+                  ) : (
+                    selectedQuestions.map((question, index) => (
+                      <div key={question.id} className="border-2 border-swiss-ink bg-swiss-paper p-4">
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 flex items-center justify-center bg-swiss-ink text-white font-black text-sm shrink-0">
+                            {index + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <Badge variant="outline" className="text-xs border-swiss-ink font-bold">
+                                {question.topic}
+                              </Badge>
+                              <Badge variant="outline" className="text-xs border-swiss-ink font-bold">
+                                {question.marks} marks
+                              </Badge>
+                              {question.calculator_allowed && (
+                                <Badge variant="outline" className="text-xs border-swiss-lead">
+                                  <Calculator className="w-3 h-3 mr-1" />
+                                  Calculator
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="text-sm">
+                              <LatexPreview
+                                latex={question.question_latex}
+                                className="text-sm"
+                                showSkeleton={false}
+                              />
+                            </div>
+                            {question.image_url && (
+                              <div className="mt-2">
+                                <Image
+                                  src={question.image_url}
+                                  alt="Question diagram"
+                                  width={400}
+                                  height={160}
+                                  className="max-w-full h-auto max-h-40 border border-swiss-ink/20 object-contain"
+                                  unoptimized
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : (
+                /* Print Mode - A4 Page Preview */
+                <div className="flex justify-center">
+                  <div
+                    className="bg-white shadow-lg border border-swiss-ink/20 p-8 origin-top"
+                    style={{
+                      width: "210mm",
+                      minHeight: "297mm",
+                      transform: "scale(0.5)",
+                      transformOrigin: "top center",
+                    }}
+                  >
+                    {/* Paper Header */}
+                    <div className="text-center mb-8 border-b-2 border-swiss-ink pb-4">
+                      <h1 className="text-2xl font-black uppercase tracking-wider">
+                        {title || "Untitled Exam"}
+                      </h1>
+                      <p className="text-sm text-swiss-lead mt-1">
+                        {selectedQuestions.length} Questions | {totalMarks} Marks
+                      </p>
+                    </div>
+
+                    {/* Questions */}
+                    <div className="space-y-6">
+                      {selectedQuestions.map((question, index) => (
+                        <div key={question.id} className="pb-4 border-b border-swiss-ink/20">
+                          <div className="flex gap-3">
+                            <span className="font-black text-lg">{index + 1}.</span>
+                            <div className="flex-1">
+                              <LatexPreview
+                                latex={question.question_latex}
+                                className="text-base"
+                                showSkeleton={false}
+                              />
+                              {question.image_url && (
+                                <Image
+                                  src={question.image_url}
+                                  alt="Question diagram"
+                                  width={320}
+                                  height={200}
+                                  className="max-w-xs h-auto mt-2 object-contain"
+                                  unoptimized
+                                />
+                              )}
+                              <div className="mt-2 text-right text-sm text-swiss-lead">
+                                [{question.marks} marks]
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="border-t-2 border-swiss-ink bg-swiss-paper px-6 py-4">
-          <div className="max-w-2xl mx-auto flex items-center justify-between">
-            <Button
-              variant="outline"
-              onClick={() => setCurrentStep("builder")}
-              className="border-2 border-swiss-ink font-bold uppercase tracking-wider"
-            >
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back
-            </Button>
-            <Button
-              onClick={handleCreateAssignment}
-              disabled={submitting || !title.trim() || !selectedClassId}
-              className="bg-swiss-signal hover:bg-swiss-ink text-white font-bold uppercase tracking-wider"
-            >
-              {submitting ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Create Assignment
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
+        {/* Quick Create Class Dialog */}
+        <Dialog open={showCreateClassDialog} onOpenChange={setShowCreateClassDialog}>
+          <DialogContent className="border-2 border-swiss-ink">
+            <DialogHeader>
+              <DialogTitle className="font-black uppercase tracking-wider">
+                Create New Class
+              </DialogTitle>
+              <DialogDescription>
+                Add a new class to assign this assessment to.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div>
+                <Label htmlFor="className" className="text-xs font-black uppercase tracking-widest text-swiss-lead">
+                  Class Name
+                </Label>
+                <Input
+                  id="className"
+                  value={newClassName}
+                  onChange={(e) => setNewClassName(e.target.value)}
+                  placeholder="e.g. Year 10 Set 1"
+                  className="border-2 border-swiss-ink mt-2"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && newClassName.trim()) {
+                      handleCreateClass()
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowCreateClassDialog(false)
+                  setNewClassName("")
+                }}
+                className="border-2 border-swiss-ink font-bold uppercase tracking-wider"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateClass}
+                disabled={creatingClass || !newClassName.trim()}
+                className="bg-swiss-signal hover:bg-swiss-ink text-white font-bold uppercase tracking-wider"
+              >
+                {creatingClass ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Class
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }

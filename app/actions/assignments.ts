@@ -772,10 +772,16 @@ export async function getAssignmentDetails(
       { p_assignment_id: assignmentId }
     )
 
+    // Debug logging
+    if (junctionError) {
+      console.log("[getAssignmentDetails] RPC error:", junctionError.message)
+    }
+    console.log("[getAssignmentDetails] Junction questions found:", junctionQuestions?.length ?? 0)
+
     let questions: QuestionWithDetails[] = []
 
     if (!junctionError && junctionQuestions && junctionQuestions.length > 0) {
-      // Use junction table data
+      // Use junction table data from RPC
       questions = junctionQuestions.map((q: {
         question_id: string
         order_index: number
@@ -787,6 +793,8 @@ export async function getAssignmentDetails(
         question_type: string
         calculator_allowed: boolean
         answer_key: { answer: string; explanation: string }
+        custom_question_number: string | null
+        is_ghost: boolean
       }) => ({
         question_id: q.question_id,
         order_index: q.order_index,
@@ -800,35 +808,83 @@ export async function getAssignmentDetails(
         answer_key: q.answer_key,
       }))
     } else {
-      // Fallback to JSONB content.question_ids
-      const questionIds = (assignment.content as { question_ids?: string[] })?.question_ids || []
+      // Fallback 1: Try direct query to junction table
+      console.log("[getAssignmentDetails] Trying direct junction table query...")
+      const { data: directJunction, error: directError } = await supabase
+        .from("assignment_questions")
+        .select(`
+          question_id,
+          order_index,
+          questions!inner(
+            id,
+            marks,
+            question_latex,
+            topic,
+            sub_topic,
+            difficulty,
+            question_type,
+            calculator_allowed,
+            answer_key
+          )
+        `)
+        .eq("assignment_id", assignmentId)
+        .order("order_index", { ascending: true })
 
-      if (questionIds.length > 0) {
-        const { data: questionsData, error: questionsError } = await supabase
-          .from("questions")
-          .select("id, marks, question_latex, topic, sub_topic, difficulty, question_type, calculator_allowed, answer_key")
-          .in("id", questionIds)
+      if (!directError && directJunction && directJunction.length > 0) {
+        console.log("[getAssignmentDetails] Direct junction query found:", directJunction.length)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        questions = directJunction.map((aq: any) => {
+          const q = aq.questions
+          return {
+            question_id: aq.question_id,
+            order_index: aq.order_index,
+            marks: q.marks,
+            question_latex: q.question_latex,
+            topic: q.topic,
+            sub_topic: q.sub_topic,
+            difficulty: q.difficulty,
+            question_type: q.question_type,
+            calculator_allowed: q.calculator_allowed,
+            answer_key: q.answer_key,
+          }
+        })
+      } else {
+        // Fallback 2: Use JSONB content.question_ids
+        if (directError) {
+          console.log("[getAssignmentDetails] Direct junction error:", directError.message)
+        }
+        const questionIds = (assignment.content as { question_ids?: string[] })?.question_ids || []
+        console.log("[getAssignmentDetails] Fallback to content.question_ids:", questionIds.length)
 
-        if (!questionsError && questionsData) {
-          // Maintain order from question_ids array
-          questions = questionIds
-            .map((id, index) => {
-              const q = questionsData.find((qd) => qd.id === id)
-              if (!q) return null
-              return {
-                question_id: q.id,
-                order_index: index,
-                marks: q.marks,
-                question_latex: q.question_latex,
-                topic: q.topic,
-                sub_topic: q.sub_topic,
-                difficulty: q.difficulty,
-                question_type: q.question_type,
-                calculator_allowed: q.calculator_allowed,
-                answer_key: q.answer_key as { answer: string; explanation: string },
-              }
-            })
-            .filter((q): q is QuestionWithDetails => q !== null)
+        if (questionIds.length > 0) {
+          const { data: questionsData, error: questionsError } = await supabase
+            .from("questions")
+            .select("id, marks, question_latex, topic, sub_topic, difficulty, question_type, calculator_allowed, answer_key")
+            .in("id", questionIds)
+
+          console.log("[getAssignmentDetails] Questions fetch result:", questionsData?.length ?? 0, "error:", questionsError?.message)
+
+          if (!questionsError && questionsData) {
+            // Maintain order from question_ids array
+            questions = questionIds
+              .map((id, index) => {
+                const q = questionsData.find((qd) => qd.id === id)
+                if (!q) return null
+                return {
+                  question_id: q.id,
+                  order_index: index,
+                  marks: q.marks,
+                  question_latex: q.question_latex,
+                  topic: q.topic,
+                  sub_topic: q.sub_topic,
+                  difficulty: q.difficulty,
+                  question_type: q.question_type,
+                  calculator_allowed: q.calculator_allowed,
+                  answer_key: q.answer_key as { answer: string; explanation: string },
+                }
+              })
+              .filter((q): q is QuestionWithDetails => q !== null)
+          }
         }
       }
     }

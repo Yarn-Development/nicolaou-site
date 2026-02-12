@@ -17,6 +17,7 @@ import {
   Trash2,
   Monitor,
   FileStack,
+  Eye,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -349,7 +350,9 @@ function AssignmentRow({ assignment, onDownload, onDelete, isDownloading }: Assi
       <div className="flex items-center justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-1">
-            <h3 className="font-bold text-lg truncate">{assignment.title}</h3>
+            <Link href={`/dashboard/assignments/${assignment.id}`} className="hover:text-swiss-signal transition-colors">
+              <h3 className="font-bold text-lg truncate">{assignment.title}</h3>
+            </Link>
 
             {/* Mode Badge */}
             {assignment.mode === "paper" ? (
@@ -456,6 +459,12 @@ function AssignmentRow({ assignment, onDownload, onDelete, isDownloading }: Assi
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="border-2 border-swiss-ink">
+              <DropdownMenuItem asChild className="font-medium cursor-pointer">
+                <Link href={`/dashboard/assignments/${assignment.id}`}>
+                  <Eye className="h-4 w-4 mr-2" />
+                  View Details
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuItem asChild className="font-medium cursor-pointer">
                 <Link href={`/dashboard/assignments/${assignment.id}/feedback`}>
                   <FileText className="h-4 w-4 mr-2" />
