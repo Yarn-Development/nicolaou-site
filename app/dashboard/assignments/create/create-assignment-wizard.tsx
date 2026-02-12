@@ -31,8 +31,6 @@ import {
   Eye,
   Monitor,
   FileDown,
-  HelpCircle,
-  ScrollText,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -84,6 +82,7 @@ import {
 } from "@/lib/docx-exporter"
 import { toast } from "sonner"
 import { Stepper } from "@/components/ui/stepper"
+import { FeedbackSettings } from "@/components/assignment-wizard/feedback-settings"
 
 // =====================================================
 // Types
@@ -183,6 +182,7 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
   const [selectedClassId, setSelectedClassId] = useState("")
   const [dueDate, setDueDate] = useState("")
   const [generateFeedbackSheets, setGenerateFeedbackSheets] = useState(true)
+  const [includeRemediation, setIncludeRemediation] = useState(true)
   const [previewMode, setPreviewMode] = useState<"screen" | "print">("screen")
   
   // Quick Create Class State
@@ -300,6 +300,8 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
           dueDate: dueDate || undefined,
           status: "published", // Publish immediately
           mode: mode,
+          generateFeedback: generateFeedbackSheets,
+          includeRemediation: includeRemediation,
         }
       )
 
@@ -1238,39 +1240,13 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 />
               </div>
 
-              {/* Generate Student Feedback Sheets Toggle */}
-              <div className="border-2 border-swiss-ink bg-swiss-concrete p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <ScrollText className="w-4 h-4 text-swiss-ink" />
-                      <span className="font-black uppercase tracking-wider text-sm">
-                        Generate Student Feedback Sheets
-                      </span>
-                      <div className="relative group">
-                        <HelpCircle className="w-4 h-4 text-swiss-lead cursor-help" />
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-swiss-ink text-white text-xs rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                          <p>When enabled, personalized revision lists will be generated for each student based on their performance, highlighting topics they need to review.</p>
-                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-swiss-ink"></div>
-                        </div>
-                      </div>
-                    </div>
-                    <p className="text-xs text-swiss-lead">
-                      Creates personalized revision lists based on student performance
-                    </p>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={generateFeedbackSheets}
-                      onChange={(e) => setGenerateFeedbackSheets(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-11 h-6 bg-swiss-lead/30 peer-checked:bg-swiss-signal rounded-full transition-colors"></div>
-                    <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white border border-swiss-ink rounded-full transition-transform peer-checked:translate-x-5"></div>
-                  </label>
-                </div>
-              </div>
+              {/* Feedback & Revision Settings */}
+              <FeedbackSettings
+                generateFeedback={generateFeedbackSheets}
+                onGenerateFeedbackChange={setGenerateFeedbackSheets}
+                includeRemediation={includeRemediation}
+                onIncludeRemediationChange={setIncludeRemediation}
+              />
 
               {/* Error Message */}
               {error && (
