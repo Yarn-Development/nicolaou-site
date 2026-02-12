@@ -619,6 +619,8 @@ export async function createAssignmentWithQuestions(
     status?: AssignmentStatus
     mode?: AssignmentMode
     description?: string
+    generateFeedback?: boolean
+    includeRemediation?: boolean
   } = {}
 ) {
   const supabase = await createClient()
@@ -658,6 +660,11 @@ export async function createAssignmentWithQuestions(
   }
 
   // Create the assignment (also store question_ids in content for backward compatibility)
+  const feedbackSettings = {
+    generate_feedback: options.generateFeedback ?? true,
+    include_remediation: options.includeRemediation ?? true,
+  }
+
   const { data: newAssignment, error: insertError } = await supabase
     .from("assignments")
     .insert({
@@ -666,7 +673,9 @@ export async function createAssignmentWithQuestions(
       content: {
         question_ids: questionIds,
         description: options.description || "",
+        ...feedbackSettings,
       },
+      metadata: feedbackSettings,
       due_date: options.dueDate || null,
       status: options.status || "draft",
       mode: options.mode || "online",
