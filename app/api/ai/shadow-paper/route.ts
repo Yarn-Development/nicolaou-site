@@ -531,6 +531,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
         title: assignmentTitle,
         status: 'draft',
         mode: 'paper',
+        assignment_type: 'shadow_paper',
         content: {
           question_ids: questionIds,
           description: `AI-generated shadow paper based on ${baseFilename}`,

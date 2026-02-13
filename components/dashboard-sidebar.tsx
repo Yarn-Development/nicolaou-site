@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { BarChart, FileText, LayoutDashboard, Settings, Users, ChevronLeft, ChevronRight, Database, ClipboardList, ClipboardCheck, PlusCircle, Upload, Menu, X } from "lucide-react"
+import { BarChart, FileText, LayoutDashboard, Settings, Users, ChevronLeft, ChevronRight, Database, ClipboardList, ClipboardCheck, PlusCircle, Upload, Menu, X, Library } from "lucide-react"
 
 export function DashboardSidebar() {
   const pathname = usePathname()
@@ -52,34 +52,40 @@ export function DashboardSidebar() {
       number: "04"
     },
     {
+      title: "My Library",
+      href: "/dashboard/library",
+      icon: <Library className="h-5 w-5" />,
+      number: "05"
+    },
+    {
       title: "New Assignment",
       href: "/dashboard/assignments/create",
       icon: <PlusCircle className="h-5 w-5" />,
-      number: "05"
+      number: "06"
     },
     {
       title: "Question Bank",
       href: "/dashboard/questions/browse",
       icon: <Database className="h-5 w-5" />,
-      number: "06"
+      number: "07"
     },
     {
       title: "Videos",
       href: "/dashboard/assessments",
       icon: <FileText className="h-5 w-5" />,
-      number: "07"
+      number: "08"
     },
     {
       title: "Analytics",
       href: "/dashboard/analytics",
       icon: <BarChart className="h-5 w-5" />,
-      number: "08"
+      number: "09"
     },
     {
       title: "Digitize Paper",
       href: "/dashboard/ingest?mode=digitize",
       icon: <Upload className="h-5 w-5" />,
-      number: "09"
+      number: "10"
     },
   ]
 
