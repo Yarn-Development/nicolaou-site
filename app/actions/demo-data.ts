@@ -249,7 +249,7 @@ export async function seedDemoData(): Promise<{
       }
 
       // Create submission
-      const { data: submission, error: submissionError } = await admin
+      const {  error: submissionError } = await admin
         .from("submissions")
         .insert({
           assignment_id: newAssignment.id,
