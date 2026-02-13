@@ -85,8 +85,8 @@ function safeParseJSON(content: string): unknown | null {
 // =====================================================
 
 interface ShadowPaperRequest {
-  /** Base64 encoded images of PDF pages */
-  pageImages: string[]
+  /** Storage paths for uploaded page images in the 'papers' bucket */
+  imagePaths: string[]
   /** Target year for the shadow paper */
   targetYear: string
   /** Target stream (curriculum level) */
@@ -393,7 +393,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
     const body = await request.json() as ShadowPaperRequest
 
     // Validate required fields
-    if (!body.pageImages || body.pageImages.length === 0) {
+    if (!body.imagePaths || body.imagePaths.length === 0) {
       return NextResponse.json(
         { success: false, error: 'At least one page image is required' },
         { status: 400 }
@@ -435,17 +435,41 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
       )
     }
 
-    const { pageImages, targetYear, targetStream, classId, originalFilename } = body
+    const { imagePaths, targetYear, targetStream, classId, originalFilename } = body
 
-    // Step 1: Extract questions from all pages
-    console.log(`[Shadow Paper] Extracting questions from ${pageImages.length} pages...`)
+    // Step 1: Download images from Supabase Storage and extract questions
+    console.log(`[Shadow Paper] Downloading and extracting questions from ${imagePaths.length} pages...`)
     
     const allExtractedQuestions: ExtractedQuestion[] = []
     
-    for (let i = 0; i < pageImages.length; i++) {
-      const pageQuestions = await extractQuestionsFromPage(pageImages[i], i + 1)
+    for (let i = 0; i < imagePaths.length; i++) {
+      // Download image from Supabase Storage
+      const { data: fileData, error: downloadError } = await supabase.storage
+        .from('exam-papers')
+        .download(imagePaths[i])
+
+      if (downloadError || !fileData) {
+        console.error(`[Shadow Paper] Failed to download page ${i + 1}:`, downloadError?.message)
+        continue
+      }
+
+      // Convert to base64 data URL for the vision model
+      const arrayBuffer = await fileData.arrayBuffer()
+      const base64 = Buffer.from(arrayBuffer).toString('base64')
+      const imageDataUrl = `data:image/png;base64,${base64}`
+
+      const pageQuestions = await extractQuestionsFromPage(imageDataUrl, i + 1)
       allExtractedQuestions.push(...pageQuestions)
     }
+
+    // Clean up uploaded images from storage (fire-and-forget)
+    supabase.storage
+      .from('exam-papers')
+      .remove(imagePaths)
+      .then(({ error }) => {
+        if (error) console.error('[Shadow Paper] Failed to clean up storage files:', error.message)
+        else console.log(`[Shadow Paper] Cleaned up ${imagePaths.length} storage files`)
+      })
 
     console.log(`[Shadow Paper] Extracted ${allExtractedQuestions.length} questions`)
 
