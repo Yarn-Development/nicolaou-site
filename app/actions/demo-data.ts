@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { revalidatePath } from "next/cache"
 
 // =====================================================
@@ -104,7 +105,12 @@ export async function seedDemoData(): Promise<{
       }
     }
 
-    // 2. Create demo student profiles
+    // 2. Create demo student profiles using admin client
+    // We need the admin client to:
+    // - Create auth.users entries (profiles.id has FK to auth.users)
+    // - Bypass RLS (no INSERT policy exists on profiles for authenticated users)
+    const admin = createAdminClient()
+
     const demoStudents: DemoStudent[] = [
       { name: "Alice Thompson", email: `demo.alice.${user.id.slice(0, 8)}@demo.nicolaou.app` },
       { name: "Ben Carter", email: `demo.ben.${user.id.slice(0, 8)}@demo.nicolaou.app` },
@@ -116,28 +122,32 @@ export async function seedDemoData(): Promise<{
     const studentIds: string[] = []
 
     for (const student of demoStudents) {
-      // Create a fake profile (using a generated UUID)
-      const studentId = crypto.randomUUID()
-      
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .insert({
-          id: studentId,
-          email: student.email,
-          full_name: student.name,
-          role: "student",
-        })
+      // Create a real auth.users entry — this also triggers handle_new_user()
+      // which auto-creates the profile row with role 'student'
+      const { data: authUser, error: authError } = await admin.auth.admin.createUser({
+        email: student.email,
+        email_confirm: true,
+        user_metadata: { full_name: student.name },
+        // No password — demo users cannot log in
+      })
 
-      if (profileError) {
-        console.error(`Error creating demo student ${student.name}:`, profileError)
-        // Continue with other students
+      if (authError || !authUser.user) {
+        console.error(`Error creating demo student ${student.name}:`, authError)
         continue
       }
+
+      const studentId = authUser.user.id
+
+      // Update the profile full_name in case the trigger didn't set it correctly
+      await admin
+        .from("profiles")
+        .update({ full_name: student.name })
+        .eq("id", studentId)
 
       studentIds.push(studentId)
 
       // 3. Enroll student in the demo class
-      const { error: enrollError } = await supabase
+      const { error: enrollError } = await admin
         .from("enrollments")
         .insert({
           class_id: newClass.id,
@@ -205,7 +215,7 @@ export async function seedDemoData(): Promise<{
       order_index: index,
     }))
 
-    const { error: junctionError } = await supabase
+    const { error: junctionError } = await admin
       .from("assignment_questions")
       .insert(assignmentQuestions)
 
@@ -239,7 +249,7 @@ export async function seedDemoData(): Promise<{
       }
 
       // Create submission
-      const { data: submission, error: submissionError } = await supabase
+      const {  error: submissionError } = await admin
         .from("submissions")
         .insert({
           assignment_id: newAssignment.id,
@@ -258,28 +268,6 @@ export async function seedDemoData(): Promise<{
       if (submissionError) {
         console.error(`Error creating submission for student ${i + 1}:`, submissionError)
         continue
-      }
-
-      // 8. Create student_responses entries for each question
-      if (submission) {
-        for (const question of questions) {
-          const questionScore = gradingData[question.id].score
-          const isCorrect = questionScore === question.marks
-
-          const { error: responseError } = await supabase
-            .from("student_responses")
-            .insert({
-              submission_id: submission.id,
-              question_id: question.id,
-              marks_awarded: questionScore,
-              is_correct: isCorrect,
-            })
-
-          if (responseError) {
-            console.error(`Error creating student_response for Q${question.id}:`, responseError)
-            // Non-fatal - continue
-          }
-        }
       }
     }
 
@@ -330,6 +318,8 @@ export async function removeDemoData(): Promise<{
   }
 
   try {
+    const admin = createAdminClient()
+
     // Find the demo class
     const { data: demoClass } = await supabase
       .from("classes")
@@ -346,7 +336,7 @@ export async function removeDemoData(): Promise<{
     }
 
     // Get demo students (those enrolled in this class with demo email pattern)
-    const { data: enrollments } = await supabase
+    const { data: enrollments } = await admin
       .from("enrollments")
       .select("student_id")
       .eq("class_id", demoClass.id)
@@ -354,22 +344,25 @@ export async function removeDemoData(): Promise<{
     const studentIds = enrollments?.map(e => e.student_id) || []
 
     // Delete enrollments first
-    await supabase
+    await admin
       .from("enrollments")
       .delete()
       .eq("class_id", demoClass.id)
 
-    // Delete demo student profiles (those with demo email pattern)
+    // Delete demo student profiles and auth.users entries
     if (studentIds.length > 0) {
-      await supabase
-        .from("profiles")
-        .delete()
-        .in("id", studentIds)
-        .like("email", "%@demo.nicolaou.app")
+      // Profiles will be cascade-deleted when we delete the auth.users entries
+      // (profiles.id FK references auth.users(id) ON DELETE CASCADE)
+      for (const studentId of studentIds) {
+        const { error: deleteUserError } = await admin.auth.admin.deleteUser(studentId)
+        if (deleteUserError) {
+          console.error(`Error deleting demo auth user ${studentId}:`, deleteUserError)
+        }
+      }
     }
 
     // Delete the demo class (this should cascade delete assignments, submissions, etc.)
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await admin
       .from("classes")
       .delete()
       .eq("id", demoClass.id)
