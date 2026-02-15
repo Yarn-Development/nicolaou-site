@@ -4,6 +4,7 @@ import { useState, useCallback } from "react"
 import { useDropzone } from "react-dropzone"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import { createClient } from "@/lib/supabase/client"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -171,6 +172,39 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
   }
 
   // =====================================================
+  // Helper: Upload page images to Supabase Storage
+  // =====================================================
+
+  const uploadPageImages = async (images: string[]): Promise<string[]> => {
+    const supabase = createClient()
+    const timestamp = Date.now()
+    const uploadedPaths: string[] = []
+
+    for (let i = 0; i < images.length; i++) {
+      // Convert base64 data URL to Blob
+      const response = await fetch(images[i])
+      const blob = await response.blob()
+
+      const filePath = `shadow-pages/${timestamp}/page-${i + 1}.png`
+
+      const { error } = await supabase.storage
+        .from("exam-papers")
+        .upload(filePath, blob, {
+          contentType: "image/png",
+          upsert: false,
+        })
+
+      if (error) {
+        throw new Error(`Failed to upload page ${i + 1}: ${error.message}`)
+      }
+
+      uploadedPaths.push(filePath)
+    }
+
+    return uploadedPaths
+  }
+
+  // =====================================================
   // Main processing function
   // =====================================================
 
@@ -197,10 +231,20 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
         throw new Error("Failed to convert PDF to images")
       }
 
-      // Step 2: Send to API for extraction
+      // Step 1b: Upload images to Supabase Storage
+      setProgress({
+        status: "uploading",
+        message: `Uploading ${pageImages.length} page images...`,
+        currentStep: 1,
+        totalSteps: 4,
+      })
+
+      const imagePaths = await uploadPageImages(pageImages)
+
+      // Step 2: Send storage paths to API for extraction
       setProgress({
         status: "extracting",
-        message: `Extracting questions from ${pageImages.length} pages...`,
+        message: `Extracting questions from ${imagePaths.length} pages...`,
         currentStep: 2,
         totalSteps: 4,
       })
@@ -211,7 +255,7 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          pageImages,
+          imagePaths,
           targetYear,
           targetStream,
           classId: selectedClassId,

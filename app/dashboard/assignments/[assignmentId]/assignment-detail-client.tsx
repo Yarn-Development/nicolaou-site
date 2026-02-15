@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, FileText, CheckCircle, ClipboardList, Calendar, Users, Hash, Calculator, Ban } from "lucide-react"
+import { ArrowLeft, FileText, CheckCircle, ClipboardList, Calendar, Users, Hash, Calculator, Ban, Printer } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import type { AssignmentDetails } from "@/app/actions/assignments"
@@ -125,6 +125,18 @@ export function AssignmentDetailClient({ assignment }: AssignmentDetailClientPro
             <Button variant="outline" className="border-2 border-swiss-ink font-bold uppercase tracking-wider">
               <FileText className="w-4 h-4 mr-2" />
               View Feedback
+            </Button>
+          </Link>
+          <Link href={`/dashboard/assignments/${assignment.id}/print`}>
+            <Button variant="outline" className="border-2 border-swiss-ink font-bold uppercase tracking-wider">
+              <Printer className="w-4 h-4 mr-2" />
+              Print Exam Paper
+            </Button>
+          </Link>
+          <Link href={`/dashboard/assignments/${assignment.id}/print?view=marksheet`}>
+            <Button variant="outline" className="border-2 border-swiss-ink font-bold uppercase tracking-wider">
+              <ClipboardList className="w-4 h-4 mr-2" />
+              Student Marksheet
             </Button>
           </Link>
         </div>

@@ -9,6 +9,7 @@ import { revalidatePath } from "next/cache"
 
 export type AssignmentStatus = "draft" | "published"
 export type AssignmentMode = "online" | "paper"
+export type AssignmentType = "exam" | "shadow_paper"
 export type SubmissionStatus = "submitted" | "graded"
 
 export type Assignment = {
@@ -18,6 +19,7 @@ export type Assignment = {
   due_date: string | null
   status: AssignmentStatus
   mode: AssignmentMode
+  assignment_type: AssignmentType
   content: {
     question_ids?: string[]
     description?: string
