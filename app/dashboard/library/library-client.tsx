@@ -428,16 +428,28 @@ function LibraryRow({
             </Button>
           </Link>
         ) : item.type === "revision_list" ? (
-          <Link href={`/dashboard/library/revision/${item.id}`}>
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-2 border-swiss-ink font-bold uppercase text-xs tracking-wider"
-            >
-              <Eye className="h-3 w-3 mr-1" />
-              View
-            </Button>
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link href={`/dashboard/library/revision/${item.id}`}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-2 border-swiss-ink font-bold uppercase text-xs tracking-wider"
+              >
+                <Eye className="h-3 w-3 mr-1" />
+                View
+              </Button>
+            </Link>
+            <Link href={`/revision-list/${item.id}`}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-2 border-swiss-ink font-bold uppercase text-xs tracking-wider"
+              >
+                <Printer className="h-3 w-3 mr-1" />
+                Print
+              </Button>
+            </Link>
+          </div>
         ) : (
           <Link href={`/dashboard/assignments/${item.id}`}>
             <Button
@@ -463,7 +475,33 @@ function LibraryRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="border-2 border-swiss-ink">
-            {item.type !== "revision_list" && (
+            {item.type === "revision_list" ? (
+              <>
+                <DropdownMenuItem
+                  onClick={() =>
+                    window.open(
+                      `/dashboard/library/revision/${item.id}`,
+                      "_self"
+                    )
+                  }
+                >
+                  <Eye className="h-4 w-4 mr-2" />
+                  View Details
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    window.open(
+                      `/revision-list/${item.id}`,
+                      "_self"
+                    )
+                  }
+                >
+                  <Printer className="h-4 w-4 mr-2" />
+                  Print Preview
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            ) : (
               <>
                 <DropdownMenuItem
                   onClick={() =>

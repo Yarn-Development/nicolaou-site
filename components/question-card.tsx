@@ -1,8 +1,11 @@
 "use client"
 
-import { Plus, Check } from "lucide-react"
+import { useState } from "react"
+import { Plus, Check, Bookmark, BookmarkCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { QuestionDisplay, SourceBadge } from "@/components/question-display"
+import { saveQuestionToBank, removeQuestionFromBank } from "@/app/actions/saved-questions"
+import { toast } from "sonner"
 import type { Question } from "@/lib/types/database"
 
 interface QuestionCardProps {
@@ -12,6 +15,10 @@ interface QuestionCardProps {
   isAdded?: boolean
   /** Show full question preview or compact view */
   variant?: 'full' | 'compact'
+  /** Whether this question is saved in the teacher's personal bank */
+  isSaved?: boolean
+  /** Show the save-to-bank button */
+  showSaveButton?: boolean
 }
 
 /**
@@ -25,8 +32,40 @@ export function QuestionCard({
   onAdd, 
   disabled, 
   isAdded,
-  variant = 'compact'
+  variant = 'compact',
+  isSaved: initialIsSaved = false,
+  showSaveButton = true,
 }: QuestionCardProps) {
+  const [isSaved, setIsSaved] = useState(initialIsSaved)
+  const [isSaving, setIsSaving] = useState(false)
+
+  const handleToggleSave = async () => {
+    setIsSaving(true)
+    try {
+      if (isSaved) {
+        const result = await removeQuestionFromBank(question.id)
+        if (result.success) {
+          setIsSaved(false)
+          toast.success('Removed from Personal Bank')
+        } else {
+          toast.error('Failed to remove from bank')
+        }
+      } else {
+        const result = await saveQuestionToBank(question.id)
+        if (result.success) {
+          setIsSaved(true)
+          toast.success('Saved to Personal Bank')
+        } else {
+          toast.error('Failed to save to bank')
+        }
+      }
+    } catch {
+      toast.error('An error occurred')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   return (
     <div className={`
       border-2 border-swiss-ink bg-swiss-paper
@@ -68,16 +107,42 @@ export function QuestionCard({
             )}
           </div>
 
-          {/* Add Button */}
-          <Button
-            onClick={() => onAdd(question)}
-            disabled={disabled || isAdded}
-            className={`
-              font-bold uppercase tracking-wider text-xs px-4 py-2
-              transition-colors duration-200 flex-shrink-0
-              ${isAdded 
-                ? "bg-green-500 text-white border-2 border-green-600 hover:bg-green-500" 
-                : "bg-swiss-signal text-white hover:bg-swiss-ink"
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Save to Bank Button */}
+            {showSaveButton && (
+              <Button
+                onClick={handleToggleSave}
+                disabled={isSaving}
+                variant="outline"
+                size="sm"
+                className={`
+                  text-xs px-2 py-2 transition-colors duration-200
+                  ${isSaved 
+                    ? "border-amber-500 text-amber-600 bg-amber-50 hover:bg-amber-100" 
+                    : "border-swiss-ink/30 text-swiss-lead hover:border-swiss-ink hover:text-swiss-ink"
+                  }
+                `}
+                title={isSaved ? "Remove from Personal Bank" : "Save to Personal Bank"}
+              >
+                {isSaved ? (
+                  <BookmarkCheck className="h-4 w-4" />
+                ) : (
+                  <Bookmark className="h-4 w-4" />
+                )}
+              </Button>
+            )}
+
+            {/* Add Button */}
+            <Button
+              onClick={() => onAdd(question)}
+              disabled={disabled || isAdded}
+              className={`
+                font-bold uppercase tracking-wider text-xs px-4 py-2
+                transition-colors duration-200
+                ${isAdded 
+                  ? "bg-green-500 text-white border-2 border-green-600 hover:bg-green-500" 
+                  : "bg-swiss-signal text-white hover:bg-swiss-ink"
               }
               disabled:opacity-50 disabled:cursor-not-allowed
             `}
@@ -94,6 +159,7 @@ export function QuestionCard({
               </>
             )}
           </Button>
+          </div>
         </div>
       </div>
 

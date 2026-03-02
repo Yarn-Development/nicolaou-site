@@ -10,6 +10,7 @@ import {
   ChevronUp,
   Loader2,
   Trophy,
+  Printer,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -145,6 +146,20 @@ function RevisionListCard({ list, isExpanded, onToggleExpand }: RevisionListCard
               </p>
               <p className="text-xs text-swiss-lead">questions done</p>
             </div>
+
+            <Link
+              href={`/revision-list/${list.revision_list_id}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-2 border-swiss-ink font-bold uppercase text-[10px] tracking-wider hidden md:flex"
+              >
+                <Printer className="h-3 w-3 mr-1" />
+                Print
+              </Button>
+            </Link>
             
             {isExpanded ? (
               <ChevronUp className="h-5 w-5 text-swiss-lead" />

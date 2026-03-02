@@ -12,6 +12,7 @@ import {
   Calculator,
   Hash,
   Calendar,
+  Printer,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -91,16 +92,24 @@ export function RevisionDetailClient({
 
   return (
     <div className="space-y-6">
-      {/* Back Button */}
-      <Link href="/dashboard/library">
-        <Button
-          variant="ghost"
-          className="font-bold uppercase text-xs tracking-wider -ml-2"
-        >
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Library
-        </Button>
-      </Link>
+      {/* Navigation */}
+      <div className="flex items-center justify-between">
+        <Link href="/dashboard/library">
+          <Button
+            variant="ghost"
+            className="font-bold uppercase text-xs tracking-wider -ml-2"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Library
+          </Button>
+        </Link>
+        <Link href={`/revision-list/${revisionList.id}`}>
+          <Button className="bg-swiss-ink hover:bg-swiss-ink/90 text-white font-bold uppercase text-xs tracking-wider border-2 border-swiss-ink">
+            <Printer className="h-4 w-4 mr-2" />
+            Print Revision List
+          </Button>
+        </Link>
+      </div>
 
       {/* Header */}
       <div className="border-b-2 border-swiss-ink pb-6">

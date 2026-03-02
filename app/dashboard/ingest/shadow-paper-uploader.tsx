@@ -607,19 +607,37 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
               
               <div className="space-y-3">
                 <Button
-                  onClick={() => router.push(`/dashboard/assignments/${resultAssignmentId}`)}
+                  onClick={() => router.push(`/dashboard/assignments/${resultAssignmentId}/print`)}
                   className="w-full bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider h-12"
+                >
+                  <FileText className="w-4 h-4 mr-2" />
+                  PRINT / EXPORT PAPER
+                  <ChevronRight className="w-4 h-4 ml-2" />
+                </Button>
+                <Button
+                  onClick={() => router.push(`/dashboard/assignments/${resultAssignmentId}`)}
+                  variant="outline"
+                  className="w-full border-2 border-swiss-ink font-bold uppercase tracking-wider h-12"
                 >
                   VIEW ASSIGNMENT
                   <ChevronRight className="w-4 h-4 ml-2" />
                 </Button>
-                <Button
-                  onClick={handleReset}
-                  variant="outline"
-                  className="w-full border-2 border-swiss-ink font-bold uppercase tracking-wider"
-                >
-                  CREATE ANOTHER
-                </Button>
+                <div className="grid grid-cols-2 gap-3">
+                  <Button
+                    onClick={() => router.push('/dashboard/library')}
+                    variant="outline"
+                    className="border-2 border-swiss-ink font-bold uppercase tracking-wider"
+                  >
+                    VIEW IN LIBRARY
+                  </Button>
+                  <Button
+                    onClick={handleReset}
+                    variant="outline"
+                    className="border-2 border-swiss-ink font-bold uppercase tracking-wider"
+                  >
+                    CREATE ANOTHER
+                  </Button>
+                </div>
               </div>
             </div>
           )}

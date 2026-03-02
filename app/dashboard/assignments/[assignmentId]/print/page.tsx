@@ -17,10 +17,12 @@ export default async function PrintPage({ params, searchParams }: PrintPageProps
     notFound()
   }
 
+  const initialView = view === "marksheet" ? "marksheet" : view === "feedback" ? "feedback" : "paper"
+
   return (
     <ExamPaperClient
       assignment={result.data}
-      initialView={view === "marksheet" ? "marksheet" : "paper"}
+      initialView={initialView}
     />
   )
 }

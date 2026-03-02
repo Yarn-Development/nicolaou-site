@@ -1,20 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { sanitize } from '@/lib/question-sanitizer'
 
 /**
  * Shadow Paper Generation API
  * 
- * Takes a PDF page image, extracts questions using vision AI,
- * then generates new "shadow" questions that test the same skills
- * but with different numbers/contexts.
+ * Takes uploaded page image paths from Supabase Storage, extracts questions 
+ * using vision AI, then generates new "shadow" questions that test the same 
+ * skills but with different numbers/contexts.
+ * 
+ * Optimized for Vercel deployment:
+ * - Processes pages in parallel batches (avoids timeout)
+ * - Uses signed URLs instead of downloading full images (avoids 413)
+ * - Generates shadow questions in parallel batches
  * 
  * Uses:
  * - Qwen VL for OCR/question extraction
- * - GPT for generating shadow questions
+ * - GPT-4o-mini for generating shadow questions
  */
+
+// Allow large payloads and long execution
+export const maxDuration = 300 // 5 minutes (Vercel Pro)
+export const dynamic = 'force-dynamic'
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
+
+// Batch size for parallel processing
+const OCR_BATCH_SIZE = 3
+const SHADOW_BATCH_SIZE = 5
 
 // =====================================================
 // Helper: Safe JSON parsing with LaTeX escape handling
@@ -35,13 +49,8 @@ function safeParseJSON(content: string): unknown | null {
   }
 
   // Second attempt: Fix common LaTeX escape issues
-  // The AI often outputs LaTeX with single backslashes that aren't properly escaped
   try {
-    // Fix unescaped backslashes in common LaTeX commands
-    // We need to be careful not to break already-escaped sequences
     const latexFixed = cleaned
-      // Replace single backslashes followed by LaTeX commands with double backslashes
-      // But only if they're not already escaped
       .replace(/(?<!\\)\\(?!\\|"|n|r|t|b|f|u[0-9a-fA-F]{4})/g, '\\\\')
     
     return JSON.parse(latexFixed)
@@ -52,11 +61,8 @@ function safeParseJSON(content: string): unknown | null {
   // Third attempt: More aggressive cleaning
   try {
     const aggressive = cleaned
-      // Remove control characters except newlines in strings
       .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, '')
-      // Fix newlines that might be inside strings (convert to escaped)
       .replace(/\n/g, '\\n')
-      // Fix tabs
       .replace(/\t/g, '\\t')
     
     return JSON.parse(aggressive)
@@ -85,7 +91,7 @@ function safeParseJSON(content: string): unknown | null {
 // =====================================================
 
 interface ShadowPaperRequest {
-  /** Storage paths for uploaded page images in the 'papers' bucket */
+  /** Storage paths for uploaded page images in the 'exam-papers' bucket */
   imagePaths: string[]
   /** Target year for the shadow paper */
   targetYear: string
@@ -135,11 +141,48 @@ interface ShadowPaperResponse {
 }
 
 // =====================================================
+// Helper: Process array in parallel batches
+// =====================================================
+
+async function processBatch<T, R>(
+  items: T[],
+  batchSize: number,
+  processor: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = []
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize)
+    const batchResults = await Promise.all(batch.map(processor))
+    results.push(...batchResults)
+  }
+  return results
+}
+
+// =====================================================
+// Helper: Get signed URL for a storage file
+// =====================================================
+
+async function getSignedUrl(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  path: string
+): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from('exam-papers')
+    .createSignedUrl(path, 600) // 10-minute expiry
+
+  if (error || !data?.signedUrl) {
+    console.error(`[Shadow Paper] Failed to get signed URL for ${path}:`, error?.message)
+    return null
+  }
+  return data.signedUrl
+}
+
+// =====================================================
 // Helper: Extract questions from a page image
 // =====================================================
 
 async function extractQuestionsFromPage(
-  imageData: string,
+  imageSource: string,
   pageNumber: number
 ): Promise<ExtractedQuestion[]> {
   const systemPrompt = `You are an expert OCR system specialized in extracting mathematical questions from UK exam papers (GCSE and A-Level).
@@ -183,6 +226,11 @@ You MUST respond with valid JSON only.`
 If no questions are found, return: { "questions": [] }
 Return ONLY the JSON object.`
 
+  // Determine if the source is a URL or base64 data URL
+  const imageContent = imageSource.startsWith('http') 
+    ? { type: 'image_url' as const, image_url: { url: imageSource } }
+    : { type: 'image_url' as const, image_url: { url: imageSource } }
+
   const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -198,10 +246,7 @@ Return ONLY the JSON object.`
         { 
           role: 'user', 
           content: [
-            {
-              type: 'image_url',
-              image_url: { url: imageData }
-            },
+            imageContent,
             { type: 'text', text: userPrompt }
           ]
         }
@@ -212,7 +257,7 @@ Return ONLY the JSON object.`
   })
 
   if (!response.ok) {
-    console.error('OCR extraction failed for page', pageNumber)
+    console.error(`OCR extraction failed for page ${pageNumber}:`, response.status, response.statusText)
     return []
   }
 
@@ -244,19 +289,28 @@ async function generateShadowQuestion(
   original: ExtractedQuestion,
   targetStream: string
 ): Promise<GeneratedShadowQuestion | null> {
-  const systemPrompt = `You are an expert UK mathematics question generator. Your task is to create a "shadow" question - a NEW question that tests the EXACT SAME mathematical skill as the original, but with:
-1. Different numbers and values
-2. Different context (if applicable)
-3. Different variable names
-4. Similar difficulty and format
+  const systemPrompt = `You are an expert UK GCSE Mathematics exam question writer for Pearson Edexcel. Create a "shadow" question — a NEW question that tests the EXACT SAME mathematical skill as the original, but with different numbers, contexts, and variable names.
 
-The new question should be indistinguishable from a real exam question.
+CRITICAL REQUIREMENTS — Your question MUST be indistinguishable from a real Edexcel exam question:
 
-IMPORTANT:
-- Maintain the exact same mathematical concept being tested
-- Ensure the answer is a "nice" number (no complex decimals for Foundation)
-- Use proper LaTeX notation
-- Provide a complete step-by-step solution
+LANGUAGE & TONE:
+1. Write in the precise, clinical style of Edexcel papers — clear, unambiguous, no filler words
+2. Use British English spelling and conventions (e.g., "metres" not "meters", "favourite" not "favorite")
+3. Use everyday British names and contexts (e.g., "Priya", "Tom", "Mrs Ahmed", shops, journeys in the UK)
+4. Every piece of information needed to solve the question must be stated explicitly
+5. If the question requires a diagram, describe it textually (e.g., "Here is a right-angled triangle with sides labelled...")
+
+MATHEMATICAL NOTATION:
+6. Wrap ALL mathematical expressions in dollar signs: $3x + 7 = 22$
+7. For display equations use double dollars: $$\\frac{x}{5} = 2\\frac{1}{2}$$
+8. Use \\textbf{} for bold emphasis (e.g., \\textbf{all}, \\textbf{NOT})
+9. Numbers should give "clean" answers (no messy decimals for Foundation tier)
+
+STRUCTURE:
+10. Match the original's mark allocation exactly
+11. Include part labels (a), (b), (c) if the original has them
+12. End multi-step questions with "You must show your working" or "Show that..." where appropriate
+13. If the original asks "Is X correct? You must show how you get your answer." — keep this format
 
 You MUST respond with valid JSON only.`
 
@@ -272,12 +326,6 @@ ${original.questionLatex}
 - Marks: ${original.suggestedMarks}
 - Difficulty: ${original.suggestedDifficulty}
 - Target Stream: ${targetStream}
-
-**REQUIREMENTS:**
-1. Create a NEW question testing the SAME skill
-2. Use DIFFERENT numbers that give clean answers
-3. If there's a context (word problem), use a DIFFERENT but similar context
-4. Provide a complete solution with working
 
 **OUTPUT FORMAT (JSON only):**
 {
@@ -437,30 +485,34 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
 
     const { imagePaths, targetYear, targetStream, classId, originalFilename } = body
 
-    // Step 1: Download images from Supabase Storage and extract questions
-    console.log(`[Shadow Paper] Downloading and extracting questions from ${imagePaths.length} pages...`)
+    // ---- Step 1: Get signed URLs for all pages (avoids downloading full images) ----
+    console.log(`[Shadow Paper] Getting signed URLs for ${imagePaths.length} pages...`)
     
-    const allExtractedQuestions: ExtractedQuestion[] = []
-    
+    const signedUrls: { url: string; pageNumber: number }[] = []
     for (let i = 0; i < imagePaths.length; i++) {
-      // Download image from Supabase Storage
-      const { data: fileData, error: downloadError } = await supabase.storage
-        .from('exam-papers')
-        .download(imagePaths[i])
-
-      if (downloadError || !fileData) {
-        console.error(`[Shadow Paper] Failed to download page ${i + 1}:`, downloadError?.message)
-        continue
+      const url = await getSignedUrl(supabase, imagePaths[i])
+      if (url) {
+        signedUrls.push({ url, pageNumber: i + 1 })
       }
-
-      // Convert to base64 data URL for the vision model
-      const arrayBuffer = await fileData.arrayBuffer()
-      const base64 = Buffer.from(arrayBuffer).toString('base64')
-      const imageDataUrl = `data:image/png;base64,${base64}`
-
-      const pageQuestions = await extractQuestionsFromPage(imageDataUrl, i + 1)
-      allExtractedQuestions.push(...pageQuestions)
     }
+
+    if (signedUrls.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'Failed to access uploaded page images' },
+        { status: 500 }
+      )
+    }
+
+    // ---- Step 2: Extract questions from pages in parallel batches ----
+    console.log(`[Shadow Paper] Extracting questions from ${signedUrls.length} pages (batch size: ${OCR_BATCH_SIZE})...`)
+    
+    const extractionResults = await processBatch(
+      signedUrls,
+      OCR_BATCH_SIZE,
+      async ({ url, pageNumber }) => extractQuestionsFromPage(url, pageNumber)
+    )
+    
+    const allExtractedQuestions = extractionResults.flat()
 
     // Clean up uploaded images from storage (fire-and-forget)
     supabase.storage
@@ -480,17 +532,16 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
       )
     }
 
-    // Step 2: Generate shadow questions for each extracted question
-    console.log('[Shadow Paper] Generating shadow questions...')
+    // ---- Step 3: Generate shadow questions in parallel batches ----
+    console.log(`[Shadow Paper] Generating ${allExtractedQuestions.length} shadow questions (batch size: ${SHADOW_BATCH_SIZE})...`)
     
-    const shadowQuestions: GeneratedShadowQuestion[] = []
+    const shadowResults = await processBatch(
+      allExtractedQuestions,
+      SHADOW_BATCH_SIZE,
+      async (original) => generateShadowQuestion(original, targetStream)
+    )
     
-    for (const original of allExtractedQuestions) {
-      const shadow = await generateShadowQuestion(original, targetStream)
-      if (shadow) {
-        shadowQuestions.push(shadow)
-      }
-    }
+    const shadowQuestions = shadowResults.filter((q): q is GeneratedShadowQuestion => q !== null)
 
     console.log(`[Shadow Paper] Generated ${shadowQuestions.length} shadow questions`)
 
@@ -501,46 +552,49 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
       )
     }
 
-    // Step 3: Save shadow questions to the question bank
+    // ---- Step 4: Save shadow questions to the question bank ----
     const questionIds: string[] = []
     const difficulty = targetStream.includes('Foundation') ? 'Foundation' : 'Higher'
 
     console.log(`[Shadow Paper] Saving ${shadowQuestions.length} questions to bank...`)
 
-    for (const sq of shadowQuestions) {
-      const { data: question, error: insertError } = await supabase
+    // Batch insert questions (5 at a time to avoid hitting DB limits)
+    for (let i = 0; i < shadowQuestions.length; i += 5) {
+      const batch = shadowQuestions.slice(i, i + 5)
+      const insertData = batch.map(sq => ({
+        created_by: user.id,
+        content_type: 'generated_text' as const,
+        question_latex: sanitize(sq.questionLatex),
+        topic: sq.topic,
+        sub_topic: sq.subTopic,
+        curriculum_level: targetStream,
+        difficulty: difficulty,
+        marks: sq.marks,
+        calculator_allowed: sq.calculatorAllowed,
+        is_verified: false,
+        answer_key: {
+          answer: sanitize(sq.answerKey.answer),
+          explanation: sanitize(sq.answerKey.explanation),
+          type: 'ai_generated'
+        },
+        meta_tags: ['shadow_paper', `source_q${sq.originalQuestionNumber}`]
+      }))
+
+      const { data: questions, error: insertError } = await supabase
         .from('questions')
-        .insert({
-          created_by: user.id,
-          content_type: 'generated_text',
-          question_latex: sq.questionLatex,
-          topic: sq.topic,
-          sub_topic: sq.subTopic,
-          curriculum_level: targetStream,
-          difficulty: difficulty,
-          marks: sq.marks,
-          calculator_allowed: sq.calculatorAllowed,
-          is_verified: false,
-          answer_key: {
-            answer: sq.answerKey.answer,
-            explanation: sq.answerKey.explanation,
-            type: 'ai_generated'
-          },
-          meta_tags: ['shadow_paper', `source_q${sq.originalQuestionNumber}`]
-        })
+        .insert(insertData)
         .select('id')
-        .single()
 
       if (insertError) {
-        console.error(`[Shadow Paper] Failed to insert question ${sq.originalQuestionNumber}:`, insertError.message)
-      } else if (question) {
-        questionIds.push(question.id)
+        console.error(`[Shadow Paper] Batch insert failed:`, insertError.message)
+      } else if (questions) {
+        questionIds.push(...questions.map(q => q.id))
       }
     }
 
     console.log(`[Shadow Paper] Successfully saved ${questionIds.length}/${shadowQuestions.length} questions`)
 
-    // Step 4: Create an assignment with all the shadow questions
+    // ---- Step 5: Create an assignment with all the shadow questions ----
     const baseFilename = originalFilename
       .replace(/\.[^/.]+$/, '') // Remove extension
       .replace(/[^a-zA-Z0-9\s]/g, ' ') // Clean special chars
@@ -585,8 +639,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
 
     if (linkError) {
       console.error('Failed to link questions to assignment:', linkError)
-      // Don't fail the whole request - the assignment was created with question_ids in content
-      // The fallback in getAssignmentDetails should pick them up
     } else {
       console.log(`[Shadow Paper] Successfully linked ${assignmentQuestions.length} questions to assignment`)
     }
