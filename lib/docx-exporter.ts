@@ -440,8 +440,14 @@ function createQuestionText(text: string): Paragraph {
 
 /**
  * Create metadata paragraph (topic, difficulty, calculator)
+ * Only shown in mark scheme / teacher editions, NOT on student exam papers
  */
-function createMetadata(question: ExamQuestion) {
+function createMetadata(question: ExamQuestion, forTeacher: boolean = false) {
+  if (!forTeacher) {
+    // On student exam paper: no metadata shown (matches Edexcel style)
+    return new Paragraph({ text: "", spacing: { after: 100 } })
+  }
+
   const parts = []
   
   if (question.topic_name || question.topic) {
@@ -723,8 +729,8 @@ export async function exportExamToWord(
       )
     }
 
-    // Metadata line
-    docChildren.push(createMetadata(question))
+    // Metadata line - omitted on student exam paper (Edexcel style)
+    docChildren.push(createMetadata(question, false))
 
     // Answer space (blank lines for student answers)
     if (!includeAnswers && !includeMarkScheme) {

@@ -56,6 +56,23 @@ const TEMP_DIAGRAM_FILE = path.join(process.cwd(), 'temp_diagram.png')
 // Rate limiting
 const MIN_DELAY_MS = 4000 // ~15 requests per minute
 
+// Edexcel-style rcParams boilerplate — prepended to every AI-generated script
+// so the style is enforced even if the AI omits these settings
+const RCPARAMS_BOILERPLATE = `
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import numpy as np
+
+# Pearson Edexcel exam paper style
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans']
+plt.rcParams['lines.linewidth'] = 1.0
+plt.rcParams['lines.color'] = 'black'
+plt.rcParams['text.usetex'] = False
+`
+
 // =====================================================
 // GEOMETRY TOPICS CONFIGURATION
 // =====================================================
@@ -190,33 +207,54 @@ interface ParsedArgs {
 // AI GENERATION
 // =====================================================
 
-const SYSTEM_PROMPT = `You are a Geometry Question Generator for UK GCSE Mathematics.
-Your task is to create exam-style geometry questions WITH accompanying Python matplotlib diagrams.
+const SYSTEM_PROMPT = `You are a Geometry Question Generator for UK GCSE Mathematics (Pearson Edexcel style).
+Your task is to create exam-style geometry questions WITH accompanying Python matplotlib diagrams that look exactly like they came from a printed Pearson Edexcel GCSE exam paper.
 
 IMPORTANT REQUIREMENTS:
 1. Create a clear, well-structured geometry question appropriate for the specified topic and level.
 2. Write a COMPLETE, STANDALONE Python script that draws the diagram for this question.
-3. The diagram MUST be exam-quality: clean, black and white lines, properly labeled.
+3. The diagram MUST replicate the Pearson Edexcel exam paper style precisely — monochrome, crisp, minimal.
 
 PYTHON SCRIPT REQUIREMENTS:
-- Import matplotlib.pyplot as plt and numpy as np at the top
-- Use plt.figure(figsize=(8, 8)) for consistent sizing
-- Use black lines with appropriate thickness (linewidth=2)
-- Label all points with capital letters (A, B, C, D...)
-- Label all given measurements clearly (e.g., '5 cm', 'x', '35°')
+- Import matplotlib.pyplot as plt, numpy as np, and matplotlib.patches as patches at the top
+- Configure global rcParams at the start of the script:
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans']
+    plt.rcParams['lines.linewidth'] = 1.0
+    plt.rcParams['lines.color'] = 'black'
+    plt.rcParams['text.usetex'] = False
+- Use plt.figure(figsize=(6, 6)) for tight, exam-sized diagrams
 - Use plt.axis('equal') to maintain proportions
-- Use plt.axis('off') to hide axes
-- The script MUST save to 'temp_diagram.png' using: plt.savefig('temp_diagram.png', dpi=150, bbox_inches='tight', facecolor='white')
+- Use plt.axis('off') to hide axes — NO axis ticks, borders, or grid lines
+- Save using: plt.savefig('temp_diagram.png', dpi=200, bbox_inches='tight', facecolor='white', edgecolor='none')
 - Call plt.close() at the end
 - The script must be completely self-contained and runnable
 
-DIAGRAM STYLE:
-- Use clear, thick black lines for shapes
-- Use red or blue dashed lines for construction lines (if needed)
-- Use matplotlib.patches for circles and arcs
-- Use plt.annotate or plt.text for labels with good positioning
-- Include arrows for angles using matplotlib.patches.FancyArrowPatch or Arc
-- Mark right angles with small squares where appropriate
+EDEXCEL DIAGRAM STYLE — MANDATORY RULES:
+1. LINES: All shape outlines must use linewidth=1.0, solid black. NO colored lines. NO dashed lines unless showing a genuine geometric extension or construction. NO matplotlib default blue.
+2. VERTEX LABELS: Point labels (A, B, C, D...) must be rendered in italic serif style:
+   plt.text(x, y, r'$A$', fontsize=14, fontstyle='italic', fontfamily='serif', ha='center', va='center')
+   Position labels slightly OUTSIDE the shape, offset from the vertex.
+3. MEASUREMENT LABELS: Lengths and angle values in sans-serif:
+   plt.text(x, y, '5 cm', fontsize=11, fontfamily='sans-serif', ha='center', va='center')
+   Use LaTeX mathtext for variables: r'$x$'
+4. NO VERTEX DOTS: Do NOT draw large circular markers or dots at vertices. Edexcel diagrams show sharp corners formed by line intersections only.
+5. ANGLES: Draw angle arcs using matplotlib.patches.Arc with small radius (0.4-0.6 units relative to shape size), thin linewidth=1.0. Do NOT use filled wedges or colored sectors.
+6. RIGHT ANGLES: Draw small perpendicular square markers (two short perpendicular line segments forming an open square corner), NOT filled squares. Size ~0.3 units.
+7. "NOT ACCURATELY DRAWN" LABEL: Every diagram MUST include this label in italic, small font:
+   plt.text(x, y, 'Diagram NOT\\naccurately drawn', fontsize=8, fontstyle='italic', fontfamily='sans-serif', color='black', ha='right', va='top')
+   Position it in the top-right or bottom-left corner area, away from the shape.
+8. BACKGROUND: Pure white. No grid lines. No colored fills. No shading.
+9. CIRCLES: Use matplotlib.patches.Circle with fill=False, edgecolor='black', linewidth=1.0
+
+THINGS TO ABSOLUTELY AVOID:
+- No grid lines or axis ticks
+- No colored fills or shading
+- No thick lines (linewidth > 1.5)
+- No large circular markers at vertices (no plt.plot with 'o' marker)
+- No matplotlib default blue color anywhere
+- No red or blue dashed construction lines
+- No FancyArrowPatch for angles (use Arc instead)
 
 OUTPUT FORMAT (JSON only):
 {
@@ -239,12 +277,16 @@ Topic Description: ${topic.description}
 
 Requirements:
 - Question should be worth 3-5 marks
-- Include a clear diagram that students would see in an exam
-- The diagram should show all given information (lengths, angles)
-- Mark any unknown values with variables like x, y, or θ
-- Ensure the Python code creates a professional-looking diagram
+- Include a clear diagram that students would see in a Pearson Edexcel GCSE exam paper
+- The diagram should show all given information (lengths, angles) with proper Edexcel labeling conventions
+- Mark any unknown values with variables like x, y, or θ using LaTeX mathtext (r'$x$')
+- Point labels (A, B, C...) must be italic serif, measurement labels must be sans-serif
+- NO vertex dots, NO colored lines, NO grid — monochrome black only
+- Include "Diagram NOT accurately drawn" text in the corner
+- Use linewidth=1.0, dpi=200, figsize=(6,6)
+- Angle arcs via matplotlib.patches.Arc, right angles as small open square markers
 
-Generate the question now.`
+Generate the question now as JSON.`
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -314,14 +356,27 @@ Generate the question now.`
 
 async function executePythonCode(pythonCode: string): Promise<boolean> {
   // Clean up the python code - handle escaped newlines
-  const cleanedCode = pythonCode
+  let cleanedCode = pythonCode
     .replace(/\\n/g, '\n')
     .replace(/\\"/g, '"')
     .replace(/\\'/g, "'")
     .replace(/\\\\/g, '\\')
 
+  // Strip duplicate import lines that the boilerplate already provides
+  cleanedCode = cleanedCode
+    .replace(/^import matplotlib\n?/gm, '')
+    .replace(/^matplotlib\.use\([^)]+\)\n?/gm, '')
+    .replace(/^import matplotlib\.pyplot as plt\n?/gm, '')
+    .replace(/^import matplotlib\.patches as patches\n?/gm, '')
+    .replace(/^from matplotlib import patches\n?/gm, '')
+    .replace(/^import numpy as np\n?/gm, '')
+    .replace(/^plt\.rcParams\[.*?\].*\n?/gm, '')
+
+  // Prepend boilerplate to enforce Edexcel style rcParams
+  const finalCode = RCPARAMS_BOILERPLATE + '\n' + cleanedCode
+
   // Write to temp file
-  fs.writeFileSync(TEMP_PYTHON_FILE, cleanedCode, 'utf-8')
+  fs.writeFileSync(TEMP_PYTHON_FILE, finalCode, 'utf-8')
 
   try {
     // Execute Python script

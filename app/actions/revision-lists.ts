@@ -525,3 +525,304 @@ export async function getAssignmentRevisionList(
     return { success: false, error: "An unexpected error occurred" }
   }
 }
+
+// =====================================================
+// Get All Teacher's Revision Lists (for Library)
+// =====================================================
+
+export interface TeacherRevisionListItem {
+  id: string
+  title: string
+  description: string | null
+  assignment_id: string
+  assignment_title: string
+  class_name: string
+  subject: string
+  question_count: number
+  student_count: number
+  created_at: string
+}
+
+/**
+ * Gets all revision lists created by the current teacher
+ */
+export async function getTeacherRevisionLists(): Promise<{
+  success: boolean
+  data?: TeacherRevisionListItem[]
+  error?: string
+}> {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError || !user) {
+    return { success: false, error: "You must be logged in" }
+  }
+
+  try {
+    const { data: revisionLists, error } = await supabase
+      .from("revision_lists")
+      .select(`
+        id,
+        title,
+        description,
+        assignment_id,
+        created_at,
+        assignments!inner(
+          id,
+          title,
+          classes!inner(
+            name,
+            subject,
+            teacher_id
+          )
+        ),
+        revision_list_questions(count),
+        student_revision_allocations(count)
+      `)
+      .eq("created_by", user.id)
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Error fetching teacher revision lists:", error)
+      return { success: false, error: "Failed to fetch revision lists" }
+    }
+
+    const transformed: TeacherRevisionListItem[] = (revisionLists || []).map((rl) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const assignment = rl.assignments as any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const cls = assignment?.classes as any
+
+      return {
+        id: rl.id,
+        title: rl.title,
+        description: rl.description,
+        assignment_id: rl.assignment_id,
+        assignment_title: assignment?.title || "Unknown",
+        class_name: cls?.name || "Unknown",
+        subject: cls?.subject || "Unknown",
+        question_count: Array.isArray(rl.revision_list_questions)
+          ? rl.revision_list_questions.length
+          : 0,
+        student_count: Array.isArray(rl.student_revision_allocations)
+          ? rl.student_revision_allocations.length
+          : 0,
+        created_at: rl.created_at,
+      }
+    })
+
+    return { success: true, data: transformed }
+  } catch (error) {
+    console.error("Error in getTeacherRevisionLists:", error)
+    return { success: false, error: "An unexpected error occurred" }
+  }
+}
+
+// =====================================================
+// Get Revision List Detail (Teacher View)
+// =====================================================
+
+/**
+ * Gets a single revision list with questions and student allocations.
+ * Used by the dedicated revision detail page.
+ */
+export async function getRevisionListDetail(
+  revisionListId: string
+): Promise<{
+  success: boolean
+  data?: {
+    revisionList: {
+      id: string
+      title: string
+      description: string | null
+      assignment_id: string
+      assignment_title: string
+      class_name: string
+      subject: string
+      created_at: string
+    }
+    questions: RevisionListQuestionResult[]
+    allocations: {
+      studentId: string
+      studentName: string
+      status: string
+      completedQuestions: number
+      totalQuestions: number
+    }[]
+  } | null
+  error?: string
+}> {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError || !user) {
+    return { success: false, error: "You must be logged in" }
+  }
+
+  try {
+    // Get the revision list with assignment/class info
+    const { data: revisionList, error: listError } = await supabase
+      .from("revision_lists")
+      .select(`
+        id, title, description, assignment_id, created_at, created_by,
+        assignments!inner(
+          title,
+          classes!inner(name, subject)
+        )
+      `)
+      .eq("id", revisionListId)
+      .single()
+
+    if (listError) {
+      if (listError.code === "PGRST116") {
+        return { success: true, data: null }
+      }
+      console.error("Failed to get revision list:", listError)
+      return { success: false, error: "Failed to fetch revision list" }
+    }
+
+    // Verify ownership
+    if (revisionList.created_by !== user.id) {
+      return { success: false, error: "Permission denied" }
+    }
+
+    // Get questions
+    const { data: questions, error: questionsError } = await supabase.rpc(
+      "get_revision_list_questions",
+      { p_revision_list_id: revisionList.id }
+    )
+
+    if (questionsError) {
+      console.error("Failed to get questions:", questionsError)
+    }
+
+    // Get allocations with student info
+    const { data: allocations, error: allocationsError } = await supabase
+      .from("student_revision_allocations")
+      .select(`
+        student_id,
+        status,
+        progress,
+        profiles!inner(full_name)
+      `)
+      .eq("revision_list_id", revisionList.id)
+
+    if (allocationsError) {
+      console.error("Failed to get allocations:", allocationsError)
+    }
+
+    const totalQuestions = questions?.length || 0
+
+    const formattedAllocations = (allocations || []).map((a) => {
+      const progress = a.progress || {}
+      const completedCount = Object.values(progress).filter(
+        (p: { completed?: boolean }) => p.completed
+      ).length
+
+      return {
+        studentId: a.student_id,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        studentName: (a.profiles as any)?.full_name || "Unknown",
+        status: a.status,
+        completedQuestions: completedCount,
+        totalQuestions,
+      }
+    })
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const assignment = revisionList.assignments as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cls = assignment?.classes as any
+
+    return {
+      success: true,
+      data: {
+        revisionList: {
+          id: revisionList.id,
+          title: revisionList.title,
+          description: revisionList.description,
+          assignment_id: revisionList.assignment_id,
+          assignment_title: assignment?.title || "Unknown",
+          class_name: cls?.name || "Unknown",
+          subject: cls?.subject || "Unknown",
+          created_at: revisionList.created_at,
+        },
+        questions: questions || [],
+        allocations: formattedAllocations,
+      },
+    }
+  } catch (error) {
+    console.error("Error in getRevisionListDetail:", error)
+    return { success: false, error: "An unexpected error occurred" }
+  }
+}
+
+// =====================================================
+// Delete Revision List
+// =====================================================
+
+/**
+ * Deletes a revision list and all associated data.
+ * Cascades to revision_list_questions and student_revision_allocations.
+ */
+export async function deleteRevisionList(
+  revisionListId: string
+): Promise<{
+  success: boolean
+  error?: string
+}> {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError || !user) {
+    return { success: false, error: "You must be logged in" }
+  }
+
+  try {
+    // Verify ownership
+    const { data: revisionList, error: fetchError } = await supabase
+      .from("revision_lists")
+      .select("id, created_by")
+      .eq("id", revisionListId)
+      .single()
+
+    if (fetchError || !revisionList) {
+      return { success: false, error: "Revision list not found" }
+    }
+
+    if (revisionList.created_by !== user.id) {
+      return { success: false, error: "Permission denied" }
+    }
+
+    // Delete (cascades to questions + allocations)
+    const { error: deleteError } = await supabase
+      .from("revision_lists")
+      .delete()
+      .eq("id", revisionListId)
+
+    if (deleteError) {
+      console.error("Failed to delete revision list:", deleteError)
+      return { success: false, error: "Failed to delete revision list" }
+    }
+
+    revalidatePath("/dashboard/library")
+    revalidatePath("/dashboard/revision")
+
+    return { success: true }
+  } catch (error) {
+    console.error("Error in deleteRevisionList:", error)
+    return { success: false, error: "An unexpected error occurred" }
+  }
+}

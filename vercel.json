@@ -1,0 +1,20 @@
+{
+  "functions": {
+    "app/api/ai/shadow-paper/route.ts": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
+    "app/api/ai/generate/route.ts": {
+      "maxDuration": 120,
+      "memory": 512
+    },
+    "app/api/ai/analyze-paper/route.ts": {
+      "maxDuration": 120,
+      "memory": 512
+    },
+    "app/api/ai/extract-pdf/route.ts": {
+      "maxDuration": 120,
+      "memory": 512
+    }
+  }
+}

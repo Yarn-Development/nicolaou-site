@@ -40,6 +40,8 @@ export interface Profile {
   full_name: string | null
   role: UserRole
   avatar_url: string | null
+  institution: string | null
+  onboarding_completed: boolean
   created_at: string
   updated_at: string
 }

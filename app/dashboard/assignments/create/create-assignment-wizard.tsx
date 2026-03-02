@@ -31,6 +31,7 @@ import {
   Eye,
   Monitor,
   FileDown,
+  Library,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -1557,18 +1558,35 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 )}
               </div>
 
-              {/* Mode-Specific Actions */}
+              {/* Saved to Library Banner */}
+              <div className="flex items-center gap-3 p-4 bg-green-50 border-2 border-green-400 mb-6">
+                <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0" />
+                <span className="text-sm font-bold uppercase tracking-wider text-green-700">
+                  Saved to Library
+                </span>
+              </div>
+
+              {/* Primary Action: View in Library */}
+              <Link href="/dashboard/library" className="block mb-4">
+                <Button className="w-full bg-swiss-signal hover:bg-swiss-ink text-white font-bold uppercase tracking-wider py-6 text-lg">
+                  <Library className="w-5 h-5 mr-2" />
+                  View in Library
+                </Button>
+              </Link>
+
+              {/* Mode-Specific Secondary Actions */}
               {mode === "paper" ? (
                 <div className="space-y-3">
                   <Button
                     onClick={() => handleExportExam(false)}
                     disabled={isExporting}
-                    className="w-full bg-swiss-signal hover:bg-swiss-ink text-white font-bold uppercase tracking-wider py-6 text-lg"
+                    variant="outline"
+                    className="w-full border-2 border-swiss-ink font-bold uppercase tracking-wider"
                   >
                     {isExporting ? (
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     ) : (
-                      <Download className="w-5 h-5 mr-2" />
+                      <Download className="w-4 h-4 mr-2" />
                     )}
                     Download Exam Paper
                   </Button>
@@ -1604,16 +1622,17 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 <div className="space-y-3">
                   <Button
                     onClick={handleCopyLink}
-                    className="w-full bg-swiss-signal hover:bg-swiss-ink text-white font-bold uppercase tracking-wider py-6 text-lg"
+                    variant="outline"
+                    className="w-full border-2 border-swiss-ink font-bold uppercase tracking-wider"
                   >
                     {linkCopied ? (
                       <>
-                        <CheckCircle className="w-5 h-5 mr-2" />
+                        <CheckCircle className="w-4 h-4 mr-2" />
                         Link Copied!
                       </>
                     ) : (
                       <>
-                        <Copy className="w-5 h-5 mr-2" />
+                        <Copy className="w-4 h-4 mr-2" />
                         Copy Student Link
                       </>
                     )}

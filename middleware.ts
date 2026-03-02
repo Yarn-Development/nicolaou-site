@@ -50,14 +50,29 @@ export async function middleware(request: NextRequest) {
     return response
   }
 
-  // User is authenticated - fetch their role
+  // User is authenticated - fetch their role and onboarding status
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('role, onboarding_completed')
     .eq('id', user.id)
     .single()
 
   const userRole: UserRole = profile?.role || 'student'
+  const onboardingCompleted = profile?.onboarding_completed ?? false
+
+  // 0. Redirect to onboarding if not completed (unless already on /onboarding)
+  if (!onboardingCompleted && !pathname.startsWith('/onboarding')) {
+    // Allow auth callback and API routes to pass through
+    if (!pathname.startsWith('/api') && !pathname.startsWith('/auth')) {
+      return NextResponse.redirect(new URL('/onboarding', request.url))
+    }
+  }
+
+  // 0b. If onboarding is completed and user is on /onboarding, redirect to dashboard
+  if (onboardingCompleted && pathname.startsWith('/onboarding')) {
+    const targetDashboard = userRole === 'student' ? '/student-dashboard' : '/dashboard'
+    return NextResponse.redirect(new URL(targetDashboard, request.url))
+  }
 
   // Role-based route protection and redirection
   
