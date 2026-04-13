@@ -53,7 +53,7 @@ export function FeatureSection() {
             </span>
           </div>
           <div className="col-span-12 md:col-span-9 lg:col-span-7">
-            <h2 className="text-5xl font-extrabold tracking-tight leading-none mb-6 text-swiss-ink uppercase">
+            <h2 className="text-5xl font-extrabold tracking-tight leading-none mb-6 text-swiss-ink">
               Powerful tools<br />for everyone.
             </h2>
             <p className="text-xl leading-relaxed text-swiss-lead">
@@ -80,7 +80,7 @@ export function FeatureSection() {
               </div>
 
               {/* Content */}
-              <h3 className="text-xl font-bold mb-4 uppercase tracking-tight text-swiss-ink">{feature.title}</h3>
+              <h3 className="text-xl font-bold mb-4 tracking-tight text-swiss-ink">{feature.title}</h3>
               <p className="text-sm leading-relaxed text-swiss-lead">{feature.description}</p>
 
               {/* Bottom Divider */}

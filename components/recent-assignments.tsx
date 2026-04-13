@@ -75,12 +75,12 @@ export function RecentAssignments({ assignments, isTeacher = true }: RecentAssig
   return (
     <div className="space-y-4">
       {isDemo && (
-        <div className="px-2 py-1 bg-amber-500/20 text-amber-500 text-xs rounded-md inline-block mb-2">
+        <div className="px-2 py-1 bg-primary/10 text-primary text-xs inline-block mb-2">
           Demo Data
         </div>
       )}
       {displayAssignments.map((assignment) => (
-        <div key={assignment.id} className="flex flex-col space-y-2 rounded-md p-3 transition-all hover:bg-muted/50">
+        <div key={assignment.id} className="flex flex-col space-y-2 p-3 transition-all hover:bg-muted/50">
           <div className="flex items-center justify-between">
             <div>
               <p className="font-medium">{assignment.title}</p>
@@ -88,8 +88,8 @@ export function RecentAssignments({ assignments, isTeacher = true }: RecentAssig
             </div>
             <div className="flex items-center gap-2">
               <div
-                className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  assignment.status === "Active" ? "bg-primary/20 text-primary" : "bg-green-500/20 text-green-500"
+                className={`px-2 py-1 text-xs font-bold uppercase tracking-wide ${
+                  assignment.status === "Active" ? "bg-primary/20 text-primary" : "bg-foreground/10 text-foreground"
                 }`}
               >
                 {assignment.status}

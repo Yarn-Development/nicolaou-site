@@ -19,9 +19,9 @@ const badgeVariants = cva(
         outline:
           "border-swiss-ink dark:border-swiss-paper bg-transparent text-swiss-ink dark:text-swiss-paper [a&]:hover:bg-swiss-ink/5 dark:[a&]:hover:bg-swiss-paper/5 focus-visible:ring-swiss-ink dark:focus-visible:ring-swiss-paper",
         success:
-          "border-green-600 dark:border-green-400 bg-green-600 dark:bg-green-400 text-white dark:text-green-950 [a&]:hover:bg-green-700 dark:[a&]:hover:bg-green-500 focus-visible:ring-green-600 dark:focus-visible:ring-green-400",
+          "border-swiss-ink dark:border-swiss-paper bg-swiss-ink dark:bg-swiss-paper text-swiss-paper dark:text-swiss-ink [a&]:hover:bg-swiss-ink/80 dark:[a&]:hover:bg-swiss-paper/80 focus-visible:ring-swiss-ink dark:focus-visible:ring-swiss-paper",
         warning:
-          "border-yellow-600 dark:border-yellow-400 bg-yellow-600 dark:bg-yellow-400 text-yellow-950 dark:text-yellow-950 [a&]:hover:bg-yellow-700 dark:[a&]:hover:bg-yellow-500 focus-visible:ring-yellow-600 dark:focus-visible:ring-yellow-400",
+          "border-swiss-signal bg-swiss-signal text-white [a&]:hover:bg-swiss-signal/80 focus-visible:ring-swiss-signal",
       },
     },
     defaultVariants: {

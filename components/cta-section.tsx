@@ -10,10 +10,10 @@ export function CTASection() {
         <div className="grid grid-cols-12 gap-8">
           {/* Main CTA Text */}
           <div className="col-span-12 lg:col-span-8">
-            <h2 className="text-6xl md:text-8xl font-black tracking-tighter leading-[0.9] uppercase mb-8 text-swiss-paper">
-              READY TO<br />
-              TRANSFORM<br />
-              YOUR TEACHING?
+            <h2 className="text-6xl md:text-8xl font-black tracking-tighter leading-[0.9] mb-8 text-swiss-paper">
+              Ready to<br />
+              transform<br />
+              your teaching?
             </h2>
           </div>
 

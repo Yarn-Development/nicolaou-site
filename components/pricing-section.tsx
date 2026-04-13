@@ -65,7 +65,7 @@ export function PricingSection() {
             </span>
           </div>
           <div className="col-span-12 md:col-span-9 lg:col-span-7">
-            <h2 className="text-5xl font-extrabold tracking-tight leading-none mb-6 text-swiss-ink uppercase">
+            <h2 className="text-5xl font-extrabold tracking-tight leading-none mb-6 text-swiss-ink">
               Choose the<br />perfect plan.
             </h2>
             <p className="text-xl leading-relaxed text-swiss-lead mb-8">

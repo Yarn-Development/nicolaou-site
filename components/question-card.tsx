@@ -119,7 +119,7 @@ export function QuestionCard({
                 className={`
                   text-xs px-2 py-2 transition-colors duration-200
                   ${isSaved 
-                    ? "border-amber-500 text-amber-600 bg-amber-50 hover:bg-amber-100" 
+                    ? "border-foreground text-foreground bg-muted hover:bg-muted" 
                     : "border-swiss-ink/30 text-swiss-lead hover:border-swiss-ink hover:text-swiss-ink"
                   }
                 `}
@@ -141,7 +141,7 @@ export function QuestionCard({
                 font-bold uppercase tracking-wider text-xs px-4 py-2
                 transition-colors duration-200
                 ${isAdded 
-                  ? "bg-green-500 text-white border-2 border-green-600 hover:bg-green-500" 
+                  ? "bg-foreground text-background border-2 border-foreground hover:bg-foreground" 
                   : "bg-swiss-signal text-white hover:bg-swiss-ink"
               }
               disabled:opacity-50 disabled:cursor-not-allowed
@@ -181,9 +181,9 @@ export function QuestionCard({
           {/* Difficulty */}
           <span className={`
             text-[10px] font-bold uppercase tracking-wider px-2 py-1 border
-            ${question.difficulty === 'Higher' 
-              ? 'border-purple-500 text-purple-700 bg-purple-50' 
-              : 'border-blue-500 text-blue-700 bg-blue-50'
+            ${question.difficulty === 'Higher'
+              ? 'border-foreground text-foreground bg-foreground/5'
+              : 'border-muted-foreground text-muted-foreground bg-muted'
             }
           `}>
             {question.difficulty}
@@ -261,7 +261,7 @@ export function QuestionCardCompact({
         className={`
           flex-shrink-0 text-xs
           ${isAdded 
-            ? "bg-green-100 text-green-700 hover:bg-green-100" 
+            ? "bg-foreground text-background hover:bg-foreground/90"
             : "bg-swiss-signal text-white hover:bg-swiss-ink"
           }
         `}

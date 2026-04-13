@@ -2,63 +2,79 @@
 
 @layer base {
   .light {
-    /* Swiss Focus - International Red Palette (Light Mode) */
-    --background: 0 0% 100%; /* Pure white (#FFFFFF) */
-    --foreground: 0 0% 0%; /* Pure black (#000000) */
-    --card: 0 0% 96%; /* Concrete (#F4F4F4) */
-    --card-foreground: 0 0% 0%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 0%;
-    --primary: 4 100% 60%; /* Signal Red (#FF3B30) */
+    /* Swiss Focus — warm-tinted neutrals (OKLCH H≈25) */
+    --background: 20 10% 97%;      /* oklch(97.5% 0.005 25) — near-white, slightly warm */
+    --foreground: 20 8% 11%;       /* oklch(11% 0.008 25)   — near-black, slightly warm */
+    --card: 20 9% 94%;             /* oklch(94% 0.006 25)   — concrete */
+    --card-foreground: 20 8% 11%;
+    --popover: 20 10% 97%;
+    --popover-foreground: 20 8% 11%;
+    --primary: 4 100% 60%;         /* Signal Red #FF3B30 — unchanged */
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 0%; /* Black for secondary elements */
-    --secondary-foreground: 0 0% 100%;
-    --accent: 0 0% 33%; /* Lead (#555555) for accents */
-    --accent-foreground: 0 0% 100%;
-    --muted: 0 0% 96%; /* Concrete background */
-    --muted-foreground: 0 0% 40%; /* Improved contrast for WCAG AA */
-    --destructive: 0 84% 60%;
+    --secondary: 20 8% 11%;
+    --secondary-foreground: 20 10% 97%;
+    --accent: 20 5% 42%;           /* oklch(42% 0.008 25)   — lead */
+    --accent-foreground: 20 10% 97%;
+    --muted: 20 9% 94%;
+    --muted-foreground: 20 5% 42%; /* oklch(42% 0.008 25) */
+    --destructive: 4 100% 57%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 0%; /* Pure black borders */
-    --input: 0 0% 96%;
+    --border: 20 8% 11%;           /* same as ink */
+    --input: 20 9% 94%;
     --ring: 4 100% 60%;
-    --radius: 0rem; /* No border radius - Sharp rectangles */
-    
-    /* Swiss RGB colors for alpha support */
-    --swiss-paper: 255 255 255;
-    --swiss-concrete: 244 244 244;
-    --swiss-ink: 0 0 0;
-    --swiss-lead: 85 85 85;
+    --radius: 0rem;                /* sharp rectangles */
+
+    /* Direct OKLCH tokens for Swiss utility classes */
+    --color-bg:      oklch(97.5% 0.005 25);
+    --color-surface: oklch(94% 0.006 25);
+    --color-ink:     oklch(11% 0.008 25);
+    --color-lead:    oklch(42% 0.008 25);
+    --color-signal:  oklch(57% 0.22 25);
+    --color-border:  oklch(11% 0.008 25);
+
+    /* RGB channel vars for alpha-composited utilities */
+    --swiss-paper: 247 245 244;
+    --swiss-concrete: 241 239 237;
+    --swiss-ink: 27 25 24;
+    --swiss-lead: 108 104 103;
     --swiss-signal: 255 59 48;
   }
 
   .dark {
-    /* Swiss Focus - International Red Palette (Dark Mode) */
-    --background: 0 0% 0%; /* Pure black */
-    --foreground: 0 0% 100%; /* Pure white */
-    --card: 0 0% 7%; /* Very dark grey */
-    --card-foreground: 0 0% 100%;
-    --popover: 0 0% 7%;
-    --popover-foreground: 0 0% 100%;
-    --primary: 4 100% 60%; /* Signal Red */
+    /* Swiss Focus dark — warm near-black surfaces */
+    --background: 20 7% 10%;       /* oklch(10% 0.008 25) */
+    --foreground: 20 7% 96%;       /* oklch(96% 0.005 25) */
+    --card: 20 6% 15%;             /* oklch(15% 0.008 25) */
+    --card-foreground: 20 7% 96%;
+    --popover: 20 6% 15%;
+    --popover-foreground: 20 7% 96%;
+    --primary: 4 100% 62%;         /* Signal Red — slightly lighter in dark */
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 100%; /* White for secondary in dark mode */
-    --secondary-foreground: 0 0% 0%;
-    --accent: 0 0% 67%; /* Lighter grey for accents */
-    --accent-foreground: 0 0% 0%;
-    --muted: 0 0% 7%;
-    --muted-foreground: 0 0% 75%; /* Improved contrast for WCAG AA */
-    --destructive: 0 84% 65%;
+    --secondary: 20 7% 96%;
+    --secondary-foreground: 20 7% 10%;
+    --accent: 20 4% 62%;           /* oklch(62% 0.006 25) */
+    --accent-foreground: 20 7% 10%;
+    --muted: 20 6% 15%;
+    --muted-foreground: 20 4% 62%;
+    --destructive: 4 100% 65%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 100%; /* White borders in dark mode */
-    --input: 0 0% 7%;
-    --ring: 4 100% 60%;
-    
-    /* Swiss RGB colors for alpha support - Dark Mode */
-    --swiss-paper: 0 0 0;
-    --swiss-concrete: 18 18 18;
-    --swiss-ink: 255 255 255;
-    --swiss-lead: 171 171 171;
+    --border: 20 7% 96%;           /* same as ink in dark */
+    --input: 20 6% 15%;
+    --ring: 4 100% 62%;
+
+    /* Direct OKLCH tokens */
+    --color-bg:      oklch(10% 0.008 25);
+    --color-surface: oklch(15% 0.008 25);
+    --color-ink:     oklch(96% 0.005 25);
+    --color-lead:    oklch(62% 0.006 25);
+    --color-signal:  oklch(62% 0.22 25);
+    --color-border:  oklch(96% 0.005 25);
+
+    /* RGB channel vars for alpha-composited utilities */
+    --swiss-paper: 24 22 21;
+    --swiss-concrete: 37 35 33;
+    --swiss-ink: 245 244 243;
+    --swiss-lead: 157 154 152;
     --swiss-signal: 255 59 48;
   }
 }
@@ -68,19 +84,24 @@
     border-color: hsl(var(--border));
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
   }
-  
+
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: 'Inter', sans-serif;
+    font-family: 'Mulish', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
+  /* Bricolage Grotesque for all heading levels — automatic, no class required */
+  h1, h2, h3, h4 {
+    font-family: 'Bricolage Grotesque', sans-serif;
+  }
 }
 
-/* Swiss Focus Design System - Flat, No Shadows, No Gradients */
+/* ─── Swiss Focus Design System ─────────────────────────────────────────── */
+/* Flat. No shadows. No gradients. No rounded corners.                        */
 
-/* Removed all glassmorphic effects - Solid backgrounds only */
 .swiss-surface {
   background-color: hsl(var(--card));
   border: 1px solid hsl(var(--border));
@@ -91,110 +112,111 @@
   border: 2px solid hsl(var(--border));
 }
 
-/* Swiss theme-aware utility classes */
-.bg-swiss-paper {
-  background-color: hsl(var(--background));
-}
+/* Theme-aware colour utilities */
+.bg-swiss-paper    { background-color: hsl(var(--background)); }
+.bg-swiss-concrete { background-color: hsl(var(--card)); }
+.bg-swiss-signal   { background-color: hsl(var(--primary)); }
+.bg-swiss-ink      { background-color: hsl(var(--foreground)); }
 
-.bg-swiss-concrete {
-  background-color: hsl(var(--card));
-}
+.text-swiss-ink    { color: hsl(var(--foreground)); }
+.text-swiss-paper  { color: hsl(var(--background)); }
+.text-swiss-lead   { color: hsl(var(--muted-foreground)); }
+.text-swiss-signal { color: hsl(var(--primary)); }
 
-.bg-swiss-signal {
-  background-color: hsl(var(--primary));
-}
+.border-swiss-ink  { border-color: hsl(var(--border)); }
 
-.bg-swiss-ink {
-  background-color: hsl(var(--foreground));
-}
+/* ─── Typography Scale ───────────────────────────────────────────────────── */
+/* Bricolage Grotesque at display sizes — mixed case, not uppercase.           */
+/* Uppercase reserved for short labels and nav items only.                    */
 
-.text-swiss-ink {
-  color: hsl(var(--foreground));
-}
-
-.text-swiss-paper {
-  color: hsl(var(--background));
-}
-
-.text-swiss-lead {
-  color: hsl(var(--muted-foreground));
-}
-
-.text-swiss-signal {
-  color: hsl(var(--primary));
-}
-
-.border-swiss-ink {
-  border-color: hsl(var(--border));
-}
-
-/* Typography - Grotesque Sans-Serif Hierarchy */
 .swiss-heading-xl {
-  font-size: 6rem;
-  font-weight: 900;
-  line-height: 0.9;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: clamp(3.5rem, 8vw, 6rem);
+  font-weight: 800;
+  line-height: 0.92;
   letter-spacing: -0.04em;
-  text-transform: uppercase;
+  /* No text-transform — mixed case for display headings */
 }
 
 .swiss-heading-lg {
-  font-size: 3rem;
-  font-weight: 800;
-  line-height: 1;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 700;
+  line-height: 1.0;
   letter-spacing: -0.02em;
 }
 
 .swiss-heading-md {
-  font-size: 2rem;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 1.75rem;
   font-weight: 700;
   line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.swiss-heading-sm {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .swiss-body {
+  font-family: 'Mulish', sans-serif;
   font-size: 1rem;
   font-weight: 400;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
+/* Short labels and navigation items — uppercase is intentional here */
 .swiss-label {
-  font-size: 0.875rem;
-  font-weight: 700;
+  font-family: 'Mulish', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 
-/* Layout - Strict Grid System */
+/* ─── Layout ─────────────────────────────────────────────────────────────── */
+
 .swiss-grid-12 {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   gap: 2rem;
 }
 
-/* Buttons - Flat, No Shadows, Sharp Rectangles */
+/* ─── Buttons ─────────────────────────────────────────────────────────────  */
+/* Primary: Signal Red fill. Secondary: outline. Neither uses all-caps.       */
+
 .swiss-btn-primary {
   background-color: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
-  border: none;
-  padding: 1rem 2rem;
+  border: 2px solid hsl(var(--primary));
+  padding: 0.625rem 1.25rem;
+  font-family: 'Mulish', sans-serif;
+  font-size: 0.875rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  transition: background-color 0.2s;
+  letter-spacing: 0.01em;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+  cursor: pointer;
 }
 
 .swiss-btn-primary:hover {
-  background-color: hsl(var(--secondary));
+  background-color: hsl(var(--foreground));
+  border-color: hsl(var(--foreground));
 }
 
 .swiss-btn-secondary {
   background-color: transparent;
   color: hsl(var(--foreground));
   border: 2px solid hsl(var(--border));
-  padding: 1rem 2rem;
+  padding: 0.625rem 1.25rem;
+  font-family: 'Mulish', sans-serif;
+  font-size: 0.875rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  transition: all 0.2s;
+  letter-spacing: 0.01em;
+  transition: background-color 0.15s, color 0.15s;
+  cursor: pointer;
 }
 
 .swiss-btn-secondary:hover {
@@ -202,30 +224,29 @@
   color: hsl(var(--background));
 }
 
-/* Cards - Flat with Borders Only */
+/* ─── Cards ──────────────────────────────────────────────────────────────── */
+
 .swiss-card {
   background-color: hsl(var(--card));
   border: 1px solid hsl(var(--border));
-  padding: 2rem;
-  transition: border-color 0.2s;
+  padding: 1.5rem;
+  transition: border-color 0.15s;
 }
 
 .swiss-card:hover {
   border-color: hsl(var(--primary));
 }
 
-/* Exam Paper Card - Clean EdTech aesthetic for questions */
+/* Exam paper question card */
 .exam-paper-card {
   background-color: hsl(var(--background));
   border: 1px solid hsl(var(--border) / 0.3);
-  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.05);
   padding: 1.5rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.15s;
 }
 
 .exam-paper-card:hover {
-  border-color: hsl(var(--border) / 0.5);
-  box-shadow: 0 2px 4px 0 rgb(0 0 0 / 0.08);
+  border-color: hsl(var(--border) / 0.6);
 }
 
 .exam-paper-card .exam-paper-header {
@@ -239,7 +260,7 @@
 }
 
 .exam-paper-card .exam-paper-content {
-  font-size: 1.125rem;
+  font-size: 1.0625rem;
   line-height: 1.75;
 }
 
@@ -252,7 +273,8 @@
   border: 1px solid hsl(var(--border) / 0.15);
 }
 
-/* Dividers - Horizontal Rules */
+/* ─── Dividers ───────────────────────────────────────────────────────────── */
+
 .swiss-divider {
   width: 100%;
   height: 1px;
@@ -267,30 +289,35 @@
   border: none;
 }
 
-/* Module Labels - Small Caps */
+/* ─── Module Labels ─────────────────────────────────────────────────────── */
+
 .swiss-module-label {
   display: inline-block;
-  font-size: 0.75rem;
+  font-family: 'Mulish', sans-serif;
+  font-size: 0.6875rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: hsl(var(--primary));
 }
 
-/* Large Number Overlays */
+/* ─── Large Number Overlays ─────────────────────────────────────────────── */
+
 .swiss-number-overlay {
+  font-family: 'Bricolage Grotesque', sans-serif;
   font-size: 8rem;
   font-weight: 900;
   color: hsl(var(--muted));
-  opacity: 0.3;
+  opacity: 0.15;
   line-height: 1;
 }
 
-/* Animation - Minimal, Functional Only */
+/* ─── Animation ──────────────────────────────────────────────────────────── */
+
 @keyframes swiss-fade-in {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(16px);
   }
   to {
     opacity: 1;
@@ -299,10 +326,21 @@
 }
 
 .swiss-animate-in {
-  animation: swiss-fade-in 0.4s ease-out;
+  animation: swiss-fade-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Print Styles */
+/* ─── Flat Design Enforcement ────────────────────────────────────────────── */
+/* The Swiss Focus system has zero shadows. Override Tailwind shadow utilities  */
+/* globally so component-level shadow classes don't sneak in.                   */
+
+@layer base {
+  *[class*="shadow"] {
+    box-shadow: none !important;
+  }
+}
+
+/* ─── Print Styles ───────────────────────────────────────────────────────── */
+
 @media print {
   body {
     -webkit-print-color-adjust: exact !important;
@@ -311,32 +349,26 @@
   .break-inside-avoid {
     break-inside: avoid;
   }
-  /* Hide print buttons and control bar when printing */
   .print-hidden {
     display: none !important;
   }
-  /* Page break before revision list */
   .break-before-page {
     break-before: page;
     page-break-before: always;
   }
-  /* Ensure clean margins */
   @page {
     margin: 1cm;
   }
-  /* Prevent orphan rows in tables */
   tr {
     break-inside: avoid;
     page-break-inside: avoid;
   }
-  /* Ensure backgrounds print */
   * {
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
   }
 }
 
-/* Screen styles for print-hidden elements */
 @media screen {
   .print-hidden {
     display: flex;

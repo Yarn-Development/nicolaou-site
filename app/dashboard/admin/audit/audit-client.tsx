@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog"
 import {
   Select,
@@ -26,7 +27,8 @@ import {
   auditUpdateQuestion,
   auditDeleteQuestion,
   auditToggleVerified,
-  auditRegenerateQuestion,
+  auditFixFormatting,
+  auditFullyRegenerateQuestion,
   type AuditQuestion,
   type AuditFilters,
 } from "@/app/actions/audit"
@@ -42,6 +44,8 @@ import {
   Search,
   Filter,
   ShieldCheck,
+  Wand2,
+  Sparkles,
 } from "lucide-react"
 
 const PAGE_SIZE = 30
@@ -61,7 +65,6 @@ const VERIFIED_OPTIONS: { value: string; label: string }[] = [
   { value: "unverified", label: "Unverified" },
 ]
 
-// Convert AuditQuestion to Question type for QuestionDisplay component
 function toQuestion(aq: AuditQuestion): Question {
   return {
     id: aq.id,
@@ -88,8 +91,11 @@ function toQuestion(aq: AuditQuestion): Question {
   }
 }
 
+// =====================================================
+// Main Client
+// =====================================================
+
 export function AuditClient() {
-  // ---- State ----
   const [questions, setQuestions] = useState<AuditQuestion[]>([])
   const [loading, setLoading] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
@@ -107,21 +113,27 @@ export function AuditClient() {
   // Edit modal
   const [editingQuestion, setEditingQuestion] = useState<AuditQuestion | null>(null)
   const [editLatex, setEditLatex] = useState("")
+  const [editAnswer, setEditAnswer] = useState("")
+  const [editExplanation, setEditExplanation] = useState("")
   const [editSaving, setEditSaving] = useState(false)
 
-  // Regenerating
-  const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set())
+  // Delete confirm modal
+  const [deletingQuestion, setDeletingQuestion] = useState<AuditQuestion | null>(null)
+  const [deleteConfirming, setDeleteConfirming] = useState(false)
 
-  // Infinite scroll sentinel
+  // Regenerate choice modal
+  const [regeneratingQuestion, setRegeneratingQuestion] = useState<AuditQuestion | null>(null)
+  const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set())
+  const [regenerateMode, setRegenerateMode] = useState<"format" | "new" | null>(null)
+
   const sentinelRef = useRef<HTMLDivElement>(null)
 
-  // ---- Debounced search ----
+  // Debounced search
   useEffect(() => {
     const timer = setTimeout(() => setSearchDebounced(search), 400)
     return () => clearTimeout(timer)
   }, [search])
 
-  // ---- Build filters ----
   const buildFilters = useCallback(
     (customOffset?: number): AuditFilters => ({
       showSuspectFirst,
@@ -134,17 +146,13 @@ export function AuditClient() {
     [showSuspectFirst, contentType, verifiedStatus, searchDebounced, offset]
   )
 
-  // ---- Load questions ----
   const loadQuestions = useCallback(
     async (reset = false) => {
       if (loading) return
       setLoading(true)
-
       const currentOffset = reset ? 0 : offset
       const filters = buildFilters(currentOffset)
-
       const result = await getAuditQuestions(filters)
-
       if (result.success && result.data) {
         if (reset) {
           setQuestions(result.data)
@@ -155,14 +163,13 @@ export function AuditClient() {
         setHasMore(result.data.length === PAGE_SIZE)
         setOffset(currentOffset + result.data.length)
       }
-
       setLoading(false)
       setInitialLoading(false)
     },
     [loading, offset, buildFilters]
   )
 
-  // ---- Initial load + filter change reset ----
+  // Reset on filter change
   useEffect(() => {
     setOffset(0)
     setQuestions([])
@@ -193,39 +200,47 @@ export function AuditClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSuspectFirst, contentType, verifiedStatus, searchDebounced])
 
-  // ---- Intersection Observer for infinite scroll ----
+  // Infinite scroll
   useEffect(() => {
     if (!sentinelRef.current) return
-
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loading) {
-          loadQuestions(false)
-        }
+        if (entries[0].isIntersecting && hasMore && !loading) loadQuestions(false)
       },
       { threshold: 0.1 }
     )
-
     observer.observe(sentinelRef.current)
     return () => observer.disconnect()
   }, [hasMore, loading, loadQuestions])
 
-  // ---- Quick Actions ----
+  // ---- Handlers ----
 
   const handleEdit = (q: AuditQuestion) => {
     setEditingQuestion(q)
     setEditLatex(q.question_latex || "")
+    const ak = q.answer_key as Record<string, string> | null
+    setEditAnswer(ak?.answer || "")
+    setEditExplanation(ak?.explanation || "")
   }
 
   const handleEditSave = async () => {
     if (!editingQuestion) return
     setEditSaving(true)
-    const result = await auditUpdateQuestion(editingQuestion.id, editLatex)
+    const result = await auditUpdateQuestion(
+      editingQuestion.id,
+      editLatex,
+      { answer: editAnswer, explanation: editExplanation }
+    )
     if (result.success) {
       setQuestions((prev) =>
         prev.map((q) =>
           q.id === editingQuestion.id
-            ? { ...q, question_latex: editLatex, is_suspect: false }
+            ? {
+                ...q,
+                question_latex: editLatex,
+                answer_key: { answer: editAnswer, explanation: editExplanation },
+                is_suspect: false,
+              }
             : q
         )
       )
@@ -234,85 +249,105 @@ export function AuditClient() {
     setEditSaving(false)
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this question permanently? This cannot be undone.")) return
-    const result = await auditDeleteQuestion(id)
-    if (result.success) {
-      setQuestions((prev) => prev.filter((q) => q.id !== id))
-      setTotal((prev) => prev - 1)
-    }
+  const handleDeleteRequest = (q: AuditQuestion) => {
+    setDeletingQuestion(q)
   }
 
-  const handleRegenerate = async (id: string) => {
+  const handleDeleteConfirm = async () => {
+    if (!deletingQuestion) return
+    setDeleteConfirming(true)
+    const result = await auditDeleteQuestion(deletingQuestion.id)
+    if (result.success) {
+      setQuestions((prev) => prev.filter((q) => q.id !== deletingQuestion.id))
+      setTotal((prev) => prev - 1)
+      setDeletingQuestion(null)
+    }
+    setDeleteConfirming(false)
+  }
+
+  const handleRegenerateRequest = (q: AuditQuestion) => {
+    setRegeneratingQuestion(q)
+    setRegenerateMode(null)
+  }
+
+  const handleRegenerateConfirm = async (mode: "format" | "new") => {
+    if (!regeneratingQuestion) return
+    const id = regeneratingQuestion.id
+    setRegeneratingQuestion(null)
+    setRegenerateMode(mode)
     setRegeneratingIds((prev) => new Set(prev).add(id))
-    const result = await auditRegenerateQuestion(id)
-    if (result.success && result.newLatex) {
+
+    const action = mode === "new" ? auditFullyRegenerateQuestion : auditFixFormatting
+    const result = await action(id)
+
+    if (result.success) {
       setQuestions((prev) =>
         prev.map((q) =>
           q.id === id
-            ? { ...q, question_latex: result.newLatex!, is_suspect: false }
+            ? {
+                ...q,
+                question_latex: result.newLatex ?? q.question_latex,
+                answer_key: result.newAnswerKey
+                  ? { answer: result.newAnswerKey.answer, explanation: result.newAnswerKey.explanation }
+                  : q.answer_key,
+                is_suspect: false,
+                is_verified: mode === "new" ? false : q.is_verified,
+              }
             : q
         )
       )
     }
+
     setRegeneratingIds((prev) => {
       const next = new Set(prev)
       next.delete(id)
       return next
     })
+    setRegenerateMode(null)
   }
 
   const handleToggleVerified = async (id: string, currentValue: boolean) => {
     const result = await auditToggleVerified(id, !currentValue)
     if (result.success) {
       setQuestions((prev) =>
-        prev.map((q) =>
-          q.id === id ? { ...q, is_verified: !currentValue } : q
-        )
+        prev.map((q) => (q.id === id ? { ...q, is_verified: !currentValue } : q))
       )
     }
   }
 
-  // ---- Stats ----
   const suspectCount = questions.filter((q) => q.is_suspect).length
   const verifiedCount = questions.filter((q) => q.is_verified).length
 
   return (
     <div className="flex-1 p-6 space-y-6">
-      {/* Page Header */}
+      {/* Header */}
       <div className="flex items-center gap-3">
         <ShieldCheck className="h-8 w-8 text-swiss-signal" />
         <div>
-          <h1 className="text-2xl font-black uppercase tracking-wider">
-            QC Audit
-          </h1>
+          <h1 className="text-2xl font-black uppercase tracking-wider">QC Audit</h1>
           <p className="text-sm text-swiss-lead">
-            Rapid quality control — scan, fix, or remove broken questions
+            Scan, fix, or replace broken questions
           </p>
         </div>
       </div>
 
-      {/* Stats Bar */}
+      {/* Stats */}
       <div className="flex items-center gap-4 border-2 border-swiss-ink p-3 bg-swiss-concrete">
         <span className="text-xs font-black uppercase tracking-wider">
           Loaded: {questions.length}
         </span>
-        <span className="text-xs font-bold text-swiss-lead">
-          / {total} total
-        </span>
+        <span className="text-xs font-bold text-swiss-lead">/ {total} total</span>
         <span className="border-l-2 border-swiss-ink pl-4 text-xs font-black uppercase tracking-wider text-amber-600">
           Suspect: {suspectCount}
         </span>
-        <span className="border-l-2 border-swiss-ink pl-4 text-xs font-black uppercase tracking-wider text-green-600">
+        <span className="border-l-2 border-swiss-ink pl-4 text-xs font-black uppercase tracking-wider">
           Verified: {verifiedCount}
         </span>
       </div>
 
-      {/* Filter Bar */}
+      {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 border-2 border-swiss-ink p-4 bg-swiss-paper">
         <Filter className="h-4 w-4 text-swiss-lead" />
-
-        {/* Suspect First Toggle */}
         <Button
           variant={showSuspectFirst ? "default" : "outline"}
           size="sm"
@@ -322,36 +357,26 @@ export function AuditClient() {
           <AlertTriangle className="h-3.5 w-3.5 mr-1" />
           Suspect First
         </Button>
-
-        {/* Content Type */}
         <Select value={contentType} onValueChange={setContentType}>
           <SelectTrigger className="w-[160px] border-2 border-swiss-ink text-xs font-bold uppercase tracking-wider">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {CONTENT_TYPE_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-
-        {/* Verified Status */}
         <Select value={verifiedStatus} onValueChange={setVerifiedStatus}>
           <SelectTrigger className="w-[140px] border-2 border-swiss-ink text-xs font-bold uppercase tracking-wider">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {VERIFIED_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
+              <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-
-        {/* Search */}
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-swiss-lead" />
           <Input
@@ -374,12 +399,8 @@ export function AuditClient() {
       ) : questions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-swiss-ink/30">
           <ShieldCheck className="h-12 w-12 text-swiss-lead/40 mb-4" />
-          <p className="text-sm font-bold uppercase tracking-wider text-swiss-lead">
-            No questions found
-          </p>
-          <p className="text-xs text-swiss-lead mt-1">
-            Try adjusting your filters
-          </p>
+          <p className="text-sm font-bold uppercase tracking-wider text-swiss-lead">No questions found</p>
+          <p className="text-xs text-swiss-lead mt-1">Try adjusting your filters</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -389,24 +410,20 @@ export function AuditClient() {
               question={q}
               isRegenerating={regeneratingIds.has(q.id)}
               onEdit={() => handleEdit(q)}
-              onDelete={() => handleDelete(q.id)}
-              onRegenerate={() => handleRegenerate(q.id)}
-              onToggleVerified={() =>
-                handleToggleVerified(q.id, q.is_verified)
-              }
+              onDelete={() => handleDeleteRequest(q)}
+              onRegenerate={() => handleRegenerateRequest(q)}
+              onToggleVerified={() => handleToggleVerified(q.id, q.is_verified)}
             />
           ))}
         </div>
       )}
 
-      {/* Infinite Scroll Sentinel */}
+      {/* Infinite scroll sentinel */}
       <div ref={sentinelRef} className="h-10 flex items-center justify-center">
         {loading && !initialLoading && (
           <div className="flex items-center gap-2">
             <Loader2 className="h-5 w-5 animate-spin text-swiss-lead" />
-            <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">
-              Loading more...
-            </span>
+            <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">Loading more...</span>
           </div>
         )}
         {!hasMore && questions.length > 0 && (
@@ -416,66 +433,167 @@ export function AuditClient() {
         )}
       </div>
 
-      {/* Edit Modal */}
-      <Dialog
-        open={!!editingQuestion}
-        onOpenChange={(open) => {
-          if (!open) setEditingQuestion(null)
-        }}
-      >
-        <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+      {/* ── Edit Modal ── */}
+      <Dialog open={!!editingQuestion} onOpenChange={(open) => { if (!open) setEditingQuestion(null) }}>
+        <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-lg font-black uppercase tracking-wider">
-              Edit Question LaTeX
-            </DialogTitle>
+            <DialogTitle className="text-lg font-black uppercase tracking-wider">Edit Question</DialogTitle>
+            <DialogDescription className="text-xs text-swiss-lead">
+              {editingQuestion?.topic_name} · {editingQuestion?.sub_topic_name}
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-            {/* Raw LaTeX Editor */}
-            <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-wider text-swiss-lead">
-                Raw LaTeX
-              </label>
-              <Textarea
-                value={editLatex}
-                onChange={(e) => setEditLatex(e.target.value)}
-                className="min-h-[300px] font-mono text-sm border-2 border-swiss-ink"
-                placeholder="Enter question LaTeX..."
-              />
+          <div className="space-y-6 mt-4">
+            {/* Question LaTeX */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wider text-swiss-lead">Question LaTeX</label>
+                <Textarea
+                  value={editLatex}
+                  onChange={(e) => setEditLatex(e.target.value)}
+                  className="min-h-[200px] font-mono text-sm border-2 border-swiss-ink"
+                  placeholder="Enter question LaTeX..."
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wider text-swiss-lead">Preview</label>
+                <div className="border-2 border-swiss-ink p-4 min-h-[200px] bg-white">
+                  <LatexPreview latex={editLatex} />
+                </div>
+              </div>
             </div>
 
-            {/* Live Preview */}
-            <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-wider text-swiss-lead">
-                Live Preview
-              </label>
-              <div className="border-2 border-swiss-ink p-4 min-h-[300px] bg-white">
-                <LatexPreview latex={editLatex} />
+            {/* Answer + Explanation */}
+            <div className="border-t-2 border-swiss-ink pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wider text-swiss-lead">Answer</label>
+                <Textarea
+                  value={editAnswer}
+                  onChange={(e) => setEditAnswer(e.target.value)}
+                  className="min-h-[80px] font-mono text-sm border-2 border-swiss-ink"
+                  placeholder="e.g. x = 4"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-wider text-swiss-lead">Explanation / Mark Scheme</label>
+                <Textarea
+                  value={editExplanation}
+                  onChange={(e) => setEditExplanation(e.target.value)}
+                  className="min-h-[80px] font-mono text-sm border-2 border-swiss-ink"
+                  placeholder="Step-by-step working..."
+                />
               </div>
             </div>
           </div>
 
           <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setEditingQuestion(null)} className="border-2 border-swiss-ink">
+              Cancel
+            </Button>
+            <Button onClick={handleEditSave} disabled={editSaving} className="font-bold uppercase tracking-wider">
+              {editSaving ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Saving...</> : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Confirm Modal ── */}
+      <Dialog open={!!deletingQuestion} onOpenChange={(open) => { if (!open) setDeletingQuestion(null) }}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase tracking-wider text-swiss-signal">
+              Delete Question?
+            </DialogTitle>
+            <DialogDescription className="text-sm text-swiss-lead mt-1">
+              This cannot be undone. The question will be permanently removed from the question bank.
+            </DialogDescription>
+          </DialogHeader>
+
+          {deletingQuestion && (
+            <div className="border-2 border-swiss-ink p-4 bg-swiss-concrete my-4 max-h-[120px] overflow-hidden">
+              <p className="text-xs font-mono text-swiss-lead line-clamp-4">
+                {deletingQuestion.question_latex}
+              </p>
+            </div>
+          )}
+
+          <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setEditingQuestion(null)}
+              onClick={() => setDeletingQuestion(null)}
               className="border-2 border-swiss-ink"
+              disabled={deleteConfirming}
             >
               Cancel
             </Button>
             <Button
-              onClick={handleEditSave}
-              disabled={editSaving}
-              className="font-bold uppercase tracking-wider"
+              onClick={handleDeleteConfirm}
+              disabled={deleteConfirming}
+              className="bg-swiss-signal text-white hover:bg-red-700 font-bold uppercase tracking-wider"
             >
-              {editSaving ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Saving...
-                </>
-              ) : (
-                "Save Changes"
-              )}
+              {deleteConfirming ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Deleting...</> : "Delete permanently"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Regenerate Choice Modal ── */}
+      <Dialog open={!!regeneratingQuestion} onOpenChange={(open) => { if (!open) setRegeneratingQuestion(null) }}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black uppercase tracking-wider">
+              Fix This Question
+            </DialogTitle>
+            <DialogDescription className="text-sm text-swiss-lead mt-1">
+              Choose how to fix the question.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 gap-3 my-4">
+            {/* Option 1: Fix formatting */}
+            <button
+              onClick={() => handleRegenerateConfirm("format")}
+              className="text-left border-2 border-swiss-ink p-4 bg-swiss-paper hover:bg-swiss-concrete transition-colors"
+            >
+              <div className="flex items-start gap-3">
+                <Wand2 className="h-5 w-5 mt-0.5 text-swiss-lead flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-black uppercase tracking-wider">Fix LaTeX formatting</p>
+                  <p className="text-xs text-swiss-lead mt-1">
+                    Keeps the same maths content and numbers — just cleans up broken LaTeX syntax,
+                    missing braces, and delimiter errors.
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            {/* Option 2: New question */}
+            <button
+              onClick={() => handleRegenerateConfirm("new")}
+              className="text-left border-2 border-swiss-ink p-4 bg-swiss-paper hover:bg-swiss-concrete transition-colors"
+            >
+              <div className="flex items-start gap-3">
+                <Sparkles className="h-5 w-5 mt-0.5 text-swiss-signal flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-black uppercase tracking-wider">Generate a new question</p>
+                  <p className="text-xs text-swiss-lead mt-1">
+                    Replaces this question entirely with a fresh one on the same topic, marks,
+                    and difficulty. The question will be marked unverified.
+                  </p>
+                  {regeneratingQuestion && (
+                    <p className="text-xs font-bold mt-2 text-swiss-ink">
+                      Topic: {regeneratingQuestion.sub_topic_name || regeneratingQuestion.topic_name || regeneratingQuestion.topic} ·{" "}
+                      {regeneratingQuestion.marks}M · {regeneratingQuestion.difficulty}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </button>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRegeneratingQuestion(null)} className="border-2 border-swiss-ink">
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -485,7 +603,7 @@ export function AuditClient() {
 }
 
 // =====================================================
-// AuditCard — individual question card with hover overlay
+// AuditCard
 // =====================================================
 
 interface AuditCardProps {
@@ -508,107 +626,122 @@ function AuditCard({
   const q = toQuestion(question)
 
   return (
-    <div className="group relative border-2 border-swiss-ink bg-swiss-paper overflow-hidden">
-      {/* Suspect Badge */}
-      {question.is_suspect && (
-        <div className="absolute top-2 right-2 z-10">
+    <div className="relative border-2 border-swiss-ink bg-swiss-paper overflow-hidden flex flex-col">
+      {/* Status badges */}
+      <div className="absolute top-2 right-2 z-10 flex flex-col items-end gap-1">
+        {question.is_suspect && (
           <Badge variant="warning" className="text-[10px] px-2 py-0.5">
             <AlertTriangle className="h-3 w-3 mr-1" />
             Suspect
           </Badge>
-        </div>
-      )}
-
-      {/* Verified Badge */}
-      {question.is_verified && (
-        <div className="absolute top-2 left-2 z-10">
+        )}
+        {question.is_verified && (
           <Badge variant="success" className="text-[10px] px-2 py-0.5">
             <CheckCircle className="h-3 w-3 mr-1" />
             Verified
           </Badge>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Regenerating Overlay */}
+      {/* Regenerating overlay */}
       {isRegenerating && (
-        <div className="absolute inset-0 z-20 bg-swiss-paper/80 flex flex-col items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-swiss-signal mb-2" />
+        <div className="absolute inset-0 z-20 bg-swiss-paper/90 flex flex-col items-center justify-center gap-2">
+          <Loader2 className="h-8 w-8 animate-spin text-swiss-signal" />
           <span className="text-xs font-black uppercase tracking-wider text-swiss-signal">
-            Regenerating...
+            Working...
           </span>
         </div>
       )}
 
-      {/* Question Content */}
-      <div className="p-4">
+      {/* Content */}
+      <div className="p-4 flex-1">
         <QuestionDisplay
           question={q}
           variant="card"
           showSourceBadge
           showTopicInfo
           enableZoom={false}
-          maxHeight="280px"
+          maxHeight="260px"
         />
       </div>
 
-      {/* Question ID (subtle) */}
-      <div className="px-4 pb-2">
+      {/* ID */}
+      <div className="px-4 pb-1">
         <span className="text-[10px] font-mono text-swiss-lead/40 select-all">
           {question.id.slice(0, 8)}
         </span>
       </div>
 
-      {/* Quick Actions Overlay — appears on hover */}
-      <div className="absolute bottom-0 left-0 right-0 translate-y-full group-hover:translate-y-0 transition-transform duration-200 ease-out bg-swiss-ink/90 backdrop-blur-sm p-2 flex items-center justify-center gap-2 z-10">
-        {/* Edit */}
-        <Button
-          variant="ghost"
-          size="icon"
+      {/* Action bar — always visible */}
+      <div className="border-t-2 border-swiss-ink grid grid-cols-4">
+        <ActionButton
           onClick={onEdit}
-          className="h-8 w-8 text-swiss-paper hover:text-swiss-signal hover:bg-white/10"
-          title="Edit LaTeX"
-        >
-          <Pencil className="h-4 w-4" />
-        </Button>
-
-        {/* Delete */}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onDelete}
-          className="h-8 w-8 text-swiss-paper hover:text-red-400 hover:bg-white/10"
-          title="Delete question"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-
-        {/* Regenerate */}
-        <Button
-          variant="ghost"
-          size="icon"
+          icon={<Pencil className="h-3.5 w-3.5" />}
+          label="Edit"
+          title="Edit question and answer"
+        />
+        <ActionButton
           onClick={onRegenerate}
+          icon={<RefreshCw className="h-3.5 w-3.5" />}
+          label="Fix"
+          title="Fix formatting or generate new question"
           disabled={isRegenerating}
-          className="h-8 w-8 text-swiss-paper hover:text-blue-400 hover:bg-white/10"
-          title="Regenerate with AI"
-        >
-          <RefreshCw className="h-4 w-4" />
-        </Button>
-
-        {/* Verify / Unverify */}
-        <Button
-          variant="ghost"
-          size="icon"
+        />
+        <ActionButton
           onClick={onToggleVerified}
-          className="h-8 w-8 text-swiss-paper hover:text-green-400 hover:bg-white/10"
-          title={question.is_verified ? "Unverify" : "Verify"}
-        >
-          {question.is_verified ? (
-            <XCircle className="h-4 w-4" />
-          ) : (
-            <CheckCircle className="h-4 w-4" />
-          )}
-        </Button>
+          icon={question.is_verified ? <XCircle className="h-3.5 w-3.5" /> : <CheckCircle className="h-3.5 w-3.5" />}
+          label={question.is_verified ? "Unverify" : "Verify"}
+          title={question.is_verified ? "Remove verification" : "Mark as verified"}
+          active={question.is_verified}
+        />
+        <ActionButton
+          onClick={onDelete}
+          icon={<Trash2 className="h-3.5 w-3.5" />}
+          label="Delete"
+          title="Delete question permanently"
+          danger
+        />
       </div>
     </div>
+  )
+}
+
+function ActionButton({
+  onClick,
+  icon,
+  label,
+  title,
+  disabled,
+  danger,
+  active,
+}: {
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+  title: string
+  disabled?: boolean
+  danger?: boolean
+  active?: boolean
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`
+        flex flex-col items-center justify-center gap-1 py-2 text-[10px] font-bold uppercase tracking-wider
+        border-r-2 border-swiss-ink last:border-r-0
+        transition-colors disabled:opacity-40 disabled:cursor-not-allowed
+        ${danger
+          ? "text-swiss-signal hover:bg-swiss-signal hover:text-white"
+          : active
+          ? "text-swiss-ink bg-swiss-concrete hover:bg-swiss-signal hover:text-white"
+          : "text-swiss-lead hover:bg-swiss-ink hover:text-swiss-paper"
+        }
+      `}
+    >
+      {icon}
+      {label}
+    </button>
   )
 }

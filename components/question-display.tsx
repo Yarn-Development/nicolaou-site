@@ -213,33 +213,33 @@ function getSourceConfig(contentType: ContentType) {
       return {
         label: 'AI Generated',
         icon: FileText,
-        bgColor: 'bg-blue-50',
-        textColor: 'text-blue-700',
-        borderColor: 'border-blue-200',
+        bgColor: 'bg-muted',
+        textColor: 'text-foreground',
+        borderColor: 'border-border',
       }
     case 'synthetic_image':
       return {
         label: 'AI Diagram',
         icon: Triangle,
-        bgColor: 'bg-purple-50',
-        textColor: 'text-purple-700',
-        borderColor: 'border-purple-200',
+        bgColor: 'bg-foreground/5',
+        textColor: 'text-foreground',
+        borderColor: 'border-foreground/20',
       }
     case 'image_ocr':
       return {
         label: 'Scanned',
         icon: ImageIcon,
-        bgColor: 'bg-amber-50',
-        textColor: 'text-amber-700',
-        borderColor: 'border-amber-200',
+        bgColor: 'bg-muted',
+        textColor: 'text-muted-foreground',
+        borderColor: 'border-border',
       }
     case 'official_past_paper':
       return {
         label: 'Past Paper',
         icon: FileCheck,
-        bgColor: 'bg-green-50',
-        textColor: 'text-green-700',
-        borderColor: 'border-green-200',
+        bgColor: 'bg-primary/5',
+        textColor: 'text-primary',
+        borderColor: 'border-primary/20',
       }
     default:
       return {

@@ -133,12 +133,12 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
     return new Date(dateStr) < new Date()
   }
 
-  // Helper to get RAG color
+  // Helper to get RAG color — Swiss system: red for poor, neutral for acceptable, ink for good
   const getRAGColor = (percentage: number | null) => {
-    if (percentage === null) return { bg: "bg-gray-100", text: "text-gray-500" }
-    if (percentage >= 70) return { bg: "bg-green-100", text: "text-green-600" }
-    if (percentage >= 40) return { bg: "bg-amber-100", text: "text-amber-600" }
-    return { bg: "bg-red-100", text: "text-red-600" }
+    if (percentage === null) return { bg: "bg-muted", text: "text-muted-foreground" }
+    if (percentage >= 70) return { bg: "bg-foreground", text: "text-background" }
+    if (percentage >= 40) return { bg: "bg-muted", text: "text-foreground" }
+    return { bg: "bg-primary", text: "text-white" }
   }
 
   if (isLoading) {
@@ -161,11 +161,11 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h1 className="text-4xl font-black uppercase tracking-widest text-swiss-ink mb-2">
-                MY LEARNING
+              <h1 className="text-4xl font-black tracking-tight text-swiss-ink mb-2">
+                My Learning
               </h1>
-              <p className="text-sm text-swiss-lead uppercase tracking-wider font-bold">
-                Welcome back, {profile.full_name || profile.email.split("@")[0]}!
+              <p className="text-sm text-swiss-lead font-medium">
+                Welcome back, {profile.full_name || profile.email.split("@")[0]}
               </p>
             </div>
             <div className="w-48">
@@ -277,7 +277,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                   
                   {/* Class Cards Horizontal Scroll */}
                   <div className="border-2 border-swiss-ink bg-swiss-paper p-4">
-                    <h3 className="font-black uppercase tracking-tight text-swiss-ink text-sm mb-4 flex items-center gap-2">
+                    <h3 className="font-bold tracking-tight text-swiss-ink text-sm mb-4 flex items-center gap-2">
                       <BookOpen className="w-4 h-4 text-swiss-signal" />
                       ENROLLED ({classes.length})
                     </h3>
@@ -319,7 +319,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
               <div className="space-y-3">
                 {pendingAssignments.length === 0 ? (
                   <div className="border-2 border-swiss-ink bg-swiss-concrete p-8 text-center">
-                    <CheckCircle className="w-12 h-12 mx-auto text-green-500 mb-4" />
+                    <CheckCircle className="w-12 h-12 mx-auto text-foreground mb-4" />
                     <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
                       All caught up!
                     </p>
@@ -336,30 +336,30 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                       <div
                         key={assignment.id}
                         className={`border-2 border-swiss-ink bg-swiss-paper p-4 flex items-center justify-between hover:border-swiss-signal transition-colors duration-200 ${
-                          overdue ? "bg-red-50" : ""
+                          overdue ? "bg-primary/5" : ""
                         }`}
                       >
                         <div className="flex items-center gap-4">
                           <div className={`w-10 h-10 border-2 flex items-center justify-center ${
                             overdue 
-                              ? "border-red-500 bg-red-100" 
+                              ? "border-primary bg-primary/10" 
                               : isOnline 
                                 ? "border-swiss-signal bg-swiss-signal"
-                                : "border-amber-500 bg-amber-100"
+                                : "border-muted-foreground bg-muted"
                           }`}>
                             {isOnline ? (
-                              <Laptop className={`w-5 h-5 ${overdue ? "text-red-500" : "text-white"}`} />
+                              <Laptop className={`w-5 h-5 ${overdue ? "text-primary" : "text-white"}`} />
                             ) : (
-                              <Printer className={`w-5 h-5 ${overdue ? "text-red-500" : "text-amber-600"}`} />
+                              <Printer className={`w-5 h-5 ${overdue ? "text-primary" : "text-muted-foreground"}`} />
                             )}
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
+                              <p className="font-bold text-sm text-swiss-ink">
                                 {assignment.title}
                               </p>
                               {!isOnline && (
-                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500 text-amber-600 font-bold">
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-muted-foreground text-muted-foreground font-bold">
                                   PAPER
                                 </Badge>
                               )}
@@ -369,7 +369,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                                 {assignment.class_name}
                               </span>
                               <span className={`text-xs uppercase tracking-wider font-bold ${
-                                overdue ? "text-red-600" : "text-swiss-signal"
+                                overdue ? "text-primary" : "text-swiss-signal"
                               }`}>
                                 {isOnline ? "Due: " : "Exam: "}{formatDueDate(assignment.due_date)}
                               </span>
@@ -403,7 +403,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                                 Revision List
                               </Button>
                             </Link>
-                            <Badge variant="outline" className="border-amber-500 text-amber-600 font-bold text-xs px-2 py-1">
+                            <Badge variant="outline" className="border-muted-foreground text-muted-foreground font-bold text-xs px-2 py-1">
                               <PenLine className="w-3 h-3 mr-1" />
                               In Class
                             </Badge>
@@ -447,7 +447,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                             <span className="text-3xl font-black text-swiss-lead/20">
                               {String(index + 1).padStart(2, '0')}
                             </span>
-                            <h3 className="text-lg font-black uppercase tracking-wider text-swiss-ink">
+                            <h3 className="text-lg font-bold tracking-tight text-swiss-ink">
                               {topic.topic}
                             </h3>
                           </div>
@@ -462,8 +462,8 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                         <div className="w-full h-3 bg-white border-2 border-swiss-ink">
                           <div
                             className={`h-full transition-all duration-500 ${
-                              topic.percentage >= 70 ? "bg-green-500" :
-                              topic.percentage >= 40 ? "bg-amber-500" : "bg-red-500"
+                              topic.percentage >= 70 ? "bg-foreground" :
+                              topic.percentage >= 40 ? "bg-muted-foreground" : "bg-primary/50"
                             }`}
                             style={{ width: `${topic.percentage}%` }}
                           />
@@ -544,7 +544,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <h3 className="text-lg font-bold uppercase tracking-wider text-swiss-ink mb-2">
+                        <h3 className="text-lg font-bold tracking-tight text-swiss-ink mb-2">
                           {cls.class_name}
                         </h3>
                         <div className="flex items-center gap-3 flex-wrap">
@@ -588,14 +588,14 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
 
             {/* Pending Section */}
             <div>
-              <h3 className="text-lg font-black uppercase tracking-wider text-swiss-ink mb-4 flex items-center gap-2">
+              <h3 className="text-lg font-bold tracking-tight text-swiss-ink mb-4 flex items-center gap-2">
                 <Circle className="w-5 h-5 text-swiss-signal" />
-                PENDING ({pendingAssignments.length})
+                Pending ({pendingAssignments.length})
               </h3>
 
               {pendingAssignments.length === 0 ? (
                 <div className="border-2 border-swiss-ink bg-swiss-concrete p-6 text-center">
-                  <CheckCircle className="w-8 h-8 mx-auto text-green-500 mb-2" />
+                  <CheckCircle className="w-8 h-8 mx-auto text-foreground mb-2" />
                   <p className="text-sm text-swiss-lead uppercase tracking-wider font-bold">
                     No pending assignments
                   </p>
@@ -610,22 +610,22 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                       <div
                         key={assignment.id}
                         className={`border-2 border-swiss-ink bg-swiss-paper p-4 flex items-center justify-between ${
-                          overdue ? "bg-red-50" : ""
+                          overdue ? "bg-primary/5" : ""
                         }`}
                       >
                         <div className="flex items-center gap-4">
                           {isOnline ? (
-                            <Laptop className={`w-5 h-5 ${overdue ? "text-red-500" : "text-swiss-signal"}`} />
+                            <Laptop className={`w-5 h-5 ${overdue ? "text-primary" : "text-swiss-signal"}`} />
                           ) : (
-                            <Printer className={`w-5 h-5 ${overdue ? "text-red-500" : "text-amber-500"}`} />
+                            <Printer className={`w-5 h-5 ${overdue ? "text-primary" : "text-muted-foreground"}`} />
                           )}
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
+                              <p className="font-bold text-sm text-swiss-ink">
                                 {assignment.title}
                               </p>
                               {!isOnline && (
-                                <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 font-bold uppercase tracking-wider border border-amber-300">
+                                <span className="text-[10px] px-1.5 py-0.5 bg-muted text-foreground font-bold uppercase tracking-wider border border-border">
                                   Paper
                                 </span>
                               )}
@@ -635,7 +635,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                                 {assignment.class_name}
                               </span>
                               <span className={`text-xs uppercase tracking-wider font-bold ${
-                                overdue ? "text-red-600" : isOnline ? "text-swiss-signal" : "text-amber-600"
+                                overdue ? "text-primary" : isOnline ? "text-swiss-signal" : "text-muted-foreground"
                               }`}>
                                 {isOnline ? "Due: " : "Exam: "}{formatDueDate(assignment.due_date)}
                               </span>
@@ -662,7 +662,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                           <Button 
                             size="sm"
                             disabled
-                            className="bg-amber-100 text-amber-700 border-2 border-amber-300 font-bold uppercase tracking-wider cursor-not-allowed"
+                            className="bg-muted text-foreground border-2 border-border font-bold uppercase tracking-wider cursor-not-allowed"
                           >
                             <PenLine className="w-4 h-4 mr-2" />
                             In Class
@@ -677,9 +677,9 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
 
             {/* Completed Section */}
             <div>
-              <h3 className="text-lg font-black uppercase tracking-wider text-swiss-ink mb-4 flex items-center gap-2">
-                <CheckCircle className="w-5 h-5 text-green-500" />
-                COMPLETED ({completedAssignments.length})
+              <h3 className="text-lg font-bold tracking-tight text-swiss-ink mb-4 flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-foreground" />
+                Completed ({completedAssignments.length})
               </h3>
 
               {completedAssignments.length === 0 ? (
@@ -712,18 +712,18 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                             )
                           ) : (
                             isOnline ? (
-                              <Laptop className="w-5 h-5 text-amber-500" />
+                              <Laptop className="w-5 h-5 text-muted-foreground" />
                             ) : (
-                              <Printer className="w-5 h-5 text-amber-500" />
+                              <Printer className="w-5 h-5 text-muted-foreground" />
                             )
                           )}
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="font-bold text-sm uppercase tracking-wider text-swiss-ink">
+                              <p className="font-bold text-sm text-swiss-ink">
                                 {assignment.title}
                               </p>
                               {!isOnline && (
-                                <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 font-bold uppercase tracking-wider border border-amber-300">
+                                <span className="text-[10px] px-1.5 py-0.5 bg-muted text-foreground font-bold uppercase tracking-wider border border-border">
                                   Paper
                                 </span>
                               )}
@@ -738,7 +738,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                                 </span>
                               )}
                               {!isGraded && (
-                                <span className="text-xs text-amber-600 uppercase tracking-wider font-bold">
+                                <span className="text-xs text-muted-foreground uppercase tracking-wider font-bold">
                                   Awaiting Grade
                                 </span>
                               )}
@@ -763,7 +763,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                               Graded
                             </Badge>
                           ) : (
-                            <Badge variant="outline" className="border-amber-500 text-amber-600 font-bold uppercase">
+                            <Badge variant="outline" className="border-muted-foreground text-muted-foreground font-bold uppercase">
                               <Clock className="w-3 h-3 mr-1" />
                               Submitted
                             </Badge>
@@ -828,8 +828,8 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                         strokeDasharray={`${2 * Math.PI * 80}`}
                         strokeDashoffset={`${2 * Math.PI * 80 * (1 - stats.averageScore / 100)}`}
                         className={`transition-all duration-1000 ${
-                          stats.averageScore >= 70 ? "text-green-500" :
-                          stats.averageScore >= 40 ? "text-amber-500" : "text-red-500"
+                          stats.averageScore >= 70 ? "text-foreground" :
+                          stats.averageScore >= 40 ? "text-muted-foreground" : "text-primary"
                         }`}
                         strokeLinecap="square"
                       />
@@ -879,7 +879,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                           STRONGEST TOPIC
                         </p>
                         <div className="flex items-center gap-3">
-                          <Award className="w-8 h-8 text-green-500" />
+                          <Award className="w-8 h-8 text-foreground" />
                           <div>
                             <p className="text-lg font-black text-swiss-ink uppercase">
                               {dashboardData.overallStats.bestTopic}
@@ -898,12 +898,12 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                           NEEDS ATTENTION
                         </p>
                         <div className="flex items-center gap-3">
-                          <AlertCircle className="w-8 h-8 text-red-500" />
+                          <AlertCircle className="w-8 h-8 text-primary" />
                           <div>
                             <p className="text-lg font-black text-swiss-ink uppercase">
                               {dashboardData.overallStats.weakestTopic}
                             </p>
-                            <p className="text-xs text-red-600 uppercase font-bold">
+                            <p className="text-xs text-primary uppercase font-bold">
                               Focus your revision here
                             </p>
                           </div>
@@ -945,8 +945,8 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                           <div className="w-full h-3 bg-swiss-concrete border border-swiss-ink">
                             <div 
                               className={`h-full transition-all duration-500 ${
-                                topic.percentage >= 70 ? "bg-green-500" :
-                                topic.percentage >= 40 ? "bg-amber-500" : "bg-red-500"
+                                topic.percentage >= 70 ? "bg-foreground" :
+                                topic.percentage >= 40 ? "bg-muted-foreground" : "bg-primary/50"
                               }`}
                               style={{ width: `${topic.percentage}%` }}
                             />

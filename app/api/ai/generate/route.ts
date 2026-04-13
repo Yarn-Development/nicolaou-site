@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+import {
+  needsDiagram,
+  sanitizeSvg,
+  buildDiagramSystemPrompt,
+  uploadSvgToStorage,
+} from '@/lib/diagram-utils'
+import { repairLatex } from '@/lib/latex-utils'
 
 /**
  * Unified AI Generation API Route
- * Supports two modes:
- * 1. Text Generation (GPT-OSS-120B) - Generate GCSE maths questions
- * 2. Image OCR (Qwen 2.5 VL) - Extract LaTeX from images
+ *
+ * Supports three modes:
+ * 1. Text Generation (GPT-OSS-120B, free) — topics that don't need diagrams
+ * 2. Diagram Generation (Claude Haiku) — topics that benefit from visual diagrams,
+ *    generates question + SVG in a single call so values always stay in sync
+ * 3. Image OCR (Qwen 2.5 VL) — extract LaTeX from uploaded images
  */
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
@@ -14,19 +25,27 @@ if (!OPENROUTER_API_KEY) {
   console.error('⚠️  OPENROUTER_API_KEY is not set in environment variables')
 }
 
-// Type definitions for request/response
+// =====================================================
+// Types
+// =====================================================
+
 interface TextGenRequest {
   type: 'text_gen'
   // Legacy fields (still supported)
   topic?: string
   tier?: 'Foundation' | 'Higher'
-  // New curriculum-aware fields
+  // Curriculum-aware fields
   level?: string
-  sub_topic?: string // Changed from sub_topic_name to match frontend
+  /** Parent topic name (e.g. "Geometry & Measures") used for diagram detection */
+  topic_name?: string
+  sub_topic?: string
   question_type?: 'Fluency' | 'Problem Solving' | 'Reasoning/Proof'
   marks?: number
   calculator_allowed?: boolean
   context?: string
+  // Diagram control — if omitted, auto-detected via needsDiagram()
+  force_diagram?: boolean
+  force_no_diagram?: boolean
 }
 
 interface ImageOCRRequest {
@@ -43,15 +62,27 @@ interface TextGenResponse {
   marks?: number
 }
 
+interface DiagramGenResponse {
+  question_latex: string
+  svg_markup: string
+  answer: string
+  explanation: string
+  marks: number
+  diagram_description?: string
+}
+
 interface ImageOCRResponse {
   question_latex: string
   suggested_topic: string
   suggested_difficulty: 'Foundation' | 'Higher'
 }
 
+// =====================================================
+// Main handler
+// =====================================================
+
 export async function POST(request: NextRequest) {
   try {
-    // Verify API key
     if (!OPENROUTER_API_KEY) {
       return NextResponse.json(
         { error: 'OpenRouter API key not configured' },
@@ -61,7 +92,6 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json() as AIRequest
 
-    // Route to appropriate handler based on type
     if (body.type === 'text_gen') {
       return await handleTextGeneration(body)
     } else if (body.type === 'image_ocr') {
@@ -75,38 +105,71 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('AI API Error:', error)
     return NextResponse.json(
-      { 
-        error: 'Internal server error', 
-        details: error instanceof Error ? error.message : 'Unknown error' 
+      {
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 }
     )
   }
 }
 
-/**
- * Mode A: Text Generation using GPT-OSS-120B (Free)
- * Supports both legacy (topic/tier) and new curriculum-aware generation
- */
+// =====================================================
+// Mode A: Text (or diagram) generation
+// =====================================================
+
 async function handleTextGeneration(request: TextGenRequest): Promise<NextResponse> {
-  // Check if this is a curriculum-aware request
   const isCurriculumAware = Boolean(request.level && request.sub_topic)
-  
-  let systemPrompt: string
-  let userPrompt: string
 
-  if (isCurriculumAware) {
-    // NEW: Curriculum-Aware Prompt Engineering
-    const {
-      level,
-      sub_topic,
-      question_type = 'Fluency',
-      marks = 3,
-      calculator_allowed = true,
+  if (!isCurriculumAware) {
+    return await handleLegacyTextGeneration(request)
+  }
+
+  const {
+    level,
+    sub_topic,
+    question_type = 'Fluency',
+    marks = 3,
+    calculator_allowed = true,
+    context,
+  } = request
+
+  // Resolve topic name from the sub_topic string for diagram detection.
+  // The caller passes sub_topic as the name string (e.g., "Circle Theorems"), not an ID.
+  // We also need the parent topic name. The level and sub_topic together identify the topic.
+  // We derive the parent topic name by checking if the sub_topic or level implies geometry etc.
+  // For now, we pass the sub_topic itself to needsDiagram — the function also checks
+  // the sub-topic name directly in SELECTIVE_DIAGRAM_SUBTOPICS.
+  // For ALWAYS_DIAGRAM_TOPICS we need the topic name — callers using the new curriculum-aware
+  // path should pass `topic_name` as an additional field if available; otherwise we default
+  // to sub_topic based detection only for selective topics, and check level-based geometry heuristic.
+  const topicName = request.topic_name || ''
+  const subTopicName = sub_topic || ''
+
+  // Determine whether to generate a diagram
+  let requiresDiagram: boolean
+  if (request.force_diagram === true) {
+    requiresDiagram = true
+  } else if (request.force_no_diagram === true) {
+    requiresDiagram = false
+  } else {
+    requiresDiagram = needsDiagram(topicName, subTopicName)
+  }
+
+  if (requiresDiagram) {
+    return await handleDiagramGeneration({
+      level: level!,
+      sub_topic: subTopicName,
+      topic_name: topicName,
+      question_type,
+      marks,
+      calculator_allowed,
       context,
-    } = request
+    })
+  }
 
-    systemPrompt = `You are an expert UK mathematics exam question writer with deep knowledge of:
+  // ---- Text-only path (free model) ----
+  const systemPrompt = `You are an expert UK mathematics exam question writer with deep knowledge of:
 - UK National Curriculum (KS3, GCSE Foundation, GCSE Higher)
 - A-Level Mathematics specifications (Pure, Statistics, Mechanics)
 - Exam board requirements (AQA, Edexcel, OCR)
@@ -121,7 +184,7 @@ Your questions must be:
 
 Always respond with valid JSON only, no additional text or formatting.`
 
-    userPrompt = `Create a unique ${level} mathematics question with the following specifications:
+  const userPrompt = `Create a unique ${level} mathematics question with the following specifications:
 
 **CURRICULUM CONTEXT:**
 - Level: ${level}
@@ -157,20 +220,275 @@ ${marks === 1 ? '- Single-step question\n- One method or one answer' : ''}${mark
 
 Generate ONE high-quality question now. Return ONLY the JSON object.`
 
-  } else {
-    // LEGACY: Simple topic/tier generation (backwards compatible)
-    const { topic, tier } = request
-    
-    if (!topic || !tier) {
+  try {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
+        'X-Title': 'Nicolaou Maths - Question Generator',
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-oss-120b:free',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.8,
+        max_tokens: 1500,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      console.error('OpenRouter API Error:', errorData)
       return NextResponse.json(
-        { error: 'Either (level, sub_topic_name) or (topic, tier) is required' },
-        { status: 400 }
+        { error: 'Failed to generate question', details: errorData },
+        { status: response.status }
       )
     }
 
-    systemPrompt = 'You are a GCSE mathematics question generator. Always respond with valid JSON only, no additional text or formatting.'
-    
-    userPrompt = `Create a unique GCSE Maths question on ${topic} for ${tier} tier.
+    const data = await response.json()
+    const content = data.choices[0]?.message?.content
+
+    if (!content) {
+      return NextResponse.json({ error: 'No response from AI model' }, { status: 500 })
+    }
+
+    let parsedContent: TextGenResponse
+    try {
+      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      parsedContent = JSON.parse(cleanedContent)
+    } catch {
+      console.error('Failed to parse AI response:', content)
+      return NextResponse.json(
+        { error: 'Invalid response format from AI', raw_content: content },
+        { status: 500 }
+      )
+    }
+
+    if (!parsedContent.question_latex || !parsedContent.answer) {
+      return NextResponse.json(
+        { error: 'Incomplete response from AI', content: parsedContent },
+        { status: 500 }
+      )
+    }
+
+    // Repair common LaTeX hallucinations before returning to client
+    parsedContent.question_latex = repairLatex(parsedContent.question_latex)
+    parsedContent.answer = repairLatex(parsedContent.answer)
+    if (parsedContent.explanation) parsedContent.explanation = repairLatex(parsedContent.explanation)
+
+    return NextResponse.json({
+      success: true,
+      data: parsedContent,
+      image_url: null,
+      content_type: 'generated_text',
+      has_diagram: false,
+      model: 'gpt-oss-120b',
+      curriculum_aware: true,
+    })
+  } catch (error) {
+    console.error('Text generation error:', error)
+    return NextResponse.json(
+      {
+        error: 'Failed to generate question',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    )
+  }
+}
+
+// =====================================================
+// Mode A2: Diagram generation (Claude Haiku)
+// =====================================================
+
+interface DiagramGenParams {
+  level: string
+  sub_topic: string
+  topic_name: string
+  question_type: 'Fluency' | 'Problem Solving' | 'Reasoning/Proof'
+  marks: number
+  calculator_allowed: boolean
+  context?: string
+}
+
+async function handleDiagramGeneration(params: DiagramGenParams): Promise<NextResponse> {
+  const { level, sub_topic, topic_name, question_type, marks, calculator_allowed, context } = params
+
+  const userPrompt = `Create a ${level} mathematics question WITH an SVG diagram for this specification:
+
+**CURRICULUM:**
+- Level: ${level}
+- Topic: ${topic_name || sub_topic}
+- Sub-Topic: ${sub_topic}
+
+**QUESTION REQUIREMENTS:**
+- Question Type: ${question_type}
+- Marks: ${marks}
+- Calculator: ${calculator_allowed ? 'Calculator allowed' : 'Non-calculator — use integer or simple fraction values'}${context ? `\n- Additional context: ${context}` : ''}
+
+**DIAGRAM REQUIREMENTS:**
+- The diagram must show exactly the geometric configuration the question refers to.
+- Label all GIVEN values (lengths, angles) directly in the SVG.
+- Mark any UNKNOWN value being asked for as a variable (e.g., $x$, θ) in BOTH the SVG and the question text.
+- Use integer coordinates in the 50–350 range on both axes.
+- All shapes must be clearly visible — not too small or too large.
+${question_type === 'Fluency' ? '- Standard diagram showing the core geometric property.' : ''}${question_type === 'Problem Solving' ? '- Diagram should present a realistic, slightly complex configuration.' : ''}${question_type === 'Reasoning/Proof' ? '- Diagram should support a proof — include all relevant construction lines.' : ''}
+
+**OUTPUT FORMAT (JSON only, no markdown):**
+{
+  "question_latex": "Complete question with LaTeX math",
+  "svg_markup": "<svg viewBox=\\"0 0 400 400\\" ...>...</svg>",
+  "answer": "Final answer, e.g. x = 7.4 cm",
+  "explanation": "Step-by-step mark scheme",
+  "marks": ${marks},
+  "diagram_description": "One sentence describing the diagram"
+}
+
+Return ONLY the JSON object.`
+
+  let rawContent: string
+  try {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
+        'X-Title': 'Nicolaou Maths - Diagram Question Generator',
+      },
+      body: JSON.stringify({
+        model: 'anthropic/claude-haiku-4-5',
+        messages: [
+          { role: 'system', content: buildDiagramSystemPrompt() },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 4000,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      console.error('[Diagram Gen] OpenRouter error:', errorData)
+      // Fall back to text-only on model failure
+      return NextResponse.json(
+        { error: 'Diagram generation model unavailable', details: errorData },
+        { status: response.status }
+      )
+    }
+
+    const data = await response.json()
+    rawContent = data.choices[0]?.message?.content || ''
+  } catch (fetchError) {
+    console.error('[Diagram Gen] Network error:', fetchError)
+    return NextResponse.json(
+      { error: 'Failed to reach diagram generation model' },
+      { status: 500 }
+    )
+  }
+
+  if (!rawContent) {
+    return NextResponse.json({ error: 'No response from diagram model' }, { status: 500 })
+  }
+
+  // Parse response
+  let parsed: DiagramGenResponse
+  try {
+    const cleaned = rawContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    parsed = JSON.parse(cleaned)
+  } catch {
+    console.error('[Diagram Gen] Failed to parse response:', rawContent.substring(0, 300))
+    return NextResponse.json(
+      { error: 'Invalid JSON from diagram model', raw_content: rawContent.substring(0, 300) },
+      { status: 500 }
+    )
+  }
+
+  if (!parsed.question_latex || !parsed.svg_markup || !parsed.answer) {
+    return NextResponse.json(
+      { error: 'Incomplete diagram generation response', content: parsed },
+      { status: 500 }
+    )
+  }
+
+  // Sanitize SVG
+  const sanitized = sanitizeSvg(parsed.svg_markup)
+  if (!sanitized.valid) {
+    console.warn('[Diagram Gen] SVG failed sanitization:', sanitized.errors)
+    // Degrade gracefully — return question without diagram
+    return NextResponse.json({
+      success: true,
+      data: {
+        question_latex: parsed.question_latex,
+        answer: parsed.answer,
+        explanation: parsed.explanation,
+        marks: parsed.marks,
+      },
+      image_url: null,
+      content_type: 'generated_text',
+      has_diagram: false,
+      model: 'claude-haiku-4-5',
+      curriculum_aware: true,
+      degraded: true,
+      degraded_reason: sanitized.errors.join('; '),
+    })
+  }
+
+  // Upload SVG to Supabase Storage
+  let imageUrl: string | null = null
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    const userId = user?.id || 'anon'
+
+    imageUrl = await uploadSvgToStorage(
+      sanitized.svg,
+      topic_name || sub_topic,
+      userId,
+      supabase
+    )
+  } catch (uploadError) {
+    console.warn('[Diagram Gen] SVG upload failed — degrading to text-only:', uploadError)
+  }
+
+  return NextResponse.json({
+    success: true,
+    data: {
+      question_latex: repairLatex(parsed.question_latex),
+      answer: repairLatex(parsed.answer),
+      explanation: repairLatex(parsed.explanation),
+      marks: parsed.marks,
+      diagram_description: parsed.diagram_description,
+    },
+    image_url: imageUrl,
+    content_type: imageUrl ? 'synthetic_image' : 'generated_text',
+    has_diagram: Boolean(imageUrl),
+    model: 'claude-haiku-4-5',
+    curriculum_aware: true,
+  })
+}
+
+// =====================================================
+// Legacy text generation (topic/tier, no curriculum)
+// =====================================================
+
+async function handleLegacyTextGeneration(request: TextGenRequest): Promise<NextResponse> {
+  const { topic, tier } = request
+
+  if (!topic || !tier) {
+    return NextResponse.json(
+      { error: 'Either (level, sub_topic) or (topic, tier) is required' },
+      { status: 400 }
+    )
+  }
+
+  const systemPrompt = 'You are a GCSE mathematics question generator. Always respond with valid JSON only, no additional text or formatting.'
+
+  const userPrompt = `Create a unique GCSE Maths question on ${topic} for ${tier} tier.
 
 Requirements:
 - The question should be appropriate for ${tier} tier GCSE students
@@ -185,7 +503,6 @@ Requirements:
 }
 
 Do not include any other text, markdown formatting, or code blocks. Only return the JSON object.`
-  }
 
   try {
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
@@ -199,28 +516,18 @@ Do not include any other text, markdown formatting, or code blocks. Only return 
       body: JSON.stringify({
         model: 'openai/gpt-oss-120b:free',
         messages: [
-          {
-            role: 'system',
-            content: systemPrompt
-          },
-          {
-            role: 'user',
-            content: userPrompt
-          }
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
         ],
-        temperature: 0.8, // Higher creativity for varied questions
-        max_tokens: 1500, // Increased for detailed explanations
+        temperature: 0.8,
+        max_tokens: 1500,
       }),
     })
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      console.error('OpenRouter API Error:', errorData)
       return NextResponse.json(
-        { 
-          error: 'Failed to generate question', 
-          details: errorData 
-        },
+        { error: 'Failed to generate question', details: errorData },
         { status: response.status }
       )
     }
@@ -229,74 +536,60 @@ Do not include any other text, markdown formatting, or code blocks. Only return 
     const content = data.choices[0]?.message?.content
 
     if (!content) {
-      return NextResponse.json(
-        { error: 'No response from AI model' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'No response from AI model' }, { status: 500 })
     }
 
-    // Parse the JSON response
     let parsedContent: TextGenResponse
     try {
-      // Remove markdown code blocks if present
-      const cleanedContent = content
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim()
-      
+      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
       parsedContent = JSON.parse(cleanedContent)
     } catch {
-      console.error('Failed to parse AI response:', content)
       return NextResponse.json(
-        { 
-          error: 'Invalid response format from AI', 
-          raw_content: content 
-        },
+        { error: 'Invalid response format from AI', raw_content: content },
         { status: 500 }
       )
     }
 
-    // Validate required fields
     if (!parsedContent.question_latex || !parsedContent.answer) {
       return NextResponse.json(
-        { 
-          error: 'Incomplete response from AI', 
-          content: parsedContent 
-        },
+        { error: 'Incomplete response from AI', content: parsedContent },
         { status: 500 }
       )
     }
+
+    parsedContent.question_latex = repairLatex(parsedContent.question_latex)
+    parsedContent.answer = repairLatex(parsedContent.answer)
+    if (parsedContent.explanation) parsedContent.explanation = repairLatex(parsedContent.explanation)
 
     return NextResponse.json({
       success: true,
       data: parsedContent,
+      image_url: null,
+      content_type: 'generated_text',
+      has_diagram: false,
       model: 'gpt-oss-120b',
-      curriculum_aware: isCurriculumAware
+      curriculum_aware: false,
     })
-
   } catch (error) {
-    console.error('Text generation error:', error)
     return NextResponse.json(
-      { 
+      {
         error: 'Failed to generate question',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 }
     )
   }
 }
 
-/**
- * Mode B: Image OCR using Qwen 2.5 VL
- */
+// =====================================================
+// Mode B: Image OCR (Qwen 2.5 VL)
+// =====================================================
+
 async function handleImageOCR(request: ImageOCRRequest): Promise<NextResponse> {
   const { image_url } = request
 
   if (!image_url) {
-    return NextResponse.json(
-      { error: 'image_url is required for OCR' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'image_url is required for OCR' }, { status: 400 })
   }
 
   const systemPrompt = `You are a specialized OCR engine for mathematics. Your task is to:
@@ -327,39 +620,24 @@ Do not include any other text, explanations, or formatting. Only return the JSON
       body: JSON.stringify({
         model: 'qwen/qwen-2-vl-7b-instruct:free',
         messages: [
-          {
-            role: 'system',
-            content: systemPrompt
-          },
+          { role: 'system', content: systemPrompt },
           {
             role: 'user',
             content: [
-              {
-                type: 'image_url',
-                image_url: {
-                  url: image_url
-                }
-              },
-              {
-                type: 'text',
-                text: 'Extract the mathematical question from this image and convert it to LaTeX format. Return only JSON.'
-              }
-            ]
-          }
+              { type: 'image_url', image_url: { url: image_url } },
+              { type: 'text', text: 'Extract the mathematical question from this image and convert it to LaTeX format. Return only JSON.' },
+            ],
+          },
         ],
-        temperature: 0.2, // Lower temperature for more accurate OCR
+        temperature: 0.2,
         max_tokens: 1500,
       }),
     })
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      console.error('OpenRouter OCR Error:', errorData)
       return NextResponse.json(
-        { 
-          error: 'Failed to process image', 
-          details: errorData 
-        },
+        { error: 'Failed to process image', details: errorData },
         { status: response.status }
       )
     }
@@ -368,64 +646,40 @@ Do not include any other text, explanations, or formatting. Only return the JSON
     const content = data.choices[0]?.message?.content
 
     if (!content) {
-      return NextResponse.json(
-        { error: 'No response from OCR model' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'No response from OCR model' }, { status: 500 })
     }
 
-    // Parse the JSON response
     let parsedContent: ImageOCRResponse
     try {
-      // Remove markdown code blocks if present
-      const cleanedContent = content
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim()
-      
+      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
       parsedContent = JSON.parse(cleanedContent)
     } catch {
-      console.error('Failed to parse OCR response:', content)
       return NextResponse.json(
-        { 
-          error: 'Invalid response format from OCR', 
-          raw_content: content 
-        },
+        { error: 'Invalid response format from OCR', raw_content: content },
         { status: 500 }
       )
     }
 
-    // Validate required fields
     if (!parsedContent.question_latex) {
       return NextResponse.json(
-        { 
-          error: 'Incomplete response from OCR', 
-          content: parsedContent 
-        },
+        { error: 'Incomplete response from OCR', content: parsedContent },
         { status: 500 }
       )
     }
 
-    // Set defaults if suggestions are missing
-    if (!parsedContent.suggested_topic) {
-      parsedContent.suggested_topic = 'General'
-    }
-    if (!parsedContent.suggested_difficulty) {
-      parsedContent.suggested_difficulty = 'Foundation'
-    }
+    if (!parsedContent.suggested_topic) parsedContent.suggested_topic = 'General'
+    if (!parsedContent.suggested_difficulty) parsedContent.suggested_difficulty = 'Foundation'
 
     return NextResponse.json({
       success: true,
       data: parsedContent,
-      model: 'qwen-2-vl-7b'
+      model: 'qwen-2-vl-7b',
     })
-
   } catch (error) {
-    console.error('OCR error:', error)
     return NextResponse.json(
-      { 
+      {
         error: 'Failed to process image',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: error instanceof Error ? error.message : 'Unknown error',
       },
       { status: 500 }
     )

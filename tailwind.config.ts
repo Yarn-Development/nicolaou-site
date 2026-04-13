@@ -75,7 +75,8 @@ const config: Config = {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        sans: ['Inter', 'sans-serif'],
+        display: ['Bricolage Grotesque', 'sans-serif'],
+        sans: ['Mulish', 'sans-serif'],
       },
       letterSpacing: {
         tighter: '-0.04em',

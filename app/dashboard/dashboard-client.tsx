@@ -4,11 +4,11 @@ import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { 
-  PlusCircle, 
-  Sparkles, 
-  UploadCloud, 
-  ClipboardCheck, 
+import {
+  PlusCircle,
+  Sparkles,
+  UploadCloud,
+  ClipboardCheck,
   MessageSquare,
   FileText,
   Clock,
@@ -24,11 +24,11 @@ interface DashboardClientProps {
 
 export function DashboardClient({ actionQueue, recentActivity }: DashboardClientProps) {
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       {/* Page Header */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-        <p className="text-muted-foreground mt-1">
+      <div className="border-b-2 border-border pb-6">
+        <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
+        <p className="text-muted-foreground mt-1 text-sm">
           {new Date().toLocaleDateString("en-GB", {
             weekday: "long",
             day: "numeric",
@@ -40,16 +40,16 @@ export function DashboardClient({ actionQueue, recentActivity }: DashboardClient
 
       {/* Command Bar - Quick Actions */}
       <section>
-        <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">
+        <h2 className="swiss-label text-muted-foreground mb-4">
           Quick Actions
         </h2>
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-3">
           {/* New Assignment */}
           <Link href="/dashboard/assignments/create">
-            <Card className="bg-card border-border/50 shadow-sm hover:shadow-md hover:border-primary/30 transition-all cursor-pointer h-full group">
+            <Card className="border-2 border-border hover:border-primary transition-colors cursor-pointer h-full group">
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-lg bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
+                  <div className="p-2.5 bg-muted text-muted-foreground group-hover:bg-primary group-hover:text-white transition-colors">
                     <PlusCircle className="h-5 w-5" />
                   </div>
                   <div>
@@ -67,10 +67,10 @@ export function DashboardClient({ actionQueue, recentActivity }: DashboardClient
 
           {/* Shadow Paper */}
           <Link href="/dashboard/ingest?mode=shadow">
-            <Card className="bg-card border-border/50 shadow-sm hover:shadow-md hover:border-primary/30 transition-all cursor-pointer h-full group">
+            <Card className="border-2 border-border hover:border-primary transition-colors cursor-pointer h-full group">
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-lg bg-violet-500/10 text-violet-600 group-hover:bg-violet-500 group-hover:text-white transition-colors">
+                  <div className="p-2.5 bg-muted text-muted-foreground group-hover:bg-foreground group-hover:text-background transition-colors">
                     <Sparkles className="h-5 w-5" />
                   </div>
                   <div>
@@ -88,10 +88,10 @@ export function DashboardClient({ actionQueue, recentActivity }: DashboardClient
 
           {/* Upload & Digitize */}
           <Link href="/dashboard/ingest?mode=digitize">
-            <Card className="bg-card border-border/50 shadow-sm hover:shadow-md hover:border-primary/30 transition-all cursor-pointer h-full group">
+            <Card className="border-2 border-border hover:border-primary transition-colors cursor-pointer h-full group">
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-lg bg-emerald-500/10 text-emerald-600 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
+                  <div className="p-2.5 bg-muted text-muted-foreground group-hover:bg-foreground group-hover:text-background transition-colors">
                     <UploadCloud className="h-5 w-5" />
                   </div>
                   <div>
@@ -111,35 +111,35 @@ export function DashboardClient({ actionQueue, recentActivity }: DashboardClient
 
       {/* Action Queue - Requires Attention */}
       <section>
-        <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">
+        <h2 className="swiss-label text-muted-foreground mb-4">
           Requires Attention
         </h2>
-        <Card className="bg-card border-border/50 shadow-sm">
+        <Card className="border-2 border-border">
           <CardContent className="p-0">
             {actionQueue.length === 0 ? (
               /* Empty State */
               <div className="py-12 text-center">
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-green-100 text-green-600 mb-4">
+                <div className="inline-flex items-center justify-center w-12 h-12 bg-muted text-muted-foreground mb-4 mx-auto">
                   <PartyPopper className="h-6 w-6" />
                 </div>
-                <h3 className="text-lg font-semibold mb-1">All caught up!</h3>
+                <h3 className="text-base font-semibold mb-1">All caught up</h3>
                 <p className="text-sm text-muted-foreground">
                   No assignments need your attention right now.
                 </p>
               </div>
             ) : (
               /* Action Items */
-              <div className="divide-y divide-border/50">
+              <div className="divide-y divide-border">
                 {actionQueue.map((item) => (
-                  <div 
+                  <div
                     key={item.id}
                     className="flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`p-2 rounded-lg ${
-                        item.status === "needs_grading" 
-                          ? "bg-amber-100 text-amber-600" 
-                          : "bg-blue-100 text-blue-600"
+                      <div className={`p-2 ${
+                        item.status === "needs_grading"
+                          ? "bg-primary text-white"
+                          : "bg-muted text-foreground"
                       }`}>
                         {item.status === "needs_grading" ? (
                           <ClipboardCheck className="h-4 w-4" />
@@ -152,11 +152,11 @@ export function DashboardClient({ actionQueue, recentActivity }: DashboardClient
                         <p className="text-xs text-muted-foreground">
                           {item.className} &middot;{" "}
                           {item.status === "needs_grading" ? (
-                            <span className="text-amber-600 font-medium">
+                            <span className="text-primary font-medium">
                               {item.needsGrading} to mark
                             </span>
                           ) : (
-                            <span className="text-blue-600 font-medium">
+                            <span className="font-medium">
                               {item.gradedCount} graded, ready for feedback
                             </span>
                           )}
@@ -164,8 +164,8 @@ export function DashboardClient({ actionQueue, recentActivity }: DashboardClient
                       </div>
                     </div>
                     <Link href={`/dashboard/assignments/${item.id}/mark`}>
-                      <Button 
-                        size="sm" 
+                      <Button
+                        size="sm"
                         variant={item.status === "needs_grading" ? "default" : "outline"}
                         className="shrink-0"
                       >
@@ -182,19 +182,19 @@ export function DashboardClient({ actionQueue, recentActivity }: DashboardClient
 
       {/* Recent Activity */}
       <section>
-        <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-4">
+        <h2 className="swiss-label text-muted-foreground mb-4">
           Recent Activity
         </h2>
-        <Card className="bg-card border-border/50 shadow-sm">
+        <Card className="border-2 border-border">
           <CardContent className="p-0">
             {recentActivity.length === 0 ? (
               /* Empty State */
               <div className="py-12 text-center">
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-muted text-muted-foreground mb-4">
+                <div className="inline-flex items-center justify-center w-12 h-12 bg-muted text-muted-foreground mb-4 mx-auto">
                   <FileText className="h-6 w-6" />
                 </div>
-                <h3 className="text-lg font-semibold mb-1">No assignments yet</h3>
-                <p className="text-sm text-muted-foreground mb-4">
+                <h3 className="text-base font-semibold mb-1">No assignments yet</h3>
+                <p className="text-sm text-muted-foreground mb-6">
                   Create your first assignment to get started.
                 </p>
                 <Link href="/dashboard/assignments/create">
@@ -206,15 +206,15 @@ export function DashboardClient({ actionQueue, recentActivity }: DashboardClient
               </div>
             ) : (
               /* Activity List */
-              <div className="divide-y divide-border/50">
+              <div className="divide-y divide-border">
                 {recentActivity.map((item) => (
-                  <Link 
+                  <Link
                     key={item.id}
                     href={`/dashboard/assignments/${item.id}`}
-                    className="flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors block"
+                    className="flex items-center justify-between px-4 py-3 hover:bg-muted/40 transition-colors block"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="p-2 rounded-lg bg-muted">
+                      <div className="p-2 bg-muted">
                         <FileText className="h-4 w-4 text-muted-foreground" />
                       </div>
                       <div className="min-w-0">
@@ -249,19 +249,19 @@ function StatusBadge({ status }: { status: "draft" | "published" | "graded" }) {
   switch (status) {
     case "draft":
       return (
-        <Badge variant="secondary" className="text-xs">
+        <Badge variant="secondary" className="text-xs font-bold uppercase tracking-wide">
           Draft
         </Badge>
       )
     case "published":
       return (
-        <Badge variant="outline" className="text-xs border-green-300 text-green-700 bg-green-50">
-          Published
+        <Badge className="text-xs font-bold uppercase tracking-wide bg-foreground text-background hover:bg-foreground">
+          Live
         </Badge>
       )
     case "graded":
       return (
-        <Badge variant="outline" className="text-xs border-blue-300 text-blue-700 bg-blue-50">
+        <Badge className="text-xs font-bold uppercase tracking-wide bg-primary text-white hover:bg-primary">
           <CheckCircle2 className="h-3 w-3 mr-1" />
           Graded
         </Badge>
@@ -282,9 +282,9 @@ function formatRelativeTime(dateString: string): string {
   if (diffHours < 24) return `${diffHours}h ago`
   if (diffDays === 1) return "Yesterday"
   if (diffDays < 7) return `${diffDays}d ago`
-  
-  return date.toLocaleDateString("en-GB", { 
-    day: "numeric", 
-    month: "short" 
+
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short"
   })
 }

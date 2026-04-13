@@ -26,10 +26,10 @@ export function HeroSection() {
         <div className="grid grid-cols-12 gap-8">
           {/* Left Column - Main Heading (Asymmetric Layout) */}
           <div className="col-span-12 lg:col-span-10">
-            <h1 className="text-7xl md:text-9xl font-black leading-[0.85] tracking-tighter uppercase mb-12">
-              MASTER<br />
+            <h1 className="text-7xl md:text-9xl font-black leading-[0.85] tracking-tighter mb-12">
+              Master<br />
               GCSE<br />
-              MATHS
+              Maths
             </h1>
           </div>
 

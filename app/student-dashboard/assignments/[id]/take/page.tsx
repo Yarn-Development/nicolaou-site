@@ -31,9 +31,9 @@ export default async function TakeAssignmentPage({ params }: Props) {
     return (
       <div className="min-h-screen bg-swiss-paper flex items-center justify-center p-6">
         <div className="max-w-md w-full border-2 border-swiss-ink bg-swiss-paper p-8 text-center">
-          <div className="w-16 h-16 mx-auto mb-6 border-2 border-red-500 bg-red-100 flex items-center justify-center">
+          <div className="w-16 h-16 mx-auto mb-6 border-2 border-primary bg-primary/10 flex items-center justify-center">
             <svg 
-              className="w-8 h-8 text-red-600" 
+              className="w-8 h-8 text-primary" 
               fill="none" 
               stroke="currentColor" 
               viewBox="0 0 24 24"
@@ -151,9 +151,9 @@ export default async function TakeAssignmentPage({ params }: Props) {
     return (
       <div className="min-h-screen bg-swiss-paper flex items-center justify-center p-6">
         <div className="max-w-md w-full border-2 border-swiss-ink bg-swiss-paper p-8 text-center">
-          <div className="w-16 h-16 mx-auto mb-6 border-2 border-amber-500 bg-amber-100 flex items-center justify-center">
+          <div className="w-16 h-16 mx-auto mb-6 border-2 border-muted-foreground bg-muted flex items-center justify-center">
             <svg 
-              className="w-8 h-8 text-amber-600" 
+              className="w-8 h-8 text-muted-foreground" 
               fill="none" 
               stroke="currentColor" 
               viewBox="0 0 24 24"

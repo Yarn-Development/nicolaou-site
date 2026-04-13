@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { repairLatex } from "@/lib/latex-utils"
 
 // =====================================================
 // Types
@@ -151,12 +152,13 @@ function detectSuspect(latex: string | null): boolean {
 }
 
 // =====================================================
-// Update question LaTeX (admin edit)
+// Update question (admin edit — latex + answer_key)
 // =====================================================
 
 export async function auditUpdateQuestion(
   id: string,
-  questionLatex: string
+  questionLatex: string,
+  answerKey?: { answer: string; explanation: string }
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient()
 
@@ -169,9 +171,19 @@ export async function auditUpdateQuestion(
     return { success: false, error: "You must be logged in" }
   }
 
+  const payload: Record<string, unknown> = {
+    question_latex: repairLatex(questionLatex),
+  }
+  if (answerKey) {
+    payload.answer_key = {
+      answer: repairLatex(answerKey.answer),
+      explanation: repairLatex(answerKey.explanation),
+    }
+  }
+
   const { error } = await supabase
     .from("questions")
-    .update({ question_latex: questionLatex })
+    .update(payload)
     .eq("id", id)
 
   if (error) {
@@ -246,102 +258,215 @@ export async function auditToggleVerified(
 }
 
 // =====================================================
-// Regenerate question via AI
+// Fix LaTeX formatting only (keep same maths content)
 // =====================================================
 
-export async function auditRegenerateQuestion(
+export async function auditFixFormatting(
   id: string
-): Promise<{ success: boolean; newLatex?: string; error?: string }> {
+): Promise<{ success: boolean; newLatex?: string; newAnswerKey?: { answer: string; explanation: string }; error?: string }> {
   const supabase = await createClient()
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError || !user) return { success: false, error: "You must be logged in" }
 
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
-
-  // Fetch the current question
   const { data: question, error: fetchError } = await supabase
     .from("questions")
     .select("*")
     .eq("id", id)
     .single()
 
-  if (fetchError || !question) {
-    return { success: false, error: "Question not found" }
-  }
+  if (fetchError || !question) return { success: false, error: "Question not found" }
 
   const apiKey = process.env.OPENROUTER_API_KEY
-  if (!apiKey) {
-    return { success: false, error: "AI service not configured" }
-  }
+  if (!apiKey) return { success: false, error: "AI service not configured" }
+
+  const currentAnswer = (question.answer_key as Record<string, string> | null)?.answer || ""
+  const currentExplanation = (question.answer_key as Record<string, string> | null)?.explanation || ""
 
   try {
-    const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "http://localhost:3000",
-          "X-Title": "Nicolaou Maths - Question Auditor",
-        },
-        body: JSON.stringify({
-          model: "anthropic/claude-sonnet-4",
-          messages: [
-            {
-              role: "system",
-              content: `You are a UK GCSE Mathematics question editor. You will be given a maths question that may have formatting issues. Your task is to rewrite it cleanly using proper LaTeX notation.
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
+        "X-Title": "Nicolaou Maths - Question Auditor",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are a UK GCSE Mathematics LaTeX editor. Fix the formatting of the question and answer — do NOT change the maths content, numbers, or difficulty.
 
 RULES:
 - Use $...$ for inline math and $$...$$ for display/block math
-- Use proper LaTeX commands: \\frac{}{}, \\sqrt{}, \\times, \\div, etc.
-- Keep the mathematical content and difficulty IDENTICAL — do NOT change the question itself
-- Remove any markdown artifacts (**, \`\`\`, etc.)
-- Remove any conversational filler ("Here is...", "Solution:", etc.)
-- Output ONLY the cleaned question text, nothing else — no JSON, no explanation
-- Preserve line breaks where they make sense for readability`,
-            },
-            {
-              role: "user",
-              content: `Rewrite this question with clean LaTeX formatting. Topic: ${question.topic || "Unknown"}. Sub-topic: ${question.sub_topic_name || "Unknown"}.\n\nOriginal question:\n${question.question_latex || "[No content]"}`,
-            },
-          ],
-          temperature: 0.2,
-          max_tokens: 1500,
-        }),
-      }
-    )
+- Use correct LaTeX: \\frac{a}{b}, \\sqrt{x}, \\times, \\div, etc.
+- Ensure all { } braces are balanced (e.g. \\frac{3}{4} not \\frac{3}{4)
+- Remove markdown artifacts (\`\`\`, **, etc.) and conversational filler
+- Preserve all mathematical values exactly as-is
 
-    if (!response.ok) {
-      return { success: false, error: "AI service request failed" }
-    }
+Respond with JSON only:
+{
+  "question_latex": "...",
+  "answer": "...",
+  "explanation": "..."
+}`,
+          },
+          {
+            role: "user",
+            content: `Fix the LaTeX formatting of this question and answer.\n\nQuestion:\n${question.question_latex || "[No content]"}\n\nAnswer: ${currentAnswer}\n\nExplanation: ${currentExplanation}`,
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 2000,
+      }),
+    })
+
+    if (!response.ok) return { success: false, error: "AI service request failed" }
 
     const data = await response.json()
-    const newLatex = data.choices?.[0]?.message?.content?.trim()
+    const raw = data.choices?.[0]?.message?.content?.trim()
+    if (!raw) return { success: false, error: "AI returned empty response" }
 
-    if (!newLatex) {
-      return { success: false, error: "AI returned empty response" }
+    let parsed: { question_latex?: string; answer?: string; explanation?: string }
+    try {
+      parsed = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim())
+    } catch {
+      return { success: false, error: "AI returned invalid JSON" }
     }
 
-    // Update the question in the database
+    const newLatex = repairLatex(parsed.question_latex || question.question_latex)
+    const newAnswerKey = {
+      answer: repairLatex(parsed.answer || currentAnswer),
+      explanation: repairLatex(parsed.explanation || currentExplanation),
+    }
+
     const { error: updateError } = await supabase
       .from("questions")
-      .update({ question_latex: newLatex })
+      .update({ question_latex: newLatex, answer_key: newAnswerKey })
       .eq("id", id)
 
-    if (updateError) {
-      return { success: false, error: "Failed to save regenerated question" }
-    }
+    if (updateError) return { success: false, error: "Failed to save fixed question" }
 
     revalidatePath("/dashboard/admin/audit")
-    return { success: true, newLatex }
+    return { success: true, newLatex, newAnswerKey }
+  } catch (error) {
+    console.error("Error fixing formatting:", error)
+    return { success: false, error: "AI formatting fix failed" }
+  }
+}
+
+// =====================================================
+// Fully regenerate — brand new question, same metadata
+// =====================================================
+
+export async function auditFullyRegenerateQuestion(
+  id: string
+): Promise<{ success: boolean; newLatex?: string; newAnswerKey?: { answer: string; explanation: string }; error?: string }> {
+  const supabase = await createClient()
+
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError || !user) return { success: false, error: "You must be logged in" }
+
+  const { data: question, error: fetchError } = await supabase
+    .from("questions")
+    .select("*")
+    .eq("id", id)
+    .single()
+
+  if (fetchError || !question) return { success: false, error: "Question not found" }
+
+  const apiKey = process.env.OPENROUTER_API_KEY
+  if (!apiKey) return { success: false, error: "AI service not configured" }
+
+  const level = question.curriculum_level || question.difficulty || "GCSE Higher"
+  const subTopic = question.sub_topic_name || question.topic_name || question.topic || "General"
+  const marks = question.marks || 3
+  const questionType = question.question_type || "Fluency"
+  const calcAllowed = question.calculator_allowed ?? true
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
+        "X-Title": "Nicolaou Maths - Question Auditor Regenerate",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert UK mathematics exam question writer. Generate a single, original question in valid JSON. Use proper LaTeX: $...$ for inline math, $$...$$ for display math, \\frac{a}{b}, \\sqrt{x}, \\times, \\div etc. Respond with JSON only — no markdown.`,
+          },
+          {
+            role: "user",
+            content: `Generate a NEW ${level} maths question on the topic "${subTopic}".
+
+Requirements:
+- Type: ${questionType}
+- Marks: ${marks}
+- Calculator: ${calcAllowed ? "allowed" : "NOT allowed — use integers or simple fractions"}
+- Different numbers and context from any standard textbook question
+- All LaTeX must be syntactically correct with balanced braces
+
+JSON format:
+{
+  "question_latex": "Question text with LaTeX",
+  "answer": "The final answer",
+  "explanation": "Step-by-step working"
+}`,
+          },
+        ],
+        temperature: 0.85,
+        max_tokens: 1500,
+      }),
+    })
+
+    if (!response.ok) return { success: false, error: "AI service request failed" }
+
+    const data = await response.json()
+    const raw = data.choices?.[0]?.message?.content?.trim()
+    if (!raw) return { success: false, error: "AI returned empty response" }
+
+    let parsed: { question_latex?: string; answer?: string; explanation?: string }
+    try {
+      parsed = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim())
+    } catch {
+      return { success: false, error: "AI returned invalid JSON" }
+    }
+
+    if (!parsed.question_latex || !parsed.answer) {
+      return { success: false, error: "AI response missing required fields" }
+    }
+
+    const newLatex = repairLatex(parsed.question_latex)
+    const newAnswerKey = {
+      answer: repairLatex(parsed.answer),
+      explanation: repairLatex(parsed.explanation || ""),
+    }
+
+    const { error: updateError } = await supabase
+      .from("questions")
+      .update({
+        question_latex: newLatex,
+        answer_key: newAnswerKey,
+        is_verified: false, // new content needs re-verification
+      })
+      .eq("id", id)
+
+    if (updateError) return { success: false, error: "Failed to save regenerated question" }
+
+    revalidatePath("/dashboard/admin/audit")
+    return { success: true, newLatex, newAnswerKey }
   } catch (error) {
     console.error("Error regenerating question:", error)
     return { success: false, error: "AI regeneration failed" }
   }
 }
+
+// Keep old name as alias for backwards compatibility
+export const auditRegenerateQuestion = auditFixFormatting

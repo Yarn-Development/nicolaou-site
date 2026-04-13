@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useMemo } from "react"
 import { toast } from "sonner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -47,6 +47,7 @@ import {
   type CurriculumLevel,
   type QuestionType,
 } from "@/lib/curriculum-data"
+import { needsDiagram } from "@/lib/diagram-utils"
 
 interface GeneratedQuestion {
   question_latex: string
@@ -94,14 +95,29 @@ export function QuestionCreatorWizard() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  // Diagram state (populated after AI generation for visual topics)
+  const [aiDiagramUrl, setAiDiagramUrl] = useState<string | null>(null)
+  const [aiContentType, setAiContentType] = useState<'generated_text' | 'synthetic_image'>('generated_text')
+  const [aiHasDiagram, setAiHasDiagram] = useState(false)
+
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Get cascading dropdown options
   const availableTopics = getTopicsForLevel(aiLevel)
   const availableSubTopics = aiTopic ? getSubTopicsForTopic(aiLevel, aiTopic) : []
-  
+
   const ocrAvailableTopics = getTopicsForLevel(ocrLevel)
   const ocrAvailableSubTopics = ocrTopic ? getSubTopicsForTopic(ocrLevel, ocrTopic) : []
+
+  // Computed: does the currently selected topic/sub-topic require a diagram?
+  // Used to show a pre-generation badge and route to Claude Haiku.
+  const topicRequiresDiagram = useMemo(() => {
+    if (!aiTopic || !aiSubTopic) return false
+    const topic = availableTopics.find(t => t.id === aiTopic)
+    const subTopic = availableSubTopics.find(st => st.id === aiSubTopic)
+    if (!topic || !subTopic) return false
+    return needsDiagram(topic.name, subTopic.name)
+  }, [aiTopic, aiSubTopic, availableTopics, availableSubTopics])
 
   /**
    * AI Generator: Construct rich prompt and call API
@@ -117,6 +133,9 @@ export function QuestionCreatorWizard() {
     setAiLoading(true)
     setAiGenerated(null)
     setSaved(false)
+    setAiDiagramUrl(null)
+    setAiContentType('generated_text')
+    setAiHasDiagram(false)
 
     try {
       // Find the selected sub-topic name
@@ -165,10 +184,8 @@ Generate ONE unique, exam-style question now.
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'text_gen',
-          system_prompt: systemPrompt,
-          user_prompt: userPrompt,
           level: aiLevel,
-          topic: topic.name,
+          topic_name: topic.name,
           sub_topic: subTopic.name,
           question_type: questionType,
           marks,
@@ -185,6 +202,11 @@ Generate ONE unique, exam-style question now.
 
       setAiGenerated(data.data)
       setAiEditedLatex(data.data.question_latex)
+
+      // Handle diagram response fields
+      setAiDiagramUrl(data.image_url || null)
+      setAiContentType(data.content_type || 'generated_text')
+      setAiHasDiagram(Boolean(data.has_diagram))
     } catch (error) {
       console.error('Generate error:', error)
       toast.error('GENERATION FAILED', {
@@ -341,8 +363,9 @@ Generate ONE unique, exam-style question now.
         const { createQuestion } = await import('@/app/actions/questions')
         
         const result = await createQuestion({
-          content_type: 'generated_text',
+          content_type: aiContentType,
           question_latex: aiEditedLatex,
+          image_url: aiDiagramUrl,
           curriculum_level: aiLevel,
           topic: topic.name,
           sub_topic: subTopic.name,
@@ -431,6 +454,9 @@ Generate ONE unique, exam-style question now.
       setAiEditedLatex('')
       setUserContext('')
       setSaved(false)
+      setAiDiagramUrl(null)
+      setAiContentType('generated_text')
+      setAiHasDiagram(false)
     } else {
       setOcrImagePreview(null)
       setOcrImageUrl(null)
@@ -646,6 +672,14 @@ Generate ONE unique, exam-style question now.
               </div>
             </div>
 
+            {/* Diagram generation indicator */}
+            {topicRequiresDiagram && !aiGenerated && aiSubTopic && (
+              <div className="flex items-center gap-2 text-xs text-swiss-lead border border-dashed border-swiss-ink/40 dark:border-swiss-paper/40 px-3 py-2 bg-swiss-concrete dark:bg-swiss-paper/5">
+                <ImageIcon className="w-3 h-3 shrink-0" />
+                <span>Diagram will be generated automatically for this topic (Claude Haiku)</span>
+              </div>
+            )}
+
             {/* Generate Button */}
             <Button
               onClick={handleGenerateQuestion}
@@ -655,7 +689,7 @@ Generate ONE unique, exam-style question now.
               {aiLoading ? (
                 <>
                   <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  GENERATING QUESTION...
+                  {topicRequiresDiagram ? 'GENERATING QUESTION + DIAGRAM...' : 'GENERATING QUESTION...'}
                 </>
               ) : (
                 <>
@@ -705,6 +739,29 @@ Generate ONE unique, exam-style question now.
                     <div className="border-2 border-swiss-ink dark:border-swiss-paper bg-swiss-paper dark:bg-swiss-ink/10 p-4 min-h-[4rem]">
                       <LatexPreview latex={aiEditedLatex} />
                     </div>
+                  </div>
+                )}
+
+                {/* Diagram Preview — shown when a diagram was generated */}
+                {aiHasDiagram && aiDiagramUrl && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink dark:text-swiss-paper flex items-center gap-2">
+                      <ImageIcon className="w-3 h-3" />
+                      DIAGRAM PREVIEW
+                    </Label>
+                    <div className="border-2 border-swiss-ink dark:border-swiss-paper bg-swiss-paper dark:bg-swiss-ink/10 p-4 flex items-center justify-center">
+                      <img
+                        src={aiDiagramUrl}
+                        alt="Generated diagram"
+                        className="max-w-full"
+                        style={{ maxHeight: '280px', objectFit: 'contain' }}
+                      />
+                    </div>
+                    {aiEditedLatex !== aiGenerated?.question_latex && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">
+                        You have edited the question text — the diagram may no longer match the new values. Click NEW to regenerate with a fresh consistent diagram.
+                      </p>
+                    )}
                   </div>
                 )}
 
