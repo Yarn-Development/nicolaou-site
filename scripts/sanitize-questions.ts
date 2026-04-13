@@ -614,7 +614,7 @@ async function main(): Promise<void> {
 
       const allChanges: string[] = []
       let questionLatexCleaned = row.question_latex
-      let answerKeyCleaned: AnswerKey | null = row.answer_key
+      const answerKeyCleaned: AnswerKey | null = row.answer_key
         ? { ...row.answer_key }
         : null
 

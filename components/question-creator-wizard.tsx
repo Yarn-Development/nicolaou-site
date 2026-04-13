@@ -146,39 +146,6 @@ export function QuestionCreatorWizard() {
         throw new Error('Invalid topic or sub-topic selection')
       }
 
-      // Construct rich, pedagogically-aware prompt
-      const systemPrompt = `You are an expert UK mathematics exam question writer. Create a ${marks}-mark ${aiLevel} question.`
-      
-      const userPrompt = `
-**Curriculum Context:**
-- Level: ${aiLevel}
-- Topic: ${topic.name}
-- Sub-Topic: ${subTopic.name}
-
-**Question Requirements:**
-- Type: ${questionType}
-- Marks: ${marks}
-- Calculator: ${calculatorAllowed ? 'Calculator Allowed' : 'Non-Calculator'}
-${userContext ? `- Real-world Context: ${userContext}` : ''}
-
-**Instructions:**
-${questionType === 'Fluency' ? '- Focus on procedural skills and standard techniques' : ''}
-${questionType === 'Problem Solving' ? '- Include multi-step problem requiring application of knowledge' : ''}
-${questionType === 'Reasoning/Proof' ? '- Require mathematical justification, proof, or explanation' : ''}
-${aiLevel.includes('A-Level') || aiLevel === 'GCSE Higher' ? '- Use advanced LaTeX notation (\\frac, \\sqrt, \\int, etc.)' : ''}
-${!calculatorAllowed ? '- Ensure the question can be solved without a calculator' : ''}
-
-**Output Format (JSON):**
-{
-  "question_latex": "Question text with LaTeX notation using $ for inline math and $$ for display math",
-  "answer": "Final answer",
-  "explanation": "Step-by-step solution",
-  "marks": ${marks}
-}
-
-Generate ONE unique, exam-style question now.
-`.trim()
-
       const response = await fetch('/api/ai/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

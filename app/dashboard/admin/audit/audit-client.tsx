@@ -124,7 +124,6 @@ export function AuditClient() {
   // Regenerate choice modal
   const [regeneratingQuestion, setRegeneratingQuestion] = useState<AuditQuestion | null>(null)
   const [regeneratingIds, setRegeneratingIds] = useState<Set<string>>(new Set())
-  const [regenerateMode, setRegenerateMode] = useState<"format" | "new" | null>(null)
 
   const sentinelRef = useRef<HTMLDivElement>(null)
 
@@ -197,7 +196,6 @@ export function AuditClient() {
       setInitialLoading(false)
     }
     load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSuspectFirst, contentType, verifiedStatus, searchDebounced])
 
   // Infinite scroll
@@ -267,14 +265,12 @@ export function AuditClient() {
 
   const handleRegenerateRequest = (q: AuditQuestion) => {
     setRegeneratingQuestion(q)
-    setRegenerateMode(null)
   }
 
   const handleRegenerateConfirm = async (mode: "format" | "new") => {
     if (!regeneratingQuestion) return
     const id = regeneratingQuestion.id
     setRegeneratingQuestion(null)
-    setRegenerateMode(mode)
     setRegeneratingIds((prev) => new Set(prev).add(id))
 
     const action = mode === "new" ? auditFullyRegenerateQuestion : auditFixFormatting
@@ -303,7 +299,6 @@ export function AuditClient() {
       next.delete(id)
       return next
     })
-    setRegenerateMode(null)
   }
 
   const handleToggleVerified = async (id: string, currentValue: boolean) => {

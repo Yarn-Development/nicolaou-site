@@ -8,10 +8,9 @@ import { RecentAssignments, type RecentAssignment } from "@/components/recent-as
 import { StudentList } from "@/components/student-list"
 import { UpcomingTasks, type UpcomingTask } from "@/components/upcoming-tasks"
 import { AIAssistant } from "@/components/ai-assistant"
-import { BookOpen, FileText, GraduationCap, Users, Sparkles, Database, ClipboardList, AlertCircle, ArrowRight } from "lucide-react"
+import { FileText, Sparkles, Database, ClipboardList, AlertCircle, ArrowRight } from "lucide-react"
 import { AssignmentList } from "@/components/assignment-list"
 import Link from "next/link"
-import { Button } from "@/components/ui/button"
 import type { DashboardData } from "@/app/actions/dashboard"
 import { Badge } from "@/components/ui/badge"
 
