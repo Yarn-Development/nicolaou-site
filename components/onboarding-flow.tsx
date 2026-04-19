@@ -7,27 +7,60 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { motion, AnimatePresence } from "framer-motion"
-import { ChevronRight, ChevronLeft, GraduationCap, BookOpen, Check, Loader2 } from "lucide-react"
+import { ChevronRight, ChevronLeft, GraduationCap, BookOpen, Check, Loader2, Zap } from "lucide-react"
 import { toast } from "sonner"
 import { createClient } from "@/lib/supabase/client"
+import type { UserRole, RoleSource } from "@/lib/types/database"
 
 // =====================================================
-// Step labels
+// Types
 // =====================================================
 
-const STEPS = ["Choose Role", "Your Details", "Complete"] as const
+interface OnboardingFlowProps {
+  /** Role already assigned (from auto-detection or existing profile). Null if unknown. */
+  initialRole: UserRole | null
+  /** How the role was set. 'pending' means the user must choose. */
+  roleSource: RoleSource
+}
+
+// =====================================================
+// Step helpers
+// =====================================================
+
+/**
+ * When role_source is 'auto_detected' we skip step 1 (Choose Role).
+ * Steps are numbered from the user's perspective: 1-based display labels.
+ */
+function buildSteps(roleIsKnown: boolean) {
+  if (roleIsKnown) {
+    return ["Your Details", "Complete"] as const
+  }
+  return ["Choose Role", "Your Details", "Complete"] as const
+}
 
 // =====================================================
 // Component
 // =====================================================
 
-export function OnboardingFlow() {
+export function OnboardingFlow({ initialRole, roleSource }: OnboardingFlowProps) {
   const router = useRouter()
+
+  // Role is already known when auto-detected from email pattern
+  const roleIsKnown = roleSource === 'auto_detected' && initialRole !== null
+
+  const STEPS = buildSteps(roleIsKnown)
+
   const [step, setStep] = useState(1)
-  const [role, setRole] = useState("")
+  const [role, setRole] = useState<string>(initialRole ?? "")
   const [name, setName] = useState("")
   const [institution, setInstitution] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Map internal step number to which logical step we're on
+  // When roleIsKnown: step 1 = Details, step 2 = Complete
+  // When !roleIsKnown: step 1 = Choose Role, step 2 = Details, step 3 = Complete
+  const detailsStep = roleIsKnown ? 1 : 2
+  const completeStep = roleIsKnown ? 2 : 3
 
   const saveProfile = async () => {
     setIsSubmitting(true)
@@ -41,15 +74,21 @@ export function OnboardingFlow() {
         return
       }
 
-      // Update the profile with role, details, and mark onboarding complete
+      const updatePayload: Record<string, unknown> = {
+        full_name: name,
+        institution: institution || null,
+        onboarding_completed: true,
+      }
+
+      // Only set role + role_source if it wasn't already auto-detected
+      if (!roleIsKnown) {
+        updatePayload.role = role as UserRole
+        updatePayload.role_source = 'self_selected'
+      }
+
       const { error } = await supabase
         .from("profiles")
-        .update({
-          role: role as "teacher" | "student",
-          full_name: name,
-          institution: institution || null,
-          onboarding_completed: true,
-        })
+        .update(updatePayload)
         .eq("id", user.id)
 
       if (error) {
@@ -62,8 +101,8 @@ export function OnboardingFlow() {
         description: "Redirecting to your dashboard...",
       })
 
-      // Redirect based on role
-      const targetDashboard = role === "teacher" ? "/dashboard" : "/student-dashboard"
+      const effectiveRole = roleIsKnown ? initialRole : role
+      const targetDashboard = effectiveRole === "teacher" ? "/dashboard" : "/student-dashboard"
       router.push(targetDashboard)
     } catch (error) {
       console.error("Onboarding error:", error)
@@ -74,16 +113,20 @@ export function OnboardingFlow() {
   }
 
   const nextStep = () => {
-    if (step === 1 && role) {
-      setStep(2)
-    } else if (step === 2 && name) {
-      setStep(3)
-    } else if (step === 3) {
+    const isLastStep = step === STEPS.length
+    if (isLastStep) {
       saveProfile()
+      return
     }
+    // Validation per step
+    if (!roleIsKnown && step === 1 && !role) return  // must pick role
+    if (step === detailsStep && !name) return         // must enter name
+    setStep(s => s + 1)
   }
 
-  const prevStep = () => setStep(step - 1)
+  const prevStep = () => setStep(s => s - 1)
+
+  const effectiveRole = roleIsKnown ? initialRole : role
 
   return (
     <div className="w-full max-w-2xl mx-auto">
@@ -133,10 +176,11 @@ export function OnboardingFlow() {
       {/* Step content */}
       <div className="border-2 border-swiss-ink bg-swiss-paper p-8">
         <AnimatePresence mode="wait">
-          {/* ===== STEP 1: Choose Role ===== */}
-          {step === 1 && (
+
+          {/* ===== STEP: Choose Role (only shown when role is NOT auto-detected) ===== */}
+          {!roleIsKnown && step === 1 && (
             <motion.div
-              key="step1"
+              key="step-choose-role"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
@@ -165,16 +209,9 @@ export function OnboardingFlow() {
                   onClick={() => setRole("teacher")}
                 >
                   <div className="flex items-start gap-4">
-                    <RadioGroupItem
-                      value="teacher"
-                      id="teacher"
-                      className="mt-1"
-                    />
+                    <RadioGroupItem value="teacher" id="teacher" className="mt-1" />
                     <div className="flex-1 space-y-1">
-                      <Label
-                        htmlFor="teacher"
-                        className="text-base font-bold cursor-pointer flex items-center"
-                      >
+                      <Label htmlFor="teacher" className="text-base font-bold cursor-pointer flex items-center">
                         <BookOpen className="mr-2 size-5" />
                         Teacher / Educator
                       </Label>
@@ -194,16 +231,9 @@ export function OnboardingFlow() {
                   onClick={() => setRole("student")}
                 >
                   <div className="flex items-start gap-4">
-                    <RadioGroupItem
-                      value="student"
-                      id="student"
-                      className="mt-1"
-                    />
+                    <RadioGroupItem value="student" id="student" className="mt-1" />
                     <div className="flex-1 space-y-1">
-                      <Label
-                        htmlFor="student"
-                        className="text-base font-bold cursor-pointer flex items-center"
-                      >
+                      <Label htmlFor="student" className="text-base font-bold cursor-pointer flex items-center">
                         <GraduationCap className="mr-2 size-5" />
                         Student / Learner
                       </Label>
@@ -228,10 +258,10 @@ export function OnboardingFlow() {
             </motion.div>
           )}
 
-          {/* ===== STEP 2: Your Details ===== */}
-          {step === 2 && (
+          {/* ===== STEP: Your Details ===== */}
+          {step === detailsStep && (
             <motion.div
-              key="step2"
+              key="step-details"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
@@ -240,7 +270,7 @@ export function OnboardingFlow() {
             >
               <div>
                 <span className="text-xs font-bold uppercase tracking-widest text-swiss-signal mb-2 block">
-                  Step 2
+                  Step {detailsStep}
                 </span>
                 <h2 className="text-2xl font-black uppercase tracking-tight text-balance">
                   Tell us about yourself
@@ -250,12 +280,26 @@ export function OnboardingFlow() {
                 </p>
               </div>
 
+              {/* Auto-detected role notice */}
+              {roleIsKnown && (
+                <div className="border-l-4 border-swiss-signal bg-swiss-concrete/40 p-4 flex items-start gap-3">
+                  <Zap className="size-4 text-swiss-signal flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-wider text-swiss-ink mb-0.5">
+                      Role detected from your school email
+                    </p>
+                    <p className="text-xs text-swiss-lead font-medium">
+                      You&apos;ve been set up as a{" "}
+                      <span className="font-bold text-swiss-ink capitalize">{effectiveRole}</span>.
+                      Contact your administrator if this is incorrect.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-5">
                 <div className="space-y-2">
-                  <Label
-                    htmlFor="name"
-                    className="text-xs font-bold uppercase tracking-wider"
-                  >
+                  <Label htmlFor="name" className="text-xs font-bold uppercase tracking-wider">
                     Full Name
                   </Label>
                   <Input
@@ -268,10 +312,7 @@ export function OnboardingFlow() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label
-                    htmlFor="institution"
-                    className="text-xs font-bold uppercase tracking-wider"
-                  >
+                  <Label htmlFor="institution" className="text-xs font-bold uppercase tracking-wider">
                     School / Institution
                     <span className="text-swiss-lead font-normal ml-2 normal-case tracking-normal">
                       (optional)
@@ -281,25 +322,27 @@ export function OnboardingFlow() {
                     id="institution"
                     value={institution}
                     onChange={(e) => setInstitution(e.target.value)}
-                    placeholder={role === "teacher" ? "Where you teach" : "Where you study"}
+                    placeholder={effectiveRole === "teacher" ? "Where you teach" : "Where you study"}
                     className="border-2 border-swiss-ink/20 focus:border-swiss-ink font-medium"
                   />
                 </div>
               </div>
 
               <div className="pt-4 flex justify-between">
-                <Button
-                  variant="outline"
-                  onClick={prevStep}
-                  className="border-2 border-swiss-ink font-bold uppercase text-xs tracking-wider"
-                >
-                  <ChevronLeft className="mr-2 size-4" />
-                  Back
-                </Button>
+                {step > 1 && (
+                  <Button
+                    variant="outline"
+                    onClick={prevStep}
+                    className="border-2 border-swiss-ink font-bold uppercase text-xs tracking-wider"
+                  >
+                    <ChevronLeft className="mr-2 size-4" />
+                    Back
+                  </Button>
+                )}
                 <Button
                   onClick={nextStep}
                   disabled={!name}
-                  className="bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase text-xs tracking-wider border-2 border-swiss-signal"
+                  className="ml-auto bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase text-xs tracking-wider border-2 border-swiss-signal"
                 >
                   Continue
                   <ChevronRight className="ml-2 size-4" />
@@ -308,10 +351,10 @@ export function OnboardingFlow() {
             </motion.div>
           )}
 
-          {/* ===== STEP 3: Complete ===== */}
-          {step === 3 && (
+          {/* ===== STEP: Complete ===== */}
+          {step === completeStep && (
             <motion.div
-              key="step3"
+              key="step-complete"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
@@ -340,29 +383,21 @@ export function OnboardingFlow() {
                   </span>
                 </div>
                 <div className="px-5 py-3 flex justify-between items-center">
-                  <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">
-                    Role
-                  </span>
-                  <span className="font-bold capitalize">{role}</span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">Role</span>
+                  <span className="font-bold capitalize">{effectiveRole}</span>
                 </div>
                 <div className="px-5 py-3 flex justify-between items-center">
-                  <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">
-                    Name
-                  </span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">Name</span>
                   <span className="font-bold">{name}</span>
                 </div>
                 {institution && (
                   <div className="px-5 py-3 flex justify-between items-center">
-                    <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">
-                      Institution
-                    </span>
+                    <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">Institution</span>
                     <span className="font-bold">{institution}</span>
                   </div>
                 )}
                 <div className="px-5 py-3 flex justify-between items-center">
-                  <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">
-                    Subject
-                  </span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">Subject</span>
                   <span className="font-bold">Mathematics</span>
                 </div>
               </div>

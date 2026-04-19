@@ -53,7 +53,7 @@ export async function middleware(request: NextRequest) {
   // User is authenticated - fetch their role and onboarding status
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role, onboarding_completed')
+    .select('role, role_source, onboarding_completed')
     .eq('id', user.id)
     .single()
 

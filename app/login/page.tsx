@@ -1,15 +1,32 @@
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button"
+import { MicrosoftSignInButton } from "@/components/auth/microsoft-sign-in-button"
 import { getCurrentUser } from "@/lib/auth/helpers"
 import { redirect } from "next/navigation"
 import Link from "next/link"
-import { Shield, Zap, Target } from "lucide-react"
+import { Shield, Zap, Target, AlertTriangle } from "lucide-react"
 
-export default async function LoginPage() {
+const ERROR_MESSAGES: Record<string, string> = {
+  domain_not_allowed:
+    "Your email address is not from a registered school. Please sign in with your school email account.",
+  auth_failed:
+    "Authentication failed. Please try again.",
+  invalid_email:
+    "We could not read your email address from your account. Please try a different sign-in method.",
+}
+
+interface LoginPageProps {
+  searchParams: Promise<{ error?: string }>
+}
+
+export default async function LoginPage({ searchParams }: LoginPageProps) {
   // If already logged in, redirect to appropriate dashboard
   const user = await getCurrentUser()
   if (user) {
     redirect('/dashboard')
   }
+
+  const { error } = await searchParams
+  const errorMessage = error ? (ERROR_MESSAGES[error] ?? "An error occurred. Please try again.") : null
 
   return (
     <div className="min-h-screen bg-swiss-paper flex">
@@ -34,7 +51,7 @@ export default async function LoginPage() {
                 AI-POWERED LEARNING
               </h3>
               <p className="text-sm text-white/80 font-medium">
-                Personalized worksheets and adaptive assessments that understand how you learn best.
+                Personalised worksheets and adaptive assessments that understand how you learn best.
               </p>
             </div>
           </div>
@@ -62,7 +79,7 @@ export default async function LoginPage() {
                 SECURE & RELIABLE
               </h3>
               <p className="text-sm text-white/80 font-medium">
-                Enterprise-grade security with Google authentication. Your data is always protected.
+                School SSO — sign in with your existing Google Workspace or Microsoft account.
               </p>
             </div>
           </div>
@@ -106,13 +123,22 @@ export default async function LoginPage() {
                 SIGN IN
               </h2>
               <p className="text-sm text-swiss-lead uppercase tracking-wider font-bold">
-                Access your learning portal
+                Use your school email account
               </p>
             </div>
 
-            {/* Google Sign In Button */}
-            <div className="mb-6">
+            {/* Error Banner */}
+            {errorMessage && (
+              <div className="mb-6 border-l-4 border-red-500 bg-red-50 p-4 flex items-start gap-3">
+                <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs font-bold text-red-700">{errorMessage}</p>
+              </div>
+            )}
+
+            {/* Sign In Buttons */}
+            <div className="space-y-3 mb-6">
               <GoogleSignInButton />
+              <MicrosoftSignInButton />
             </div>
 
             {/* Divider */}
@@ -122,7 +148,7 @@ export default async function LoginPage() {
               </div>
               <div className="relative flex justify-center">
                 <span className="bg-swiss-paper px-4 text-xs font-black uppercase tracking-widest text-swiss-lead">
-                  SECURE LOGIN
+                  SCHOOL SSO
                 </span>
               </div>
             </div>
@@ -130,10 +156,11 @@ export default async function LoginPage() {
             {/* Info Box */}
             <div className="border-l-4 border-swiss-signal bg-swiss-concrete dark:bg-swiss-ink/5 p-4">
               <p className="text-xs font-bold uppercase tracking-wider text-swiss-ink mb-2">
-                ✓ NO PASSWORD REQUIRED
+                ✓ USE YOUR SCHOOL ACCOUNT
               </p>
               <p className="text-xs text-swiss-lead font-medium">
-                Sign in securely with your Google account. No passwords to remember.
+                Sign in with your school-issued Google Workspace or Microsoft account.
+                Personal email addresses are not accepted.
               </p>
             </div>
 
@@ -159,7 +186,7 @@ export default async function LoginPage() {
                 </div>
               </div>
               <p className="text-xs text-swiss-lead mt-4 font-medium">
-                New accounts start as students. Contact your administrator to upgrade your role.
+                Your role is detected automatically from your email address, or you can select it during setup.
               </p>
             </div>
           </div>

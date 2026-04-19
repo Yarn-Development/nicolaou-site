@@ -4,6 +4,7 @@
  */
 
 export type UserRole = 'student' | 'teacher' | 'admin'
+export type RoleSource = 'pending' | 'auto_detected' | 'self_selected' | 'admin_assigned'
 export type AssessmentStatus = 'draft' | 'published' | 'archived'
 export type AssessmentTier = 'foundation' | 'higher'
 export type QuestionType = 'multiple_choice' | 'short_answer' | 'long_answer' | 'calculation'
@@ -39,11 +40,22 @@ export interface Profile {
   email: string
   full_name: string | null
   role: UserRole
+  role_source: RoleSource
   avatar_url: string | null
   institution: string | null
   onboarding_completed: boolean
   created_at: string
   updated_at: string
+}
+
+export interface SchoolDomain {
+  id: string
+  domain: string
+  school_name: string
+  teacher_email_pattern: string | null
+  sso_provider: 'google' | 'azure' | 'both'
+  is_active: boolean
+  created_at: string
 }
 
 export interface Assessment {
