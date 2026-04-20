@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import {
   needsDiagram,
   sanitizeSvg,
@@ -169,56 +170,91 @@ async function handleTextGeneration(request: TextGenRequest): Promise<NextRespon
   }
 
   // ---- Text-only path (free model) ----
-  const systemPrompt = `You are an expert UK mathematics exam question writer with deep knowledge of:
+  const systemPrompt = `You are an expert Pearson Edexcel mathematics exam question writer with mastery of:
 - UK National Curriculum (KS3, GCSE Foundation, GCSE Higher)
 - A-Level Mathematics specifications (Pure, Statistics, Mechanics)
-- Exam board requirements (AQA, Edexcel, OCR)
-- Assessment objectives and mark schemes
+- Edexcel mark scheme conventions (M1, A1, B1, ft, cao, oe)
 
-Your questions must be:
-- Pedagogically sound and curriculum-aligned
-- Written in clear, unambiguous exam language
-- Mathematically rigorous with precise LaTeX notation
-- Age-appropriate for the specified level
-- Aligned with the specified question type and marks
+LANGUAGE RULES — follow these exactly:
+1. Use ONLY these Edexcel command words: Work out, Find, Calculate, Solve, Factorise, Expand, Simplify, Show that, Prove that, Explain why, Write down, Express, Give, Determine, Sketch, Hence, Hence or otherwise.
+2. British English throughout (e.g. "factorise" not "factor", "centre" not "center").
+3. "Given that ..." for conditional information. "Hence, ..." for follow-on parts.
+4. NEVER start with "A student...", "You are given...", or conversational framing.
+5. Every number and variable in the question must be unambiguous. State units explicitly.
+6. For non-calculator: use integers, simple fractions, or surds (e.g. $\\sqrt{3}$). No ugly decimals.
+7. For calculator: decimals are acceptable. Round answers to 3 significant figures unless stated otherwise.
 
-Always respond with valid JSON only, no additional text or formatting.`
+STRUCTURE RULES:
+- Single-part questions (≤ 3 marks): one direct command.
+- Multi-part questions (≥ 4 marks): split into (a), (b), (c) and sub-parts (i), (ii) where appropriate.
+  - End each part with its mark count in parentheses: "(2)" or "(3 marks)".
+  - Use "Hence" or "Hence, or otherwise," to link dependent parts.
+- "Show that" / "Prove that" questions: give the target result in the question; explanation must show every algebraic step.
+- "Reasoning/Proof" questions: require "Show that", "Prove that", "Explain why", or "Justify".
 
-  const userPrompt = `Create a unique ${level} mathematics question with the following specifications:
+MARK SCHEME (explanation field):
+- Label every mark: M1 (method mark), A1 (accuracy mark), B1 (independent mark).
+- Include "ft" where follow-through applies.
+- State "cao" (correct answer only) where no ft is allowed.
+- Format: "M1 for setting up the equation; A1 for correct answer."
 
-**CURRICULUM CONTEXT:**
+LaTeX:
+- Inline math: $...$ (e.g., $x^2 + 3x - 10 = 0$)
+- Display math: $$...$$ on its own line
+- Commands: \\frac{}{}, \\sqrt{}, \\times, \\div, \\sin, \\cos, \\tan, \\pi, \\leq, \\geq, \\neq
+- Separate question parts with \\n in the JSON string — not markdown line breaks
+
+STRICT PROHIBITIONS — never do any of these:
+- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, dotted lines, or any answer-box language in question_latex
+- NEVER use markdown tables (| col | col | --- |). For tabular data use a LaTeX array: $$\\begin{array}{|c|c|}\\hline ... \\hline\\end{array}$$
+- NEVER use markdown formatting (**bold**, *italic*, ## headings, - bullets) inside question_latex or explanation
+- NEVER end question_latex with a colon or blank line expecting the student to fill in
+- question_latex must contain ONLY the question text — no answer section whatsoever
+
+explanation field:
+- Write as plain prose steps separated by \\n in the JSON string
+- Label marks inline: "M1 for ...; A1 for ..."
+- No markdown tables or bullet lists
+
+Always respond with valid JSON only — no markdown code fences, no preamble, no trailing text.`
+
+  const multiPartHint = marks >= 4
+    ? `Structure as a multi-part question with parts (a) and (b)${marks >= 6 ? ' and (c)' : ''}. End each part with its mark count in parentheses.`
+    : `Single-part question.`
+
+  const userPrompt = `Create a unique ${level} mathematics exam question with the following specifications:
+
+CURRICULUM:
 - Level: ${level}
-- Sub-Topic: ${sub_topic}
+- Sub-Topic: ${sub_topic}${context ? `\n- Additional context: ${context}` : ''}
 
-**QUESTION REQUIREMENTS:**
-- Type: ${question_type}
-- Marks: ${marks}
-- Calculator: ${calculator_allowed ? 'Calculator allowed' : 'Non-calculator (students must show working)'}${context ? `\n- Context: ${context}` : ''}
+REQUIREMENTS:
+- Question Type: ${question_type}
+- Total Marks: ${marks}
+- Calculator: ${calculator_allowed ? 'Calculator allowed' : 'Non-calculator — use integers, simple fractions, or surds only'}
+- Structure: ${multiPartHint}
 
-**QUESTION TYPE GUIDELINES:**
-${question_type === 'Fluency' ? '- Focus on fundamental skills and standard procedures\n- Test direct application of knowledge\n- Include 1-2 straightforward steps' : ''}${question_type === 'Problem Solving' ? '- Require multi-step reasoning\n- Include real-world or unfamiliar contexts\n- Test ability to select and apply appropriate methods' : ''}${question_type === 'Reasoning/Proof' ? '- Require mathematical reasoning or formal proof\n- Include "show that", "prove", or "explain why" language\n- Test understanding of mathematical structure' : ''}
+TYPE-SPECIFIC GUIDANCE:
+${question_type === 'Fluency'
+  ? '- Test direct application of a standard procedure.\n- 1–2 clear steps.\n- Avoid narrative framing; use "Find" or "Work out" or "Simplify".'
+  : ''}${question_type === 'Problem Solving'
+  ? '- Require students to select and connect methods across ≥ 2 steps.\n- May include a real-world context (e.g. area of a shape, cost problem) — keep context brief.\n- The path to the answer should not be immediately obvious.'
+  : ''}${question_type === 'Reasoning/Proof'
+  ? '- Use "Show that", "Prove that", or "Explain why".\n- State the target result in the question text.\n- The explanation must give every algebraic step as a mark scheme.\n- Non-calculator preferred — use exact values (surds, fractions, π).'
+  : ''}
 
-**CALCULATOR GUIDANCE:**
-${calculator_allowed ? '- Decimal/complex calculations are acceptable\n- Focus can be on mathematical reasoning rather than arithmetic' : '- Avoid calculations requiring calculator (e.g., √87, complex decimals)\n- Use integer values or simple fractions\n- Students must show all working'}
+MARK BREAKDOWN GUIDANCE:
+${marks === 1 ? '1 mark: B1 for a single correct answer or statement.' : ''}${marks === 2 ? '2 marks: M1 for correct method + A1 for correct answer.' : ''}${marks === 3 ? '3 marks: M1 method + M1 or A1 substitution/simplification + A1 answer.' : ''}${marks === 4 ? '4 marks: split across two parts, or M1 + M1 + A1 + A1 for multi-step.' : ''}${marks === 5 ? '5 marks: two or three sub-parts, each with method and accuracy marks.' : ''}${marks >= 6 ? `${marks} marks: three or more sub-parts with clear mark allocation per part.` : ''}
 
-**MARK ALLOCATION:**
-${marks === 1 ? '- Single-step question\n- One method or one answer' : ''}${marks === 2 ? '- Two clear steps or 1 method + 1 answer mark\n- Could be simple problem solving' : ''}${marks >= 3 && marks <= 4 ? '- Multi-step question with clear progression\n- Award marks for method and accuracy\n- Could include interpretation or explanation' : ''}${marks >= 5 ? '- Extended response question\n- Multiple methods or approaches\n- Include communication marks or proof elements' : ''}
-
-**LATEX REQUIREMENTS:**
-- Use proper LaTeX notation: \\frac{}{}, \\sqrt{}, \\times, \\div
-- Inline math: $...$ for text integration
-- Display math: $$...$$ for centered equations
-- Examples: $\\frac{3}{4}$, $x^2 + 5x - 6 = 0$, $$\\int_{0}^{\\pi} \\sin(x) \\, dx$$
-
-**OUTPUT FORMAT (JSON only):**
+OUTPUT FORMAT (JSON only):
 {
-  "question_latex": "The complete question text with LaTeX notation",
-  "answer": "The final answer (concise)",
-  "explanation": "Full step-by-step solution with working and mark scheme breakdown",
+  "question_latex": "Complete question text using LaTeX. Multi-part questions use (a), (b), (i), (ii) labels with mark counts in parentheses at the end of each part.",
+  "answer": "Final answer, concise (e.g. \\"x = 3 or x = −5\\")",
+  "explanation": "Full mark scheme using M1/A1/B1 labels. Show every step.",
   "marks": ${marks}
 }
 
-Generate ONE high-quality question now. Return ONLY the JSON object.`
+Return ONLY the JSON object.`
 
   try {
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
@@ -230,7 +266,7 @@ Generate ONE high-quality question now. Return ONLY the JSON object.`
         'X-Title': 'Nicolaou Maths - Question Generator',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-oss-120b:free',
+        model: 'deepseek/deepseek-v3.2',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -286,7 +322,7 @@ Generate ONE high-quality question now. Return ONLY the JSON object.`
       image_url: null,
       content_type: 'generated_text',
       has_diagram: false,
-      model: 'gpt-oss-120b',
+      model: 'deepseek-v3.2',
       curriculum_aware: true,
     })
   } catch (error) {
@@ -338,12 +374,18 @@ async function handleDiagramGeneration(params: DiagramGenParams): Promise<NextRe
 - All shapes must be clearly visible — not too small or too large.
 ${question_type === 'Fluency' ? '- Standard diagram showing the core geometric property.' : ''}${question_type === 'Problem Solving' ? '- Diagram should present a realistic, slightly complex configuration.' : ''}${question_type === 'Reasoning/Proof' ? '- Diagram should support a proof — include all relevant construction lines.' : ''}
 
-**OUTPUT FORMAT (JSON only, no markdown):**
+STRICT PROHIBITIONS:
+- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, or answer-box language in question_latex
+- NEVER use markdown tables (| col | col |). For tabular data use a LaTeX array environment
+- NEVER use markdown formatting (**bold**, *italic*, ## headings) inside question_latex or explanation
+- question_latex must contain ONLY the question text — no answer section whatsoever
+
+OUTPUT FORMAT (JSON only, no markdown, no code fences):
 {
-  "question_latex": "Complete question with LaTeX math",
+  "question_latex": "Complete question text with $LaTeX$ math only — no markdown",
   "svg_markup": "<svg viewBox=\\"0 0 400 400\\" ...>...</svg>",
   "answer": "Final answer, e.g. x = 7.4 cm",
-  "explanation": "Step-by-step mark scheme",
+  "explanation": "Step-by-step mark scheme using M1/A1/B1 labels — plain prose, no markdown",
   "marks": ${marks},
   "diagram_description": "One sentence describing the diagram"
 }
@@ -438,18 +480,19 @@ Return ONLY the JSON object.`
     })
   }
 
-  // Upload SVG to Supabase Storage
+  // Upload SVG to Supabase Storage using the service-role client so that RLS
+  // does not block server-side uploads (SVG is already sanitized above).
   let imageUrl: string | null = null
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    const userId = user?.id || 'anon'
+    const sessionClient = await createClient()
+    const { data: { user } } = await sessionClient.auth.getUser()
+    const userId = user?.id || 'server'
 
     imageUrl = await uploadSvgToStorage(
       sanitized.svg,
       topic_name || sub_topic,
       userId,
-      supabase
+      createAdminClient()
     )
   } catch (uploadError) {
     console.warn('[Diagram Gen] SVG upload failed — degrading to text-only:', uploadError)
@@ -486,23 +529,33 @@ async function handleLegacyTextGeneration(request: TextGenRequest): Promise<Next
     )
   }
 
-  const systemPrompt = 'You are a GCSE mathematics question generator. Always respond with valid JSON only, no additional text or formatting.'
+  const systemPrompt = `You are an expert Pearson Edexcel GCSE mathematics question writer. Always respond with valid JSON only — no markdown code fences, no preamble, no trailing text.
+
+STRICT PROHIBITIONS — never do any of these:
+- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, or answer-box language in question_latex
+- NEVER use markdown tables (| col | col | --- |). For tabular data use a LaTeX array: $$\\begin{array}{|c|c|}\\hline ... \\hline\\end{array}$$
+- NEVER use markdown formatting (**bold**, *italic*, ## headings, - bullets) inside question_latex or explanation
+- question_latex must contain ONLY the question text — no answer section whatsoever`
 
   const userPrompt = `Create a unique GCSE Maths question on ${topic} for ${tier} tier.
 
 Requirements:
-- The question should be appropriate for ${tier} tier GCSE students
-- Include proper mathematical notation
-- Provide a clear, step-by-step solution
-- Output ONLY valid JSON in this exact format:
+- Appropriate for ${tier} tier GCSE students
+- Use Edexcel command words: Work out, Find, Calculate, Solve, Simplify, Show that, etc.
+- Inline math: $...$ — display math: $$...$$
+- Use \\frac{}{}, \\sqrt{}, \\times, \\div, \\pi as needed
+- For tabular data use LaTeX array environments, never markdown tables
+- question_latex is ONLY the question — no answer lines, no "Show your answer"
+- explanation: plain prose mark scheme with M1/A1/B1 labels, no markdown
 
+Output ONLY valid JSON:
 {
-  "question_latex": "The question text with math in LaTeX (use $...$ for inline math, $$...$$ for display math)",
-  "answer": "The final answer",
-  "explanation": "Step-by-step solution explanation"
+  "question_latex": "Question text with $LaTeX$ math — no markdown, no answer section",
+  "answer": "Concise final answer",
+  "explanation": "Step-by-step mark scheme: M1 for ...; A1 for ..."
 }
 
-Do not include any other text, markdown formatting, or code blocks. Only return the JSON object.`
+Return ONLY the JSON object.`
 
   try {
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
@@ -514,7 +567,7 @@ Do not include any other text, markdown formatting, or code blocks. Only return 
         'X-Title': 'Nicolaou Maths - Question Generator',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-oss-120b:free',
+        model: 'deepseek/deepseek-v3.2',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -567,7 +620,7 @@ Do not include any other text, markdown formatting, or code blocks. Only return 
       image_url: null,
       content_type: 'generated_text',
       has_diagram: false,
-      model: 'gpt-oss-120b',
+      model: 'deepseek/deepseek-v3.2',
       curriculum_aware: false,
     })
   } catch (error) {

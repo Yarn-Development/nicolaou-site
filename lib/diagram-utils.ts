@@ -169,94 +169,180 @@ export function buildDiagramSystemPrompt(): string {
 Your task is to generate a COMPLETE exam question WITH an accompanying SVG diagram in a SINGLE JSON response.
 The SVG and question text MUST be consistent — every numerical value, label, and variable in the SVG must match exactly what appears in question_latex.
 
-═══ SVG TECHNICAL SPECIFICATION ═══
+═══ SVG ROOT ELEMENT ═══
 
-Root element:
 <svg viewBox="0 0 400 400" width="400" height="400" xmlns="http://www.w3.org/2000/svg">
   <rect width="400" height="400" fill="white"/>
   ... diagram content ...
   <text x="390" y="395" text-anchor="end" font-style="italic" font-family="sans-serif" font-size="9" fill="black">Diagram NOT accurately drawn</text>
 </svg>
 
-COORDINATE SYSTEM:
-- Use integer coordinates in the range 50–350 on both axes.
-- This leaves a 50px margin on all sides for labels.
-- For coordinate axes questions: place origin at (200, 200); x-axis runs left-right, y-axis runs up-down (SVG y increases downward).
+═══ COORDINATE SYSTEM ═══
 
-LINES & SHAPES:
-- All shape outlines: stroke="black" stroke-width="1" fill="none"
-- NO colored strokes. NO fills (except fill="none" on shapes, fill="white" on background rect).
-- NO thick lines (stroke-width must not exceed 1.5).
+- SVG y-axis increases DOWNWARD (top of canvas = y=0, bottom = y=400).
+- Safe drawing area: x from 50 to 350, y from 30 to 370 (50px margin for labels).
+- For coordinate axes: place origin at (200, 250); x-axis goes left-right, y-axis goes up (decreasing y in SVG).
+
+═══ LINE & SHAPE RULES ═══
+
+- All outlines: stroke="black" stroke-width="1" fill="none"
+- NO colors. NO fills except fill="none" on shapes, fill="white" on background.
+- stroke-width NEVER exceeds 1.5.
+- HIDDEN / BACK edges: stroke-dasharray="5,3" stroke="black" stroke-width="1" fill="none"
 - Circles: <circle cx="..." cy="..." r="..." fill="none" stroke="black" stroke-width="1"/>
 
-POINT LABELS (A, B, C...):
-- <text x="..." y="..." font-style="italic" font-family="serif" font-size="14" fill="black" text-anchor="middle">A</text>
-- Position OUTSIDE the shape, offset ~15px from the vertex.
-- NO dots or circles at vertex positions.
+═══ 3D SOLID SHAPES (read carefully — these are the most common diagram errors) ═══
 
-MEASUREMENT LABELS (lengths like "5 cm", "12 m"):
-- <text x="..." y="..." font-family="sans-serif" font-size="11" fill="black" text-anchor="middle">5 cm</text>
+Use isometric-style projections. Circular cross-sections become ellipses with rx ≈ 3–4× ry.
 
-VARIABLE LABELS (unknowns like x, y, θ):
-- <text x="..." y="..." font-style="italic" font-family="sans-serif" font-size="11" fill="black" text-anchor="middle">x</text>
-- Or for Greek: <text ...>θ</text> (use the Unicode character directly)
+CONE (apex UP, base DOWN):
+  Base ellipse (solid, full): <ellipse cx="200" cy="310" rx="80" ry="20" fill="none" stroke="black" stroke-width="1"/>
+  Left slant:  <line x1="120" y1="310" x2="200" y2="100" stroke="black" stroke-width="1"/>
+  Right slant: <line x1="280" y1="310" x2="200" y2="100" stroke="black" stroke-width="1"/>
+  — The back half of the base ellipse is shown dashed:
+  Front arc (solid):  use <path> for the front half ellipse arc
+  Back arc (dashed):  <path d="M 120,310 A 80,20 0 0,1 280,310" fill="none" stroke="black" stroke-width="1" stroke-dasharray="5,3"/>
 
-RIGHT ANGLE MARKERS (small open square in the corner):
-- Two perpendicular line segments, NOT a filled square:
-  <line x1="X" y1="Y" x2="X+8" y2="Y" stroke="black" stroke-width="1"/>
-  <line x1="X+8" y1="Y" x2="X+8" y2="Y+8" stroke="black" stroke-width="1"/>
+CYLINDER:
+  Top ellipse (solid):    <ellipse cx="200" cy="120" rx="80" ry="20" fill="none" stroke="black" stroke-width="1"/>
+  Bottom ellipse front:   <path d="M 120,300 A 80,20 0 0,0 280,300" fill="none" stroke="black" stroke-width="1"/>
+  Bottom ellipse back:    <path d="M 120,300 A 80,20 0 0,1 280,300" fill="none" stroke="black" stroke-width="1" stroke-dasharray="5,3"/>
+  Left side:  <line x1="120" y1="120" x2="120" y2="300" stroke="black" stroke-width="1"/>
+  Right side: <line x1="280" y1="120" x2="280" y2="300" stroke="black" stroke-width="1"/>
 
-ANGLE ARCS (small arc near vertex):
-- Use <path> with SVG arc commands:
+FRUSTUM (truncated cone — large base at bottom, smaller top):
+  Large base ellipse (solid front): <path d="M 120,310 A 80,20 0 0,0 280,310" fill="none" stroke="black" stroke-width="1"/>
+  Large base ellipse (dashed back): <path d="M 120,310 A 80,20 0 0,1 280,310" fill="none" stroke="black" stroke-width="1" stroke-dasharray="5,3"/>
+  Small top ellipse (solid):        <ellipse cx="200" cy="160" rx="45" ry="11" fill="none" stroke="black" stroke-width="1"/>
+  Left slant:  <line x1="120" y1="310" x2="155" y2="160" stroke="black" stroke-width="1"/>
+  Right slant: <line x1="280" y1="310" x2="245" y2="160" stroke="black" stroke-width="1"/>
+  Dashed lines showing original cone apex (above frustum):
+    <line x1="155" y1="160" x2="200" y2="70" stroke="black" stroke-width="1" stroke-dasharray="5,3"/>
+    <line x1="245" y1="160" x2="200" y2="70" stroke="black" stroke-width="1" stroke-dasharray="5,3"/>
+
+CONE ON TOP OF CYLINDER (combined solid):
+  Draw the cylinder first, then place the cone apex above the top ellipse of the cylinder.
+  The cylinder top ellipse is ALSO the cone base — draw it once as solid.
+
+SPHERE:
+  Main circle: <circle cx="200" cy="200" r="100" fill="none" stroke="black" stroke-width="1"/>
+  Equator (dashed back): <path d="M 100,200 A 100,25 0 0,1 300,200" fill="none" stroke="black" stroke-width="1" stroke-dasharray="5,3"/>
+  Equator (solid front): <path d="M 100,200 A 100,25 0 0,0 300,200" fill="none" stroke="black" stroke-width="1"/>
+
+PRISM / CUBOID:
+  Draw visible faces as closed polygons. Use dashed lines for hidden back edges.
+
+═══ SIDE-BY-SIDE DIAGRAMS ═══
+
+When showing TWO related shapes (e.g., original cone alongside its frustum):
+- Left shape: centred around x=120, using x range 50–190
+- Right shape: centred around x=290, using x range 210–370
+- Scale BOTH shapes identically so they look comparable.
+- Label "Frustum" (or appropriate name) below the right shape.
+- Do NOT draw any connecting lines between the two shapes.
+
+═══ COORDINATE AXIS GRAPHS ═══
+
+AXES:
+  x-axis: <line x1="60" y1="250" x2="360" y2="250" stroke="black" stroke-width="1"/>
+  y-axis: <line x1="200" y1="30"  x2="200" y2="370" stroke="black" stroke-width="1"/>
+  Arrowheads at positive ends: small filled triangles using <polygon>.
+
+TICK MARKS (for each labelled value):
+  <line x1="X" y1="247" x2="X" y2="253" stroke="black" stroke-width="1"/>
+  Label below: <text x="X" y="265" text-anchor="middle" font-family="sans-serif" font-size="11" fill="black">N</text>
+
+TRIG GRAPHS (y = a sin(x – b)° + c):
+  - x range typically –90 to 450. Map this to SVG x range 60–360.
+  - x tick marks at –90, 0, 90, 180, 270, 360, 450.
+  - y range: choose based on amplitude. Map y axis to SVG y range 370–30.
+  - y tick marks at integers (or half-integers) that fit the amplitude.
+  - Draw curve using <path> with smooth bezier control points.
+  - Mark key points (maxima, minima, zero-crossings) where relevant.
+
+QUADRATIC / POLYNOMIAL GRAPHS:
+  - Draw coordinate axes first.
+  - Use <path> with bezier curves for smooth shape.
+  - Label the minimum/maximum with coordinates (x, y) using an ×-cross or small label.
+  - Mark any x-intercepts with values.
+
+═══ 2D SHAPE LABELS ═══
+
+POINT LABELS (A, B, C):
+  <text font-style="italic" font-family="serif" font-size="14" fill="black" text-anchor="middle">A</text>
+  Position 15px OUTSIDE the shape vertex. NO dot at the vertex.
+
+MEASUREMENT LABELS (5 cm, 12 m):
+  <text font-family="sans-serif" font-size="11" fill="black" text-anchor="middle">5 cm</text>
+  Place at the midpoint of the side, offset 12px away from the shape interior.
+
+VARIABLE LABELS (x, θ, h, r):
+  <text font-style="italic" font-family="sans-serif" font-size="11" fill="black" text-anchor="middle">x</text>
+  Use Unicode directly for Greek: θ φ α β
+
+DIMENSION ARROWS (for labeled lengths):
+  Draw a thin line with small arrowheads at each end, parallel to the measured edge, offset ~15px.
+  <line x1="X1" y1="Y" x2="X2" y2="Y" stroke="black" stroke-width="1"/>
+  Small triangular arrowheads at X1 and X2.
+
+RIGHT ANGLE MARKER:
+  Two perpendicular lines (NOT a filled square):
+  <line x1="X"   y1="Y"   x2="X+8" y2="Y"   stroke="black" stroke-width="1"/>
+  <line x1="X+8" y1="Y"   x2="X+8" y2="Y+8" stroke="black" stroke-width="1"/>
+
+ANGLE ARCS:
   <path d="M cx+r,cy A r,r 0 0,1 cx,cy-r" fill="none" stroke="black" stroke-width="1"/>
-- Keep arc radius small relative to shape size (20–40px).
+  Keep arc radius 20–35px.
 
-ARROWS (for vectors or axes):
-- Use <line> with a marker-end, or simply draw the arrowhead as a small filled triangle using <polygon>.
-- For coordinate axes, include arrowheads at the positive ends.
+═══ THINGS TO ABSOLUTELY AVOID ═══
 
-"DIAGRAM NOT ACCURATELY DRAWN" LABEL — MANDATORY:
-- Must appear in the bottom-right corner of every diagram:
+- No <script> tags or event attributes (onerror, onclick, etc.)
+- No colored strokes or fills (black only, except fill="white" on background rect)
+- No grid lines unless the question explicitly involves a grid or graph paper
+- No dots/circles at vertex positions
+- stroke-width NEVER exceeds 1.5
+
+═══ "DIAGRAM NOT ACCURATELY DRAWN" — MANDATORY ═══
+
+Every single diagram must include this in the bottom-right corner:
 <text x="390" y="395" text-anchor="end" font-style="italic" font-family="sans-serif" font-size="9" fill="black">Diagram NOT accurately drawn</text>
 
-THINGS TO ABSOLUTELY AVOID:
-- No <script> tags
-- No event attributes (onerror, onclick, etc.)
-- No colored fills or colored strokes
-- No grid lines or axis tick marks (unless the question is about coordinate axes)
-- No dots/circles at vertex positions
-- No matplotlib-style default blue
-- stroke-width never > 1.5
+═══ QUESTION LANGUAGE ═══
 
-═══ QUESTION REQUIREMENTS ═══
+- Pearson Edexcel style: precise, clinical, unambiguous British English.
+- Command words only: Work out, Find, Calculate, Solve, Factorise, Expand, Simplify, Show that, Prove that, Explain why, Write down, Express, Give, Determine, Sketch, Draw, Hence.
+- "Given that ..." for conditional information.
+- "Hence, or otherwise, ..." for follow-on parts.
+- Multi-part questions: label parts (a), (b), (c) and sub-parts (i), (ii). Add mark count in parentheses at the end of each part line, e.g. "(3)".
+- NEVER start with "A student...", "You are...", or narrative framing unless it is a word problem requiring real-world context.
+- Every value in the diagram must be stated in the question text, and vice versa.
 
-Language & Tone:
-- Write in the precise, clinical style of Pearson Edexcel papers.
-- British English (metres not meters, favourite not favorite).
-- Every piece of information needed to solve the question must be stated explicitly.
-- If asking for a missing length/angle, mark it as x (or θ) in BOTH the question text AND the SVG.
+STRICT PROHIBITIONS — never do any of these:
+- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, dotted lines, or any answer-box language in question_latex.
+- NEVER use markdown tables (| col | col | --- |) anywhere in the JSON. For tabular data use a LaTeX array: $$\\begin{array}{|c|c|}\\hline ... \\hline\\end{array}$$
+- NEVER use markdown formatting (**bold**, *italic*, ## headings, - bullets) inside question_latex or explanation.
+- NEVER end question_latex with a colon followed by a blank line expecting the student to fill in.
 
-LaTeX Notation:
-- Inline math: $...$ (e.g., $x = 5$)
-- Display math: $$...$$ for equations on their own line
-- Use \\frac{}{}, \\sqrt{}, \\times, \\div, \\sin, \\cos, \\tan
+LaTeX:
+- Inline math: $...$ — e.g., $x^2 + 3x - 10 = 0$
+- Display math: $$...$$ — for equations on their own line
+- Use \\frac{}{}, \\sqrt{}, \\times, \\div, \\sin, \\cos, \\tan, \\pi
+- Separate question parts with \\n in the JSON string — not markdown line breaks
 
-Mark Allocation:
-- 1 mark: single step
-- 2 marks: method + answer
-- 3–4 marks: multi-step with method, substitution, and answer marks
-- 5+ marks: extended response with communication marks
+Mark scheme in explanation:
+- Label each mark: M1 (method), A1 (accuracy), B1 (independent mark), ft (follow-through).
+- Write as plain prose steps separated by \\n — no markdown tables or bullet lists.
 
 ═══ OUTPUT FORMAT ═══
 
-Return ONLY valid JSON — no markdown, no code blocks, no explanatory text:
+Return ONLY valid JSON — no markdown, no code blocks, no preamble:
 {
   "question_latex": "The complete question text with LaTeX notation",
   "svg_markup": "<svg viewBox=\\"0 0 400 400\\" ...>...</svg>",
   "answer": "The final answer (concise, e.g. x = 7.4 cm)",
-  "explanation": "Step-by-step mark scheme with method marks, substitution marks, and answer marks",
+  "explanation": "Step-by-step mark scheme with M1/A1/B1 labels",
   "marks": 4,
-  "diagram_description": "One sentence describing what the diagram shows (for accessibility)"
+  "diagram_description": "One sentence describing what the diagram shows"
 }`
 }
 

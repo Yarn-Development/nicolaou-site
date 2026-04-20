@@ -256,16 +256,24 @@ THINGS TO ABSOLUTELY AVOID:
 - No red or blue dashed construction lines
 - No FancyArrowPatch for angles (use Arc instead)
 
-OUTPUT FORMAT (JSON only):
+STRICT PROHIBITIONS — never do any of these:
+- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, dotted lines, or any answer-box language in question_latex
+- NEVER use markdown tables (| col | col | --- |) anywhere in the JSON
+- NEVER use markdown formatting (**bold**, *italic*, ## headings, - bullets) inside question_latex or explanation
+- NEVER end question_latex with a colon or blank line expecting the student to fill in
+- question_latex must contain ONLY the question text — no answer section whatsoever
+- explanation must be plain prose with M1/A1/B1 labels separated by \n — no markdown tables or bullet lists
+
+OUTPUT FORMAT (JSON only, no markdown code fences, no preamble):
 {
-  "question_latex": "The question text with LaTeX notation ($...$)",
-  "answer": "The final answer",
-  "explanation": "Step-by-step solution with working",
+  "question_latex": "Question text with $LaTeX$ math only — no markdown, no answer section",
+  "answer": "Concise final answer with LaTeX where needed",
+  "explanation": "Step-by-step mark scheme: M1 for ...; A1 for ... (plain prose, no markdown)",
   "marks": 4,
-  "python_code": "Complete Python script as a single string"
+  "python_code": "Complete Python script as a single string. IMPORTANT: use \\n (double-backslash n) for actual code line breaks so they survive JSON parsing. Inside Python string literals (e.g. the 'Diagram NOT\\naccurately drawn' text), write \\\\n (four chars) so the Python source retains a literal \\n escape sequence."
 }
 
-Return ONLY valid JSON. No markdown, no code blocks, no additional text.`
+Return ONLY the JSON object.`
 
 async function generateGeometryQuestion(
   topic: GeometryTopic,
@@ -275,18 +283,23 @@ async function generateGeometryQuestion(
 
 Topic Description: ${topic.description}
 
-Requirements:
-- Question should be worth 3-5 marks
-- Include a clear diagram that students would see in a Pearson Edexcel GCSE exam paper
-- The diagram should show all given information (lengths, angles) with proper Edexcel labeling conventions
-- Mark any unknown values with variables like x, y, or θ using LaTeX mathtext (r'$x$')
+QUESTION REQUIREMENTS:
+- Worth 3-5 marks
+- Pearson Edexcel command words only: Work out, Find, Calculate, Show that, etc.
+- question_latex is ONLY the question text — NEVER include "Show your answer", answer lines, blank boxes, or answer-section language
+- Use $...$ for inline math, $$...$$ for display math
+- No markdown formatting (**bold**, tables, bullets) inside question_latex
+
+DIAGRAM REQUIREMENTS:
+- Show all given information (lengths, angles) with proper Edexcel labeling conventions
+- Mark unknown values with variables like x, y, or θ using LaTeX mathtext (r'$x$')
 - Point labels (A, B, C...) must be italic serif, measurement labels must be sans-serif
 - NO vertex dots, NO colored lines, NO grid — monochrome black only
 - Include "Diagram NOT accurately drawn" text in the corner
 - Use linewidth=1.0, dpi=200, figsize=(6,6)
 - Angle arcs via matplotlib.patches.Arc, right angles as small open square markers
 
-Generate the question now as JSON.`
+Return ONLY the JSON object — no code fences, no preamble.`
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -298,7 +311,7 @@ Generate the question now as JSON.`
         'X-Title': 'Nicolaou Maths - Geometry Factory',
       },
       body: JSON.stringify({
-        model: 'anthropic/claude-sonnet-4', // Best for code generation
+        model: 'anthropic/claude-haiku-4-5', // Best for code generation
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userPrompt }
@@ -354,6 +367,43 @@ Generate the question now as JSON.`
 // PYTHON EXECUTION
 // =====================================================
 
+/**
+ * Scans Python source code and replaces real newline characters that appear
+ * inside single- or double-quoted string literals with the \n escape sequence.
+ *
+ * This fixes a recurring issue where the AI includes Python string escapes
+ * (e.g. 'Diagram NOT\naccurately drawn') as a real newline in the JSON
+ * python_code field instead of double-escaping it as \\n. After JSON.parse
+ * the real newline lands inside the quoted string, causing a SyntaxError.
+ */
+function fixStringLiteralNewlines(code: string): string {
+  const out: string[] = []
+  let inSingle = false
+  let inDouble = false
+  let i = 0
+
+  while (i < code.length) {
+    const ch = code[i]
+    const prev = i > 0 ? code[i - 1] : ''
+
+    if (ch === "'" && !inDouble && prev !== '\\') {
+      inSingle = !inSingle
+      out.push(ch)
+    } else if (ch === '"' && !inSingle && prev !== '\\') {
+      inDouble = !inDouble
+      out.push(ch)
+    } else if (ch === '\n' && (inSingle || inDouble)) {
+      // Real newline inside a string literal → replace with escape sequence
+      out.push('\\n')
+    } else {
+      out.push(ch)
+    }
+    i++
+  }
+
+  return out.join('')
+}
+
 async function executePythonCode(pythonCode: string): Promise<boolean> {
   // Clean up the python code - handle escaped newlines
   let cleanedCode = pythonCode
@@ -362,15 +412,22 @@ async function executePythonCode(pythonCode: string): Promise<boolean> {
     .replace(/\\'/g, "'")
     .replace(/\\\\/g, '\\')
 
-  // Strip duplicate import lines that the boilerplate already provides
+  // Fix any real newlines that ended up inside Python string literals.
+  // This is the defensive fix for the AI not double-escaping \n in JSON.
+  cleanedCode = fixStringLiteralNewlines(cleanedCode)
+
+  // Strip duplicate import lines that the boilerplate already provides.
+  // IMPORTANT: the catch-all ^import matplotlib.* must come LAST so it doesn't
+  // strip only the prefix of "import matplotlib.pyplot as plt", leaving
+  // ".pyplot as plt" as an orphaned line that causes a SyntaxError.
   cleanedCode = cleanedCode
-    .replace(/^import matplotlib\n?/gm, '')
-    .replace(/^matplotlib\.use\([^)]+\)\n?/gm, '')
     .replace(/^import matplotlib\.pyplot as plt\n?/gm, '')
     .replace(/^import matplotlib\.patches as patches\n?/gm, '')
     .replace(/^from matplotlib import patches\n?/gm, '')
     .replace(/^import numpy as np\n?/gm, '')
+    .replace(/^matplotlib\.use\([^)]+\)\n?/gm, '')
     .replace(/^plt\.rcParams\[.*?\].*\n?/gm, '')
+    .replace(/^import matplotlib.*\n?/gm, '')  // catch-all: bare "import matplotlib" etc.
 
   // Prepend boilerplate to enforce Edexcel style rcParams
   const finalCode = RCPARAMS_BOILERPLATE + '\n' + cleanedCode

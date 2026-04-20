@@ -144,6 +144,10 @@ ${body.originalDiagramDescription ? `\n**ORIGINAL DIAGRAM:** ${body.originalDiag
 - The SVG diagram must show a DIFFERENT but similar geometric configuration.
 - All given values in the question must appear in the SVG; unknowns (x, θ) marked in both.
 - ${calculatorAllowed ? 'Standard difficulty values.' : 'Use integer/simple fraction values (non-calculator).'}
+- question_latex must contain ONLY the question text — NEVER include "Show your answer", answer lines, blank boxes, or any answer-section language.
+- NEVER use markdown tables (|col|col|) anywhere. For tabular data use a LaTeX array environment.
+- NEVER use markdown formatting (**bold**, *italic*, ## headings) inside question_latex.
+- Use plain prose with $...$ for inline math and $$...$$ for display math.
 
 **OUTPUT FORMAT (JSON only, no markdown):**
 {
@@ -269,50 +273,63 @@ Your task is to take an original exam question and generate ${count} similar que
 4. Are suitable for GCSE/A-Level revision practice
 5. Are slightly varied to help students recognize patterns
 
-IMPORTANT GUIDELINES:
-- Maintain the same question structure and type
-- Change numerical values while keeping the mathematics tractable
-- If the original has a real-world context, use a different but similar context
-- Ensure answers are "nice" numbers where appropriate (avoid complex decimals for non-calculator)
-- Use proper LaTeX notation: \\frac{}{}, \\sqrt{}, \\times, \\div
-- Inline math: $...$ for text integration
-- Display math: $$...$$ for centered equations
+═══ FORMATTING RULES — READ CAREFULLY ═══
 
-You MUST respond with valid JSON only, no additional text or markdown formatting.`
+LaTeX (questionLatex field):
+- Inline math: $...$ for expressions within prose (e.g. "Find the value of $x$.")
+- Display math: $$...$$ for equations on their own line
+- Use \\frac{}{}, \\sqrt{}, \\times, \\div, \\sin, \\cos, \\tan, \\pi
+- Separate question parts with a plain newline character \\n in the JSON string
+- Multi-part questions: label as (a), (b), (c); include mark count in parentheses e.g. "(3)"
+
+STRICT PROHIBITIONS — never do any of these:
+- NEVER use markdown tables (| col | col | --- |). For tabular data use a LaTeX array: $$\\begin{array}{|c|c|}\\hline ... \\hline\\end{array}$$
+- NEVER use markdown formatting (**bold**, *italic*, ## headings, - bullets) inside questionLatex
+- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, dotted lines, or any answer-box language anywhere in questionLatex
+- NEVER add placeholder text like "...", "[answer here]", or boxes for students to write in
+- NEVER end a question with a colon followed by a blank line expecting the student to fill in
+
+explanation field:
+- Write step-by-step working as plain prose separated by \\n in the JSON string
+- Label marks: M1 (method), A1 (accuracy), B1 (independent)
+- No markdown tables or bullet lists — use numbered steps or M1/A1 labels inline
+
+You MUST respond with valid JSON only — no markdown code fences, no preamble, no trailing text.`
 
   const userPrompt = `Generate ${count} similar question(s) based on this original:
 
-**ORIGINAL QUESTION:**
+ORIGINAL QUESTION:
 ${body.originalQuestion}
 
-**METADATA:**
+METADATA:
 - Topic: ${body.topic}
 - Sub-Topic: ${body.subTopic}
 - Difficulty: ${difficulty}
 - Marks: ${marks}
 - Calculator: ${calculatorAllowed ? 'Allowed' : 'Not allowed'}
 
-**REQUIREMENTS:**
-1. Each question should test the same skill as the original
-2. Use different numbers/values that give "nice" answers
-3. ${!calculatorAllowed ? 'Ensure calculations can be done without a calculator' : 'Standard calculator-level difficulty is fine'}
-4. Provide a clear, step-by-step solution for each
+REQUIREMENTS:
+1. Test the same mathematical skill as the original with different values
+2. Use values that give "nice" answers${!calculatorAllowed ? ' (integers or simple fractions — no calculator)' : ''}
+3. questionLatex must be ONLY the question text — no answer section, no blank lines, no "Show your answer"
+4. If the question involves a table of data, use a LaTeX array ($$\\begin{array}...) — never a markdown table
+5. Use plain \\n between lines/parts in JSON strings — no markdown formatting
 
-**OUTPUT FORMAT (JSON only):**
+OUTPUT FORMAT (JSON only, no code fences):
 {
   "questions": [
     {
-      "questionLatex": "The complete question text with LaTeX notation",
+      "questionLatex": "Complete question text with $LaTeX$ math only — no markdown",
       "answerKey": {
-        "answer": "The final answer (concise)",
-        "explanation": "Step-by-step solution with working"
+        "answer": "Concise final answer with LaTeX where needed",
+        "explanation": "Step-by-step solution: M1 ... A1 ... (plain text, no markdown tables)"
       },
       "marks": ${marks}
     }
   ]
 }
 
-Generate exactly ${count} similar question(s). Return ONLY the JSON object.`
+Return ONLY the JSON object with exactly ${count} question(s).`
 
   const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: 'POST',
@@ -323,7 +340,7 @@ Generate exactly ${count} similar question(s). Return ONLY the JSON object.`
       'X-Title': 'Nicolaou Maths - Similar Question Generator',
     },
     body: JSON.stringify({
-      model: 'openai/gpt-oss-120b:free',
+      model: 'deepseek/deepseek-v3.2',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },

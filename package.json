@@ -9,7 +9,10 @@
     "lint": "next lint",
     "seed:questions": "tsx scripts/seed-questions.ts",
     "seed:questions:dry": "tsx scripts/seed-questions.ts --dry-run",
-    "seed:questions:clear": "tsx scripts/seed-questions.ts --clear"
+    "seed:questions:clear": "tsx scripts/seed-questions.ts --clear",
+    "seed:geometry": "tsx scripts/seed-geometry.ts",
+    "purge:unverified": "tsx scripts/purge-unverified.ts",
+    "purge:unverified:confirm": "tsx scripts/purge-unverified.ts --confirm"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.10",
