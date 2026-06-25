@@ -237,6 +237,24 @@ export interface BarChartParams {
   y_label?: string; x_label?: string
 }
 
+/**
+ * A blank (or lightly pre-plotted) Cartesian grid — graph paper for foundation
+ * "plot the points / draw the graph" questions. Drawn accurately (it's a grid).
+ */
+export interface CoordinateGridParams {
+  x_min?: number
+  x_max?: number
+  y_min?: number
+  y_max?: number
+  x_label?: string
+  y_label?: string
+  /** Optional pre-plotted points the question refers to. */
+  points?: [number, number][]
+  point_labels?: string[]
+  /** Optional pre-drawn straight line y = m x + c. */
+  line?: { m: number; c: number }
+}
+
 export type DiagramType =
   | 'right_triangle' | 'general_triangle'
   | 'quadratic_curve' | 'straight_line'
@@ -245,6 +263,7 @@ export type DiagramType =
   | 'venn_2' | 'tree_diagram'
   | 'number_line' | 'vector_parallelogram'
   | 'scatter_plot' | 'bar_chart'
+  | 'coordinate_grid'
 
 export type DiagramParams =
   | RightTriangleParams | GeneralTriangleParams
@@ -254,6 +273,7 @@ export type DiagramParams =
   | Venn2Params | TreeDiagramParams
   | NumberLineParams | VectorParallelogramParams
   | ScatterPlotParams | BarChartParams
+  | CoordinateGridParams
 
 // ─────────────────────────────────────────────
 // Template renderers
@@ -1056,8 +1076,67 @@ function renderBarChart(p: BarChartParams): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const cast = <T>(v: unknown): T => v as any as T
 
+function renderCoordinateGrid(p: CoordinateGridParams): string {
+  const xMin = Math.round(p.x_min ?? -5)
+  const xMax = Math.round(p.x_max ?? 5)
+  const yMin = Math.round(p.y_min ?? -5)
+  const yMax = Math.round(p.y_max ?? 5)
+  const left = 45, right = 375, top = 30, bottom = 360
+  const xSpan = Math.max(1, xMax - xMin)
+  const ySpan = Math.max(1, yMax - yMin)
+  const px = (x: number) => left + ((x - xMin) / xSpan) * (right - left)
+  const py = (y: number) => bottom - ((y - yMin) / ySpan) * (bottom - top)
+
+  const parts: string[] = []
+  // Minor grid lines
+  for (let x = xMin; x <= xMax; x++) {
+    parts.push(`  <line x1="${f(px(x))}" y1="${f(top)}" x2="${f(px(x))}" y2="${f(bottom)}" stroke="#d1d5db" stroke-width="0.5"/>`)
+  }
+  for (let y = yMin; y <= yMax; y++) {
+    parts.push(`  <line x1="${f(left)}" y1="${f(py(y))}" x2="${f(right)}" y2="${f(py(y))}" stroke="#d1d5db" stroke-width="0.5"/>`)
+  }
+  // Axes (only if 0 is within range, else draw on the boundary)
+  const axisX = xMin <= 0 && xMax >= 0 ? px(0) : left
+  const axisY = yMin <= 0 && yMax >= 0 ? py(0) : bottom
+  parts.push(`  <line x1="${f(left)}" y1="${f(axisY)}" x2="${f(right)}" y2="${f(axisY)}" stroke="black" stroke-width="1.5"/>`)
+  parts.push(`  <line x1="${f(axisX)}" y1="${f(top)}" x2="${f(axisX)}" y2="${f(bottom)}" stroke="black" stroke-width="1.5"/>`)
+  // Integer tick labels
+  for (let x = xMin; x <= xMax; x++) {
+    if (x === 0) continue
+    parts.push(smallLabel(String(x), px(x), axisY + 13))
+  }
+  for (let y = yMin; y <= yMax; y++) {
+    if (y === 0) continue
+    parts.push(smallLabel(String(y), axisX - 10, py(y) + 3, 'end'))
+  }
+  parts.push(smallLabel('0', axisX - 8, axisY + 13, 'end'))
+  // Axis labels
+  parts.push(ptLabel(p.x_label ?? 'x', right + 8, axisY + 4))
+  parts.push(ptLabel(p.y_label ?? 'y', axisX - 4, top - 10))
+  // Optional pre-drawn line
+  if (p.line && typeof p.line.m === 'number' && typeof p.line.c === 'number') {
+    const y1 = p.line.m * xMin + p.line.c
+    const y2 = p.line.m * xMax + p.line.c
+    parts.push(`  <line x1="${f(px(xMin))}" y1="${f(py(Math.max(yMin, Math.min(yMax, y1))))}" x2="${f(px(xMax))}" y2="${f(py(Math.max(yMin, Math.min(yMax, y2))))}" stroke="#dc2626" stroke-width="2"/>`)
+  }
+  // Optional pre-plotted points
+  if (Array.isArray(p.points)) {
+    p.points.forEach(([x, y], i) => {
+      parts.push(`  <circle cx="${f(px(x))}" cy="${f(py(y))}" r="3.5" fill="black"/>`)
+      const lbl = p.point_labels?.[i]
+      if (lbl) parts.push(ptLabel(lbl, px(x) + 8, py(y) - 6))
+    })
+  }
+
+  return `<svg viewBox="0 0 400 400" width="400" height="400" xmlns="http://www.w3.org/2000/svg">
+  <rect width="400" height="400" fill="white"/>
+${parts.join('\n')}
+</svg>`
+}
+
 export function renderDiagram(type: string, params: unknown): string {
   switch (type as DiagramType) {
+    case 'coordinate_grid':         return renderCoordinateGrid(cast<CoordinateGridParams>(params))
     case 'right_triangle':          return renderRightTriangle(cast<RightTriangleParams>(params))
     case 'general_triangle':        return renderGeneralTriangle(cast<GeneralTriangleParams>(params))
     case 'quadratic_curve':         return renderQuadraticCurve(cast<QuadraticCurveParams>(params))
@@ -1101,6 +1180,17 @@ const SUBTOPIC_TEMPLATE: Record<string, DiagramType> = {
   'Straight Line Graphs': 'straight_line',
   'Linear Graphs': 'straight_line',
   'Graphical Solutions': 'straight_line',
+  // Foundation plotting — blank coordinate grid to plot on
+  'Coordinates': 'coordinate_grid',
+  'Plotting Coordinates': 'coordinate_grid',
+  'Coordinates and Plotting': 'coordinate_grid',
+  'Plotting Graphs': 'coordinate_grid',
+  'Drawing Linear Graphs': 'coordinate_grid',
+  'Drawing Straight Line Graphs': 'coordinate_grid',
+  'Plotting Linear Graphs': 'coordinate_grid',
+  'Plotting Quadratic Graphs': 'coordinate_grid',
+  'Drawing Quadratic Graphs': 'coordinate_grid',
+  'Reading Coordinates': 'coordinate_grid',
   // Vectors
   'Vectors (Basic)': 'vector_parallelogram',
   'Vectors (Advanced)': 'vector_parallelogram',
@@ -1167,4 +1257,7 @@ vector_parallelogram: { vec_a_label, vec_b_label, point_labels(["O","A","B","C"]
 
 scatter_plot: { points* (required, [[x,y],...]), x_label, y_label, x_range, y_range, line_of_best_fit(bool) }
 
-bar_chart: { bars* (required, [{label,value},...]), y_label, x_label }`
+bar_chart: { bars* (required, [{label,value},...]), y_label, x_label }
+
+coordinate_grid: { x_min, x_max, y_min, y_max (integers, default -5..5), x_label, y_label, points([[x,y],...] optional pre-plotted), point_labels(["A",...]), line({m,c} optional pre-drawn) }
+  — a blank labelled Cartesian grid (graph paper) for "plot the points / draw the graph" questions. Prefer this for FOUNDATION plotting tasks so students have a grid to work on. Leave points/line empty for a blank grid.`
