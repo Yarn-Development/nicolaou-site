@@ -11,12 +11,12 @@ export default function Home() {
       <MarketingHeader />
       <main className="flex-1">
         <HeroSection />
-        <FeatureSection />
-        
-
-        {/* <StatsSection /> */}
-        {/* <TestimonialsSection /> */}
-        <PricingSection />
+        <div id="features">
+          <FeatureSection />
+        </div>
+        <div id="how-it-works">
+          <PricingSection />
+        </div>
         <CTASection />
       </main>
       <MarketingFooter />

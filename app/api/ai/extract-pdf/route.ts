@@ -159,7 +159,7 @@ Extract all questions now. Return ONLY the JSON object.`
         'X-Title': 'Nicolaou Maths - PDF Question Extractor',
       },
       body: JSON.stringify({
-        model: 'qwen/qwen-2.5-vl-7b-instruct',
+        model: 'anthropic/claude-sonnet-4-6',
         messages: [
           { role: 'system', content: systemPrompt },
           { 

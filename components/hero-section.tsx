@@ -3,96 +3,87 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button"
-import { createClient } from "@/lib/supabase/client"
-import { useEffect, useState } from "react"
-import type { User } from "@supabase/supabase-js"
+import { MicrosoftSignInButton } from "@/components/auth/microsoft-sign-in-button"
+import { useUser } from "@clerk/nextjs"
 
 export function HeroSection() {
-  const [user, setUser] = useState<User | null>(null)
-  const supabase = createClient()
+  const { user, isLoaded } = useUser()
 
-  useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [supabase.auth])
   return (
-    <section className="bg-swiss-signal text-white px-6 py-32 border-b-4 border-swiss-ink">
-      <div className="max-w-7xl mx-auto">
+    <section className="bg-swiss-ink text-swiss-paper border-b-4 border-swiss-signal overflow-hidden">
+      {/* Top accent rule */}
+      <div className="h-1 bg-swiss-signal w-full" />
+
+      <div className="max-w-7xl mx-auto px-6 py-24 md:py-32">
         <div className="grid grid-cols-12 gap-8">
-          {/* Left Column - Main Heading (Asymmetric Layout) */}
-          <div className="col-span-12 lg:col-span-10">
-            <h1 className="text-7xl md:text-9xl font-black leading-[0.85] tracking-tighter mb-12">
-              Master<br />
-              GCSE<br />
-              Maths
-            </h1>
-          </div>
 
-          {/* Right Column - Indicator */}
-          <div className="col-span-12 lg:col-span-2 flex items-end">
-            <div className="w-full">
-              <div className="h-4 bg-white dark:bg-white mb-4 w-full"></div>
-              <p className="font-bold text-sm uppercase tracking-wider">Online • 2026</p>
-            </div>
-          </div>
-
-          {/* Description - Offset Grid */}
-          <div className="col-span-12 md:col-span-3">
-            <span className="block text-sm font-bold uppercase tracking-widest mb-4">
-              Module 01
+          {/* Label column */}
+          <div className="col-span-12 md:col-span-2">
+            <span className="block text-xs font-bold uppercase tracking-[0.25em] text-swiss-signal mb-2">
+              Platform
+            </span>
+            <span className="block text-xs font-bold uppercase tracking-[0.25em] text-white/40">
+              2026
             </span>
           </div>
 
-          <div className="col-span-12 md:col-span-9 lg:col-span-7">
-            <p className="text-xl leading-relaxed mb-8 font-medium">
-              Create personalized worksheets, track student progress, and deliver adaptive assessments—all powered by AI that understands how students learn best.
-            </p>
+          {/* Main heading */}
+          <div className="col-span-12 md:col-span-10">
+            <h1 className="text-6xl md:text-8xl lg:text-[96px] font-black leading-[0.88] tracking-tighter mb-10 text-swiss-paper">
+              Maths<br />
+              Teaching<br />
+              <span className="text-swiss-signal">Reimagined.</span>
+            </h1>
 
-            {/* Show different CTAs based on auth state */}
-            {user ? (
-              <div className="flex flex-col gap-4 mb-12">
-                <p className="text-sm font-bold uppercase tracking-widest opacity-90">
-                  Welcome back, {user.email}
+            <div className="grid grid-cols-12 gap-8">
+              <div className="col-span-12 md:col-span-7">
+                <p className="text-lg md:text-xl leading-relaxed mb-8 text-white/80 font-medium">
+                  A complete platform for GCSE and A Level Maths — build exam papers, manage assignments, deliver AI-powered feedback, and track every student&apos;s progress.
                 </p>
-                <Button 
-                  asChild
-                  className="bg-white text-swiss-signal dark:bg-white dark:text-signal hover:bg-swiss-ink hover:text-white dark:hover:bg-black dark:hover:text-white font-bold uppercase tracking-wider text-sm px-8 py-6 transition-colors duration-200 w-full sm:w-auto"
-                >
-                  <Link href="/dashboard">Go to Dashboard →</Link>
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-4 mb-12 max-w-md">
-                <GoogleSignInButton />
-                
-                <Button 
-                  asChild
-                  variant="outline"
-                  className="bg-transparent border-2 border-white text-white hover:bg-white hover:text-swiss-signal dark:hover:bg-white dark:hover:text-signal font-bold uppercase tracking-wider text-sm px-8 py-6 transition-colors duration-200"
-                >
-                  <Link href="#features">Learn More →</Link>
-                </Button>
-              </div>
-            )}
 
-            {/* Stats Grid */}
-            <div className="grid grid-cols-3 border-t-2 border-white pt-8 mt-8">
-              <div>
-                <div className="text-4xl font-black mb-2">15K+</div>
-                <div className="text-sm font-bold uppercase tracking-wider opacity-90">Students</div>
+                {isLoaded && user ? (
+                  <div className="flex flex-col gap-3 max-w-sm">
+                    <p className="text-sm font-bold uppercase tracking-widest text-white/60">
+                      Welcome back
+                    </p>
+                    <p className="text-base font-bold text-swiss-paper">
+                      {user.primaryEmailAddress?.emailAddress ?? user.firstName}
+                    </p>
+                    <Button
+                      asChild
+                      className="bg-swiss-signal text-white hover:bg-white hover:text-swiss-ink font-bold uppercase tracking-wider text-sm px-8 py-6 transition-colors duration-200 mt-2"
+                    >
+                      <Link href="/dashboard">Go to Dashboard →</Link>
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3 max-w-sm">
+                    <GoogleSignInButton />
+                    <MicrosoftSignInButton />
+                    <p className="text-xs text-white/40 uppercase tracking-wider font-bold text-center pt-1">
+                      School SSO — Google Workspace &amp; Microsoft Azure AD
+                    </p>
+                  </div>
+                )}
               </div>
-              <div>
-                <div className="text-4xl font-black mb-2">98%</div>
-                <div className="text-sm font-bold uppercase tracking-wider opacity-90">Pass Rate</div>
-              </div>
-              <div>
-                <div className="text-4xl font-black mb-2">24/7</div>
-                <div className="text-sm font-bold uppercase tracking-wider opacity-90">AI Tutor</div>
+
+              {/* Key capabilities list */}
+              <div className="col-span-12 md:col-span-5 flex items-start justify-end">
+                <div className="space-y-0 w-full max-w-xs mt-2">
+                  {[
+                    "GCSE & A Level Question Bank",
+                    "AI Paper & Question Generation",
+                    "Edexcel / AQA / OCR / IB",
+                    "Marking & Student Feedback",
+                    "Parent Email Reports",
+                    "Unused Question Booklets",
+                  ].map((cap) => (
+                    <div key={cap} className="flex items-center gap-3 py-2.5 border-b border-white/10">
+                      <div className="w-2 h-2 bg-swiss-signal flex-shrink-0" />
+                      <span className="text-sm font-bold text-white/70 uppercase tracking-wide">{cap}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

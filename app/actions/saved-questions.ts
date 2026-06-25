@@ -1,7 +1,8 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
-import { requireTeacher } from '@/lib/auth/helpers'
+import { getAuthUser } from '@/lib/auth'
+import { fetchQuery, fetchMutation, api, getConvexUserIdByClerkId } from '@/lib/convex/server'
+import type { Id } from '@/convex/_generated/dataModel'
 
 // =====================================================
 // Types
@@ -23,6 +24,17 @@ export interface SavedQuestion {
 }
 
 // =====================================================
+// Helpers
+// =====================================================
+
+/** Resolve the signed-in Clerk user to a Convex user id, or null. */
+async function currentUserId(): Promise<Id<'users'> | null> {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) return null
+  return getConvexUserIdByClerkId(authUser.clerkId)
+}
+
+// =====================================================
 // Save a question to personal bank
 // =====================================================
 
@@ -31,26 +43,18 @@ export async function saveQuestionToBank(
   folder: string = 'General',
   notes?: string
 ): Promise<{ success: boolean; error?: string }> {
+  // `folder` and `notes` are retained in the signature for compatibility but
+  // are not persisted: the Convex savedQuestions schema has no such columns.
+  void folder
+  void notes
   try {
-    const user = await requireTeacher()
-    const supabase = await createClient()
+    const userId = await currentUserId()
+    if (!userId) return { success: false, error: 'You must be logged in' }
 
-    const { error } = await supabase
-      .from('saved_questions')
-      .upsert(
-        {
-          teacher_id: user.id,
-          question_id: questionId,
-          folder,
-          notes: notes || null,
-        },
-        { onConflict: 'teacher_id,question_id' }
-      )
-
-    if (error) {
-      console.error('Failed to save question:', error)
-      return { success: false, error: error.message }
-    }
+    await fetchMutation(api.savedQuestions.saveQuestion, {
+      userId,
+      questionId: questionId as Id<'questions'>,
+    })
 
     return { success: true }
   } catch (error) {
@@ -66,19 +70,13 @@ export async function removeQuestionFromBank(
   questionId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const user = await requireTeacher()
-    const supabase = await createClient()
+    const userId = await currentUserId()
+    if (!userId) return { success: false, error: 'You must be logged in' }
 
-    const { error } = await supabase
-      .from('saved_questions')
-      .delete()
-      .eq('teacher_id', user.id)
-      .eq('question_id', questionId)
-
-    if (error) {
-      console.error('Failed to remove saved question:', error)
-      return { success: false, error: error.message }
-    }
+    await fetchMutation(api.savedQuestions.unsaveQuestion, {
+      userId,
+      questionId: questionId as Id<'questions'>,
+    })
 
     return { success: true }
   } catch (error) {
@@ -94,57 +92,29 @@ export async function getSavedQuestions(
   folder?: string
 ): Promise<{ success: boolean; data?: SavedQuestion[]; error?: string }> {
   try {
-    const user = await requireTeacher()
-    const supabase = await createClient()
+    const userId = await currentUserId()
+    if (!userId) return { success: false, error: 'You must be logged in' }
 
-    let query = supabase
-      .from('saved_questions')
-      .select(`
-        id,
-        question_id,
-        folder,
-        notes,
-        created_at,
-        questions (
-          question_latex,
-          topic,
-          sub_topic,
-          difficulty,
-          marks,
-          content_type
-        )
-      `)
-      .eq('teacher_id', user.id)
-      .order('created_at', { ascending: false })
+    const rows = await fetchQuery(api.savedQuestions.getSavedQuestions, { userId })
+
+    // Folders are not persisted in Convex; every saved question is "General".
+    let savedQuestions: SavedQuestion[] = rows.map((item) => ({
+      id: item.id,
+      question_id: item.questionId,
+      folder: 'General',
+      notes: null,
+      created_at: new Date(item.savedAt).toISOString(),
+      question_latex: item.questionLatex || '',
+      topic: item.topic || '',
+      sub_topic: item.subTopic || '',
+      difficulty: item.difficulty || '',
+      marks: item.marks || 0,
+      content_type: item.contentType || 'generated_text',
+    }))
 
     if (folder && folder !== 'all') {
-      query = query.eq('folder', folder)
+      savedQuestions = savedQuestions.filter((q) => q.folder === folder)
     }
-
-    const { data, error } = await query
-
-    if (error) {
-      console.error('Failed to fetch saved questions:', error)
-      return { success: false, error: error.message }
-    }
-
-    // Flatten the joined data
-    const savedQuestions: SavedQuestion[] = (data || []).map((item: Record<string, unknown>) => {
-      const q = item.questions as Record<string, unknown> | null
-      return {
-        id: item.id as string,
-        question_id: item.question_id as string,
-        folder: item.folder as string,
-        notes: item.notes as string | null,
-        created_at: item.created_at as string,
-        question_latex: (q?.question_latex as string) || '',
-        topic: (q?.topic as string) || '',
-        sub_topic: (q?.sub_topic as string) || '',
-        difficulty: (q?.difficulty as string) || '',
-        marks: (q?.marks as number) || 0,
-        content_type: (q?.content_type as string) || 'generated_text',
-      }
-    })
 
     return { success: true, data: savedQuestions }
   } catch (error) {
@@ -158,19 +128,12 @@ export async function getSavedQuestions(
 
 export async function getSavedFolders(): Promise<{ success: boolean; data?: string[]; error?: string }> {
   try {
-    const user = await requireTeacher()
-    const supabase = await createClient()
+    const userId = await currentUserId()
+    if (!userId) return { success: false, error: 'You must be logged in' }
 
-    const { data, error } = await supabase
-      .from('saved_questions')
-      .select('folder')
-      .eq('teacher_id', user.id)
-
-    if (error) {
-      return { success: false, error: error.message }
-    }
-
-    const folders = [...new Set((data || []).map(d => d.folder as string))].sort()
+    // Folders are not persisted in Convex; all saved questions live in "General".
+    const ids = await fetchQuery(api.savedQuestions.getSavedQuestionIds, { userId })
+    const folders = ids.length > 0 ? ['General'] : []
     return { success: true, data: folders }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Failed to fetch folders' }
@@ -185,18 +148,13 @@ export async function isQuestionSaved(
   questionId: string
 ): Promise<boolean> {
   try {
-    const user = await requireTeacher()
-    const supabase = await createClient()
+    const userId = await currentUserId()
+    if (!userId) return false
 
-    const { data, error } = await supabase
-      .from('saved_questions')
-      .select('id')
-      .eq('teacher_id', user.id)
-      .eq('question_id', questionId)
-      .maybeSingle()
-
-    if (error) return false
-    return !!data
+    return await fetchQuery(api.savedQuestions.isQuestionSaved, {
+      userId,
+      questionId: questionId as Id<'questions'>,
+    })
   } catch {
     return false
   }
@@ -208,16 +166,10 @@ export async function isQuestionSaved(
 
 export async function getSavedQuestionIds(): Promise<string[]> {
   try {
-    const user = await requireTeacher()
-    const supabase = await createClient()
+    const userId = await currentUserId()
+    if (!userId) return []
 
-    const { data, error } = await supabase
-      .from('saved_questions')
-      .select('question_id')
-      .eq('teacher_id', user.id)
-
-    if (error) return []
-    return (data || []).map(d => d.question_id)
+    return await fetchQuery(api.savedQuestions.getSavedQuestionIds, { userId })
   } catch {
     return []
   }

@@ -82,11 +82,16 @@ function PerformanceTable({ breakdown }: PerformanceTableProps) {
             >
               <td className="border-t border-r border-swiss-ink/20 p-3">
                 <div className="font-bold text-swiss-ink text-sm">
-                  {row.topic}
+                  {row.subTopic !== row.topic ? row.subTopic : row.topic}
                 </div>
                 {row.subTopic !== row.topic && (
                   <div className="text-xs text-swiss-lead mt-0.5">
-                    {row.subTopic}
+                    {row.topic}
+                  </div>
+                )}
+                {row.learningObjective && (
+                  <div className="text-xs text-swiss-lead/80 mt-1 italic">
+                    {row.learningObjective}
                   </div>
                 )}
               </td>
@@ -342,9 +347,31 @@ interface StudentFeedbackSheetProps {
 
 export function StudentFeedbackSheet({ feedback, schoolLogo }: StudentFeedbackSheetProps) {
   const [showAnswers, setShowAnswers] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
 
   const handlePrint = () => {
     window.print()
+  }
+
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true)
+    try {
+      const res = await fetch(`/api/pdf/feedback/${feedback.submissionId}`)
+      if (!res.ok) throw new Error("PDF generation failed")
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `feedback-${feedback.studentName.replace(/\s+/g, "-").toLowerCase()}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      // silent fail — print is always available as fallback
+    } finally {
+      setDownloadingPdf(false)
+    }
   }
 
   return (
@@ -360,12 +387,21 @@ export function StudentFeedbackSheet({ feedback, schoolLogo }: StudentFeedbackSh
               {feedback.studentName} - {feedback.assignmentTitle}
             </p>
           </div>
-          <button
-            onClick={handlePrint}
-            className="px-6 py-2 bg-swiss-signal text-white font-bold uppercase tracking-wider text-sm hover:bg-swiss-signal/80 transition-colors"
-          >
-            Print Report
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleDownloadPdf}
+              disabled={downloadingPdf}
+              className="px-6 py-2 bg-white text-swiss-ink font-bold uppercase tracking-wider text-sm hover:bg-white/90 transition-colors disabled:opacity-60"
+            >
+              {downloadingPdf ? "Generating..." : "Download PDF"}
+            </button>
+            <button
+              onClick={handlePrint}
+              className="px-6 py-2 bg-swiss-signal text-white font-bold uppercase tracking-wider text-sm hover:bg-swiss-signal/80 transition-colors"
+            >
+              Print Report
+            </button>
+          </div>
         </div>
       </div>
 
@@ -444,6 +480,18 @@ export function StudentFeedbackSheet({ feedback, schoolLogo }: StudentFeedbackSh
             </div>
           </div>
         </div>
+
+        {/* AI Narrative (PRD §5.4.1) */}
+        {feedback.aiNarrative && (
+          <div className="bg-white border-2 border-swiss-ink mb-6 print:mb-4 p-5">
+            <p className="text-xs font-black uppercase tracking-widest text-swiss-lead mb-2">
+              Teacher&apos;s Summary
+            </p>
+            <p className="text-base text-swiss-ink leading-relaxed font-medium">
+              {feedback.aiNarrative}
+            </p>
+          </div>
+        )}
 
         {/* Performance Table */}
         <div className="bg-white border-2 border-swiss-ink mb-6 print:mb-4">

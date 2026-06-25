@@ -1,6 +1,6 @@
 /**
  * Unified auth utility.
- * Clerk issues the session; user/profile data lives in Convex (the Supabase
+ * Clerk issues the session; user/profile data lives in Convex (the legacy SQL
  * backend has been retired). We resolve the signed-in Clerk user to a Convex
  * `users` record by `clerkId` — the reliable, unique lookup the rest of the
  * server actions already use via `getConvexUserIdByClerkId`.

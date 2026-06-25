@@ -3,11 +3,11 @@
 import { useState, useCallback, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { 
-  ArrowLeft, 
-  Check, 
-  AlertCircle, 
-  Eye, 
+import {
+  ArrowLeft,
+  Check,
+  AlertCircle,
+  Eye,
   Loader2,
   Bell,
   BellOff,
@@ -17,6 +17,7 @@ import {
   Printer,
   BookOpen,
   Send,
+  Upload,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -68,6 +69,7 @@ function PaperMarkingGrid({ data }: MarkingInterfaceProps) {
   )
   const [isTogglingFeedback, setIsTogglingFeedback] = useState(false)
   const [isReleasingPacks, setIsReleasingPacks] = useState(false)
+  const [csvError, setCsvError] = useState<string | null>(null)
 
   // Initialize student states
   const [studentStates, setStudentStates] = useState<Record<string, StudentRowState>>(() => {
@@ -268,6 +270,57 @@ function PaperMarkingGrid({ data }: MarkingInterfaceProps) {
     setIsReleasingPacks(false)
   }, [assignment.id, hasUnsavedChanges, gradedCount, router])
 
+  // CSV mark import
+  const handleCsvImport = useCallback((file: File) => {
+    setCsvError(null)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string
+        const lines = text.split(/\r?\n/).filter(l => l.trim())
+        if (lines.length < 2) {
+          setCsvError("CSV must have a header row and at least one data row")
+          return
+        }
+        let imported = 0
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''))
+          const nameOrEmail = cols[0]?.toLowerCase()
+          if (!nameOrEmail) continue
+          const student = students.find(s =>
+            s.full_name?.toLowerCase() === nameOrEmail ||
+            s.email?.toLowerCase() === nameOrEmail
+          )
+          if (!student) continue
+          const newGradingData: GradingData = { ...studentStates[student.id]?.gradingData }
+          questions.forEach((q, idx) => {
+            const raw = cols[idx + 1]
+            if (raw !== undefined && raw !== '') {
+              const val = parseInt(raw, 10)
+              if (!isNaN(val) && val >= 0 && val <= q.marks) {
+                newGradingData[q.id] = { score: val }
+              }
+            }
+          })
+          const newTotal = Object.values(newGradingData).reduce((s, d) => s + d.score, 0)
+          setStudentStates(prev => ({
+            ...prev,
+            [student.id]: { ...prev[student.id], gradingData: newGradingData, totalScore: newTotal, hasChanges: true }
+          }))
+          imported++
+        }
+        if (imported === 0) {
+          setCsvError("No matching students found. First column must match student name or email.")
+        } else {
+          toast.success(`Imported marks for ${imported} student(s). Review and save.`)
+        }
+      } catch {
+        setCsvError("Failed to parse CSV file")
+      }
+    }
+    reader.readAsText(file)
+  }, [students, questions, studentStates])
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -359,7 +412,46 @@ function PaperMarkingGrid({ data }: MarkingInterfaceProps) {
             </Badge>
           )}
 
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
+            {/* CSV template download */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-2 border-swiss-ink font-bold uppercase text-xs"
+              onClick={() => {
+                const header = ['Student', ...questions.map((q, i) => q.custom_question_number || `Q${i + 1}`)].join(',')
+                const rows = students.map(s => [s.full_name || s.email, ...questions.map(() => '')].join(','))
+                const csv = [header, ...rows].join('\n')
+                const blob = new Blob([csv], { type: 'text/csv' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `${assignment.title.replace(/\s+/g, '_')}_marks_template.csv`
+                a.click()
+                URL.revokeObjectURL(url)
+              }}
+            >
+              <FileText className="h-3 w-3 mr-1" />
+              CSV Template
+            </Button>
+            {/* CSV import */}
+            <label className="cursor-pointer">
+              <input
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  if (file) handleCsvImport(file)
+                  e.target.value = ''
+                }}
+              />
+              <span className="inline-flex items-center gap-2 px-3 py-2 border-2 border-swiss-ink font-bold uppercase tracking-wider text-sm hover:bg-swiss-concrete transition-colors cursor-pointer">
+                <Upload className="h-4 w-4" />
+                Import CSV
+              </span>
+            </label>
+            {csvError && <span className="text-xs text-red-600 font-bold max-w-[200px]">{csvError}</span>}
             <Button
               onClick={handleSaveAll}
               disabled={!hasUnsavedChanges}
@@ -368,7 +460,7 @@ function PaperMarkingGrid({ data }: MarkingInterfaceProps) {
               <Save className="h-4 w-4 mr-2" />
               Save All
             </Button>
-            
+
             {/* Release Feedback & Generate Packs */}
             {gradedCount > 0 && (
               <Button

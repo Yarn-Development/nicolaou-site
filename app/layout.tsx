@@ -1,6 +1,7 @@
 import type React from "react"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
+import { ConvexClientProvider } from "@/components/providers/convex-provider"
 import "./globals.css"
 
 export const metadata = {
@@ -13,6 +14,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+  const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -24,11 +27,27 @@ export default function RootLayout({
         />
       </head>
       <body className="antialiased">
-        <ThemeProvider>
-          {children}
-          <Toaster position="top-right" />
-        </ThemeProvider>
+        <ConvexClientProvider>
+          {hasClerk ? (
+            <ClerkWrapper>
+              <ThemeProvider>
+                {children}
+                <Toaster position="top-right" />
+              </ThemeProvider>
+            </ClerkWrapper>
+          ) : (
+            <ThemeProvider>
+              {children}
+              <Toaster position="top-right" />
+            </ThemeProvider>
+          )}
+        </ConvexClientProvider>
       </body>
     </html>
   )
+}
+
+async function ClerkWrapper({ children }: { children: React.ReactNode }) {
+  const { ClerkProvider } = await import("@clerk/nextjs")
+  return <ClerkProvider>{children}</ClerkProvider>
 }

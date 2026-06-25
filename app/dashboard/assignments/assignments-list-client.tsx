@@ -18,6 +18,8 @@ import {
   Monitor,
   FileStack,
   Eye,
+  Send,
+  EyeOff,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -31,7 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { AssignmentWithClass } from "@/app/actions/assignments"
-import { getAssignmentDetails, deleteAssignment } from "@/app/actions/assignments"
+import { getAssignmentDetails, deleteAssignment, publishAssignment, updateAssignment } from "@/app/actions/assignments"
 import { exportExamToWord, exportExamWithMarkScheme, type ExamQuestion } from "@/lib/docx-exporter"
 
 interface AssignmentsListClientProps {
@@ -40,10 +42,26 @@ interface AssignmentsListClientProps {
 
 type FilterType = "all" | "online" | "paper" | "draft" | "published"
 
-export function AssignmentsListClient({ assignments }: AssignmentsListClientProps) {
+export function AssignmentsListClient({ assignments: initialAssignments }: AssignmentsListClientProps) {
+  const [assignments, setAssignments] = useState(initialAssignments)
   const [searchQuery, setSearchQuery] = useState("")
   const [filter, setFilter] = useState<FilterType>("all")
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [publishingId, setPublishingId] = useState<string | null>(null)
+
+  const handlePublishToggle = async (assignmentId: string, currentStatus: string) => {
+    setPublishingId(assignmentId)
+    const newStatus = currentStatus === "published" ? "draft" : "published"
+    if (newStatus === "published") {
+      await publishAssignment(assignmentId)
+    } else {
+      await updateAssignment(assignmentId, { status: "draft" })
+    }
+    setAssignments(prev =>
+      prev.map(a => a.id === assignmentId ? { ...a, status: newStatus as "draft" | "published" } : a)
+    )
+    setPublishingId(null)
+  }
 
   // Filter and search assignments
   const filteredAssignments = assignments.filter((a) => {
@@ -303,7 +321,9 @@ export function AssignmentsListClient({ assignments }: AssignmentsListClientProp
                   assignment={assignment}
                   onDownload={handleDownload}
                   onDelete={handleDelete}
+                  onPublishToggle={handlePublishToggle}
                   isDownloading={downloadingId === assignment.id}
+                  isPublishing={publishingId === assignment.id}
                 />
               ))}
             </div>
@@ -322,10 +342,12 @@ interface AssignmentRowProps {
   assignment: AssignmentWithClass
   onDownload: (id: string, title: string, withMarkScheme: boolean) => Promise<void>
   onDelete: (id: string, title: string) => Promise<void>
+  onPublishToggle: (id: string, currentStatus: string) => Promise<void>
   isDownloading: boolean
+  isPublishing: boolean
 }
 
-function AssignmentRow({ assignment, onDownload, onDelete, isDownloading }: AssignmentRowProps) {
+function AssignmentRow({ assignment, onDownload, onDelete, onPublishToggle, isDownloading, isPublishing }: AssignmentRowProps) {
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "No due date"
     return new Date(dateStr).toLocaleDateString("en-US", {
@@ -459,6 +481,19 @@ function AssignmentRow({ assignment, onDownload, onDelete, isDownloading }: Assi
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="border-2 border-swiss-ink">
+              {/* Publish / Unpublish */}
+              <DropdownMenuItem
+                onClick={() => onPublishToggle(assignment.id, assignment.status)}
+                disabled={isPublishing}
+                className="font-medium cursor-pointer"
+              >
+                {assignment.status === "published" ? (
+                  <><EyeOff className="h-4 w-4 mr-2" />Unpublish</>
+                ) : (
+                  <><Send className="h-4 w-4 mr-2" />Publish to Students</>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem asChild className="font-medium cursor-pointer">
                 <Link href={`/dashboard/assignments/${assignment.id}`}>
                   <Eye className="h-4 w-4 mr-2" />

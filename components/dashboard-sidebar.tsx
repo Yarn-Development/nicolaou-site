@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { BarChart, FileText, LayoutDashboard, Settings, Users, ChevronLeft, ChevronRight, Database, ClipboardList, ClipboardCheck, PlusCircle, Upload, Menu, X, Library, ShieldCheck } from "lucide-react"
+import { BarChart, LayoutDashboard, Settings, Users, ChevronLeft, ChevronRight, Database, ClipboardList, ClipboardCheck, PlusCircle, Upload, Menu, X, Library, ShieldCheck, BookOpen } from "lucide-react"
 
 export function DashboardSidebar() {
   const pathname = usePathname()
@@ -70,21 +70,21 @@ export function DashboardSidebar() {
       number: "07"
     },
     {
-      title: "Videos",
-      href: "/dashboard/assessments",
-      icon: <FileText className="h-5 w-5" />,
-      number: "08"
-    },
-    {
       title: "Analytics",
       href: "/dashboard/analytics",
       icon: <BarChart className="h-5 w-5" />,
-      number: "09"
+      number: "08"
     },
     {
       title: "Digitize Paper",
       href: "/dashboard/ingest?mode=digitize",
       icon: <Upload className="h-5 w-5" />,
+      number: "09"
+    },
+    {
+      title: "Gen Booklet",
+      href: "/dashboard/library/booklet",
+      icon: <BookOpen className="h-5 w-5" />,
       number: "10"
     },
     {
@@ -92,6 +92,12 @@ export function DashboardSidebar() {
       href: "/dashboard/admin/audit",
       icon: <ShieldCheck className="h-5 w-5" />,
       number: "11"
+    },
+    {
+      title: "Admin",
+      href: "/dashboard/admin",
+      icon: <Settings className="h-5 w-5" />,
+      number: "12"
     },
   ]
 

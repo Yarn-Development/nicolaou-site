@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
+import { getAssignmentDetails } from "@/app/actions/assignments"
 import { FeedbackOverviewClient } from "./feedback-overview-client"
 
 interface Props {
@@ -10,38 +11,16 @@ interface Props {
 
 export default async function FeedbackOverviewPage({ params }: Props) {
   const { assignmentId } = await params
-  const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    redirect("/login")
+  const authUser = await getAuthUser()
+  if (!authUser) {
+    redirect("/sign-in")
   }
 
-  // Verify teacher owns this assignment
-  const { data: assignment } = await supabase
-    .from("assignments")
-    .select(`
-      id,
-      title,
-      classes!inner(
-        id,
-        name,
-        teacher_id
-      )
-    `)
-    .eq("id", assignmentId)
-    .single()
-
-  if (!assignment) {
-    redirect("/dashboard/assignments")
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const classData = assignment.classes as any
-  if (classData.teacher_id !== user.id) {
+  // Verify teacher owns this assignment (getAssignmentDetails is scoped to the
+  // signed-in teacher and returns an error if they don't own it).
+  const assignment = await getAssignmentDetails(assignmentId)
+  if (!assignment.success || !assignment.data) {
     redirect("/dashboard/assignments")
   }
 

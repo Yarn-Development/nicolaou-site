@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 import { loadAssignment } from "@/app/actions/student-work"
 import { SubmittedView } from "@/components/worksheet-player"
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
 import { TakeAssignmentClient } from "./take-assignment-client"
 import { PaperExamPrepSheet } from "@/components/paper-exam-prep-sheet"
 
@@ -13,15 +13,11 @@ interface Props {
 
 export default async function TakeAssignmentPage({ params }: Props) {
   const { id: assignmentId } = await params
-  const supabase = await createClient()
 
   // Check authentication
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    redirect("/login")
+  const authUser = await getAuthUser()
+  if (!authUser) {
+    redirect("/sign-in")
   }
 
   // Load assignment data

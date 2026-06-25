@@ -1,9 +1,9 @@
 /**
  * Question Sanitizer — Exam-Ready Content Cleanup
- * 
+ *
  * Shared utility for cleaning AI-generated question content to be
  * indistinguishable from genuine Pearson Edexcel exam paper questions.
- * 
+ *
  * Used by:
  * - Shadow paper generation (runtime, server-side)
  * - Database sanitizer script (CLI)
@@ -75,10 +75,10 @@ function removeConversationalFiller(text: string): SanitizeResult {
     /^(?:Shadow\s+Question\s*[:.\-]\s*\n?)/i,
     /^(?:\*\*(?:Question|Shadow Question|New Question)\*\*\s*[:.\-]?\s*\n?)/i,
   ]
-  
+
   let cleaned = text
   const changes: string[] = []
-  
+
   for (const pattern of patterns) {
     const result = cleaned.replace(pattern, '')
     if (result !== cleaned) {
@@ -87,7 +87,7 @@ function removeConversationalFiller(text: string): SanitizeResult {
       break
     }
   }
-  
+
   return { cleaned, changes }
 }
 
@@ -126,10 +126,10 @@ function removeAIMetadataLeaks(text: string): SanitizeResult {
     /\n?\s*Calculator:\s*(?:Allowed|Not Allowed|Yes|No)\s*$/i,
     /\n?\s*\(This question is worth \d+ marks?\.\)\s*$/i,
   ]
-  
+
   let cleaned = text
   const changes: string[] = []
-  
+
   for (const pattern of patterns) {
     const result = cleaned.replace(pattern, '')
     if (result !== cleaned) {
@@ -137,41 +137,109 @@ function removeAIMetadataLeaks(text: string): SanitizeResult {
       changes.push('Removed AI metadata leak')
     }
   }
-  
+
   return { cleaned, changes }
 }
 
 /**
- * Ensure proper LaTeX command formatting
- * Fixes common AI typos in LaTeX commands
+ * Recover LaTeX commands corrupted by JSON.parse consuming single-backslash
+ * escape sequences already in the database.
+ *
+ * When AI outputs "\frac" (not "\\frac") in a JSON string, JS's JSON.parse
+ * interprets \f as a form-feed (ASCII 12) and discards it, leaving "rac{...}"
+ * in the stored text. This rule detects those broken fragments and restores them
+ * so existing DB records can be fixed by running the sanitizer script.
+ *
+ * JSON single-char escape sequences that can corrupt LaTeX commands:
+ *   \b (backspace), \f (form-feed), \n (newline), \r (return), \t (tab)
+ *   → \begin→"egin", \frac→"rac{", \theta→"(tab)heta", \times→"(tab)imes"
+ */
+function recoverCorruptedCommands(text: string): SanitizeResult {
+  let cleaned = text
+  const changes: string[] = []
+
+  const recoveries: [RegExp, string][] = [
+    // \frac: \f (form-feed) is consumed → leaves "rac{"
+    [/\brac\{/g, '\\frac{'],
+    // \sqrt: safety net for missing backslash entirely
+    [/(?<!\\)\bsqrt\{/g, '\\sqrt{'],
+    // \theta: \t (tab) is consumed → leaves tab+"heta"
+    [/\x09heta\b/g, '\\theta'],
+    // Isolated "heta" not preceded by a word char (catches tab that got collapsed)
+    [/(?<!\w)heta\b/g, '\\theta'],
+    // \times: \t (tab) is consumed → leaves tab+"imes"
+    [/\x09imes\b/g, '\\times'],
+    // \tau: \t (tab) is consumed → leaves tab+"au"
+    [/\x09au\b/g, '\\tau'],
+    // \begin: \b (backspace) is consumed → leaves "egin{"
+    [/(?<!\w)egin\{/g, '\\begin{'],
+    // \div: no standard JSON escape, but match bare " div " in math context
+    [/ div /g, ' \\div '],
+    // \pm: no standard JSON escape, but match isolated "pm"
+    [/(?<!\w)pm\b(?!\s*\{)/g, '\\pm'],
+    // \cdot: no standard JSON escape, but match isolated "cdot"
+    [/(?<!\w)cdot\b/g, '\\cdot'],
+  ]
+
+  for (const [pattern, replacement] of recoveries) {
+    const result = cleaned.replace(pattern, replacement)
+    if (result !== cleaned) {
+      cleaned = result
+      changes.push('Recovered corrupted LaTeX command')
+    }
+  }
+
+  return { cleaned, changes: changes.length > 0 ? [...new Set(changes)] : [] }
+}
+
+/**
+ * Ensure proper LaTeX command formatting.
+ * Fixes common AI typos in LaTeX commands.
+ *
+ * SAFETY: The = spacing rule is scoped to math regions only to avoid
+ * corrupting surrounding prose (e.g. "Calculator: Allowed").
+ * The dollar-trimming rules only remove spaces immediately adjacent to $.
  */
 function fixLatexCommands(text: string): SanitizeResult {
   let cleaned = text
   const changes: string[] = []
-  
-  // Fix common LaTeX typos
-  const fixes: [RegExp, string][] = [
-    // Fix double-escaped commands: \\\\frac → \\frac
-    [/\\\\\\\\(frac|sqrt|times|div|pm|textbf|text|mathrm)/g, '\\\\$1'],
-    // Fix \fraction → \frac
-    [/\\fraction/g, '\\frac'],
-    // Fix spacing around = in math
-    [/\s*=\s*/g, ' = '],
-    // Fix \text{} with unnecessary braces around simple words
-    [/\\text\{(\w)\}/g, '\\text{$1}'],
-    // Ensure consistent spacing in inline math
-    [/\$\s+/g, '$'],
-    [/\s+\$/g, '$'],
-  ]
-  
-  for (const [pattern, replacement] of fixes) {
-    const result = cleaned.replace(pattern, replacement)
-    if (result !== cleaned) {
-      cleaned = result
-      changes.push('Fixed LaTeX commands')
-    }
+
+  // Fix four-backslash sequences: \\\\frac → \\frac (AI over-escaping)
+  const quadBackslash = cleaned.replace(
+    /\\\\\\\\(frac|sqrt|times|div|pm|textbf|text|mathrm)/g,
+    '\\\\$1'
+  )
+  if (quadBackslash !== cleaned) {
+    cleaned = quadBackslash
+    changes.push('Fixed LaTeX commands')
   }
-  
+
+  // Fix \fraction → \frac
+  const fracFix = cleaned.replace(/\\fraction/g, '\\frac')
+  if (fracFix !== cleaned) {
+    cleaned = fracFix
+    changes.push('Fixed LaTeX commands')
+  }
+
+  // Fix spacing around = INSIDE math regions only (not globally).
+  // Applying /\s*=\s*/g to the whole string corrupts surrounding text.
+  const equalsFix = cleaned.replace(/(\$\$[\s\S]*?\$\$|\$[^$]+?\$)/g, (mathRegion) => {
+    return mathRegion.replace(/\s*=\s*/g, ' = ')
+  })
+  if (equalsFix !== cleaned) {
+    cleaned = equalsFix
+    changes.push('Fixed LaTeX commands')
+  }
+
+  // Trim spaces immediately inside $ delimiters: "$ x $" → "$x$"
+  const trimmedDollars = cleaned
+    .replace(/\$\s+/g, '$')
+    .replace(/\s+\$/g, '$')
+  if (trimmedDollars !== cleaned) {
+    cleaned = trimmedDollars
+    changes.push('Fixed LaTeX commands')
+  }
+
   return { cleaned, changes: [...new Set(changes)] }
 }
 
@@ -180,15 +248,15 @@ function fixLatexCommands(text: string): SanitizeResult {
  */
 function cleanWhitespace(text: string): SanitizeResult {
   const cleaned = text
-    // Remove leading/trailing whitespace per line
+    // Remove trailing whitespace per line
     .split('\n')
     .map(line => line.trimEnd())
     .join('\n')
-    // Remove excessive blank lines (max 2 consecutive)
+    // Collapse excessive blank lines (max 2 consecutive)
     .replace(/\n{3,}/g, '\n\n')
     // Trim overall
     .trim()
-  
+
   return {
     cleaned,
     changes: cleaned !== text ? ['Cleaned whitespace'] : [],
@@ -203,10 +271,10 @@ function removeTrailingSolutionHints(text: string): SanitizeResult {
     /\n?\s*\*?\*?(?:Hint|Solution|Working|Answer)[:.\s].*$/is,
     /\n?\s*\*?\*?Note:\s*.*$/i,
   ]
-  
+
   let cleaned = text
   const changes: string[] = []
-  
+
   for (const pattern of patterns) {
     // Only remove if it appears at the very end and looks like a hint (not part of the question)
     const match = cleaned.match(pattern)
@@ -216,7 +284,7 @@ function removeTrailingSolutionHints(text: string): SanitizeResult {
       break
     }
   }
-  
+
   return { cleaned, changes }
 }
 
@@ -232,6 +300,7 @@ const RULES = [
   standardizeBold,
   fixNewlines,
   removeAIMetadataLeaks,
+  recoverCorruptedCommands,
   fixLatexCommands,
   removeTrailingSolutionHints,
   cleanWhitespace,

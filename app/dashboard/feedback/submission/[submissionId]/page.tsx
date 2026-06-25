@@ -1,5 +1,5 @@
 import { redirect, notFound } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
 import { generateStudentFeedback } from "@/app/actions/feedback"
 import { FeedbackPageClient } from "./feedback-page-client"
 
@@ -11,14 +11,11 @@ interface Props {
 
 export default async function FeedbackPage({ params }: Props) {
   const { submissionId } = await params
-  const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const authUser = await getAuthUser()
 
-  if (!user) {
-    redirect("/login")
+  if (!authUser) {
+    redirect("/sign-in")
   }
 
   // Generate feedback data

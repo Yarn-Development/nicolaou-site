@@ -1,32 +1,22 @@
 "use client"
 
-import { createClient } from "@/lib/supabase/client"
+import { useClerk } from "@clerk/nextjs"
 import { LogOut } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
 export function SignOutButton() {
   const [isLoading, setIsLoading] = useState(false)
-  const supabase = createClient()
+  const { signOut } = useClerk()
   const router = useRouter()
 
   const handleSignOut = async () => {
     try {
       setIsLoading(true)
-      const { error } = await supabase.auth.signOut()
-
-      if (error) {
-        console.error('Error signing out:', error.message)
-        alert('Failed to sign out. Please try again.')
-        return
-      }
-
-      // Redirect to home page after sign out
+      await signOut()
       router.push('/')
-      router.refresh()
     } catch (error) {
-      console.error('Unexpected error:', error)
-      alert('An unexpected error occurred. Please try again.')
+      console.error('Sign out error:', error)
     } finally {
       setIsLoading(false)
     }

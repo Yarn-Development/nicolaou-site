@@ -11,6 +11,38 @@ import type { AssignmentDetails } from "@/app/actions/assignments"
 import "katex/dist/katex.min.css"
 
 // =====================================================
+// Non-Calculator icon (SVG — no dependency needed)
+// =====================================================
+
+function NonCalculatorIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      className={className}
+      aria-label="Non-calculator"
+    >
+      {/* Calculator body */}
+      <rect x="4" y="2" width="16" height="20" rx="2" />
+      {/* Display */}
+      <rect x="6" y="4" width="12" height="4" rx="0.5" />
+      {/* Buttons row 1 */}
+      <rect x="6" y="10" width="3" height="3" rx="0.5" />
+      <rect x="10.5" y="10" width="3" height="3" rx="0.5" />
+      <rect x="15" y="10" width="3" height="3" rx="0.5" />
+      {/* Buttons row 2 */}
+      <rect x="6" y="15" width="3" height="3" rx="0.5" />
+      <rect x="10.5" y="15" width="3" height="3" rx="0.5" />
+      <rect x="15" y="15" width="3" height="3" rx="0.5" />
+      {/* Diagonal cross-out line */}
+      <line x1="2" y1="22" x2="22" y2="2" strokeWidth={2} stroke="currentColor" />
+    </svg>
+  )
+}
+
+// =====================================================
 // Types
 // =====================================================
 
@@ -66,6 +98,7 @@ function MarkBox({ marks }: { marks: number }) {
 export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProps) {
   const router = useRouter()
   const [view, setView] = useState<ViewMode>(initialView)
+  const [showSourceLabels, setShowSourceLabels] = useState(false)
 
   const paperRef = generatePaperRef(assignment.id)
 
@@ -81,9 +114,9 @@ export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProp
       // Convert assignment questions to ExamQuestion format
       const examQuestions: ExamQuestion[] = assignment.questions.map(q => ({
         id: q.question_id,
-        content_type: 'generated_text' as const,
+        content_type: (q.content_type === 'synthetic_image' ? 'synthetic_image' : 'generated_text') as 'generated_text' | 'synthetic_image',
         question_latex: q.question_latex,
-        image_url: null,
+        image_url: q.image_url ?? null,
         topic: q.topic,
         topic_name: q.topic,
         sub_topic_name: q.sub_topic || null,
@@ -168,6 +201,20 @@ export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProp
               </button>
             </div>
 
+            {/* Source Label Toggle */}
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase tracking-wider border-2 border-black px-3 py-2 rounded">
+              <input
+                type="checkbox"
+                checked={showSourceLabels}
+                onChange={(e) => setShowSourceLabels(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-8 h-4 bg-gray-300 rounded-full relative transition-colors peer-checked:bg-black">
+                <div className="absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform peer-checked:translate-x-4" />
+              </div>
+              Source Labels
+            </label>
+
             {/* Export Options */}
             <div className="flex items-center gap-2">
               <Button
@@ -204,7 +251,7 @@ export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProp
       {/* Content                                       */}
       {/* ============================================= */}
       {view === "paper" && (
-        <ExamPaper assignment={assignment} paperRef={paperRef} />
+        <ExamPaper assignment={assignment} paperRef={paperRef} showSourceLabels={showSourceLabels} />
       )}
       {view === "marksheet" && (
         <StudentMarksheet assignment={assignment} />
@@ -441,13 +488,25 @@ export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProp
 // Exam Paper View
 // =====================================================
 
+// Determine if the whole paper is non-calculator, calculator, or mixed
+function getPaperCalculatorStatus(questions: AssignmentDetails["questions"]): "calculator" | "non-calculator" | "mixed" {
+  if (questions.length === 0) return "calculator"
+  const allowed = questions.filter(q => q.calculator_allowed).length
+  if (allowed === questions.length) return "calculator"
+  if (allowed === 0) return "non-calculator"
+  return "mixed"
+}
+
 function ExamPaper({
   assignment,
   paperRef,
+  showSourceLabels,
 }: {
   assignment: AssignmentDetails
   paperRef: string
+  showSourceLabels: boolean
 }) {
+  const calculatorStatus = getPaperCalculatorStatus(assignment.questions)
   return (
     <div className="exam-paper-container print:m-0 print:p-0">
       {/* DO NOT WRITE zones - repeated on every page via position:fixed in print */}
@@ -539,11 +598,29 @@ function ExamPaper({
 
             {/* You must have box */}
             <div className="border-2 border-black p-4 mb-6 flex items-start justify-between">
-              <div>
+              <div className="space-y-2">
                 <p className="text-[10pt]">
                   <strong>You must have:</strong> Ruler graduated in centimetres and millimetres,
                   protractor, pair of compasses, pen, HB pencil, eraser.
                 </p>
+                {calculatorStatus === "non-calculator" && (
+                  <p className="text-[10pt] flex items-center gap-2">
+                    <NonCalculatorIcon className="w-4 h-4 text-black inline-block" />
+                    <strong>Non-calculator paper.</strong> Do not use a calculator.
+                  </p>
+                )}
+                {calculatorStatus === "calculator" && (
+                  <p className="text-[10pt]">
+                    <strong>You may use a calculator.</strong>
+                  </p>
+                )}
+                {calculatorStatus === "mixed" && (
+                  <p className="text-[10pt]">
+                    Some questions are non-calculator. A{" "}
+                    <NonCalculatorIcon className="w-3.5 h-3.5 inline-block mx-0.5" />
+                    {" "}symbol indicates non-calculator questions.
+                  </p>
+                )}
               </div>
               <div className="border border-black px-3 py-2 text-center ml-4 flex-shrink-0">
                 <p className="text-[8pt] text-gray-500">Total Marks</p>
@@ -652,6 +729,7 @@ function ExamPaper({
               question={q}
               number={index + 1}
               isLast={index === assignment.questions.length - 1}
+              showSourceLabel={showSourceLabels}
             />
           ))}
 
@@ -671,14 +749,28 @@ function ExamPaper({
 // Question Block
 // =====================================================
 
+function buildSourceLabel(question: AssignmentDetails["questions"][0]): string | null {
+  const src = question.answer_key?.source
+  if (!src) return null
+  const parts: string[] = []
+  if (src.exam_board) parts.push(src.exam_board)
+  if (src.level) parts.push(src.level)
+  if (src.paper) parts.push(src.paper)
+  if (src.year) parts.push(String(src.year))
+  if (src.question_number) parts.push(src.question_number)
+  return parts.length > 0 ? parts.join(" — ") : null
+}
+
 function QuestionBlock({
   question,
   number,
   isLast,
+  showSourceLabel,
 }: {
   question: AssignmentDetails["questions"][0]
   number: number
   isLast: boolean
+  showSourceLabel?: boolean
 }) {
   // Determine answer space height based on marks
   const answerSpaceHeight = getAnswerSpaceHeight(question.marks)
@@ -696,11 +788,39 @@ function QuestionBlock({
 
         {/* Center: Question Text */}
         <div className="text-[11pt] leading-relaxed">
+          {/* Non-calculator indicator beside question text */}
+          {!question.calculator_allowed && (
+            <div className="flex items-center gap-1.5 mb-1 text-[8pt] text-gray-500">
+              <NonCalculatorIcon className="w-4 h-4" />
+              <span className="font-bold uppercase tracking-wider">Non-calculator</span>
+            </div>
+          )}
+          {/* Source label (optional teacher toggle) */}
+          {showSourceLabel && (() => {
+            const label = buildSourceLabel(question)
+            return label ? (
+              <div className="mb-1 text-[7.5pt] text-gray-400 italic print-source-label">
+                {label}
+              </div>
+            ) : null
+          })()}
           <LatexPreview
             latex={question.question_latex}
             className="exam-question-text"
             showSkeleton={false}
           />
+
+          {/* Diagram (synthetic_image questions only) */}
+          {question.content_type === 'synthetic_image' && question.image_url && (
+            <div className="my-3" style={{ breakInside: 'avoid' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={question.image_url}
+                alt="Diagram"
+                style={{ maxWidth: '220px', height: 'auto', display: 'block' }}
+              />
+            </div>
+          )}
 
           {/* Answer working space - lined like real exam paper */}
           <div className="mt-6" style={{ minHeight: answerSpaceHeight }}>

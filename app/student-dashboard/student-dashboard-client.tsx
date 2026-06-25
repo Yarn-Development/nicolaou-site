@@ -27,13 +27,14 @@ import type { Profile } from "@/lib/types/database"
 import { SignOutButton } from "@/components/auth/sign-out-button"
 import { JoinClassCard } from "@/components/join-class-card"
 import { leaveClass } from "@/app/actions/classes"
-import { 
-  getStudentClasses, 
+import {
+  getStudentClasses,
   getStudentAssignments,
   type StudentClass,
-  type StudentAssignment 
+  type StudentAssignment
 } from "@/app/actions/student"
 import { getStudentDashboardData, type StudentDashboardData } from "@/app/actions/feedback"
+import { getStudentResources, type ClassResource } from "@/app/actions/resources"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
@@ -46,6 +47,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
   const [classes, setClasses] = useState<StudentClass[]>([])
   const [assignments, setAssignments] = useState<StudentAssignment[]>([])
   const [dashboardData, setDashboardData] = useState<StudentDashboardData | null>(null)
+  const [classResources, setClassResources] = useState<ClassResource[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [leavingClass, setLeavingClass] = useState<string | null>(null)
 
@@ -66,6 +68,13 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
 
     if (classesResult.success && classesResult.data) {
       setClasses(classesResult.data)
+      const classIds = classesResult.data.map((c) => c.class_id)
+      if (classIds.length > 0) {
+        const resourcesResult = await getStudentResources(classIds)
+        if (resourcesResult.success && resourcesResult.data) {
+          setClassResources(resourcesResult.data)
+        }
+      }
     }
 
     if (assignmentsResult.success && assignmentsResult.data) {
@@ -225,7 +234,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
       <nav className="border-b-2 border-swiss-ink bg-swiss-paper sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6">
           <div className="flex gap-2">
-            {["OVERVIEW", "CLASSES", "ASSIGNMENTS", "PROGRESS"].map((tab) => (
+            {["OVERVIEW", "CLASSES", "ASSIGNMENTS", "RESOURCES", "PROGRESS"].map((tab) => (
               <button
                 key={tab}
                 onClick={() => setSelectedTab(tab.toLowerCase())}
@@ -748,7 +757,7 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
                         
                         <div>
                           {isGraded && assignment.feedback_released && assignment.submission_id ? (
-                            <Link href={`/dashboard/feedback/submission/${assignment.submission_id}`}>
+                            <Link href={`/student-dashboard/feedback/${assignment.submission_id}`}>
                               <Button 
                                 size="sm"
                                 variant="outline"
@@ -960,6 +969,85 @@ export default function StudentDashboardClient({ profile }: StudentDashboardClie
             )}
           </div>
         )}
+        {/* RESOURCES TAB */}
+        {selectedTab === "resources" && (
+          <div className="space-y-6">
+            <h2 className="text-2xl font-black uppercase tracking-widest text-swiss-ink flex items-center gap-3">
+              <BookOpen className="w-6 h-6 text-swiss-signal" />
+              CLASS RESOURCES
+            </h2>
+
+            {classResources.length === 0 ? (
+              <div className="border-2 border-swiss-ink bg-swiss-paper p-12 text-center">
+                <BookOpen className="w-12 h-12 mx-auto mb-4 text-swiss-lead" />
+                <p className="text-lg font-black uppercase tracking-wider text-swiss-ink mb-2">
+                  No Resources Yet
+                </p>
+                <p className="text-swiss-lead font-medium text-sm">
+                  Your teacher hasn&apos;t shared any resources for your classes yet.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {classResources.map((resource) => {
+                  const typeConfig = {
+                    video_link: { label: "Video", color: "bg-red-100 text-red-800 border-red-300" },
+                    pdf: { label: "PDF", color: "bg-orange-100 text-orange-800 border-orange-300" },
+                    note: { label: "Note", color: "bg-yellow-100 text-yellow-800 border-yellow-300" },
+                    link: { label: "Link", color: "bg-teal-100 text-teal-800 border-teal-300" },
+                  }[resource.type] ?? { label: resource.type, color: "bg-gray-100 text-gray-800 border-gray-300" }
+
+                  return (
+                    <div
+                      key={resource.id}
+                      className="border-2 border-swiss-ink bg-swiss-paper p-5 flex flex-col gap-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="font-black text-swiss-ink text-sm uppercase tracking-wider leading-tight">
+                          {resource.title}
+                        </h3>
+                        <span className={`flex-shrink-0 text-[10px] font-bold uppercase border px-2 py-0.5 ${typeConfig.color}`}>
+                          {typeConfig.label}
+                        </span>
+                      </div>
+                      {resource.description && (
+                        <p className="text-xs text-swiss-lead font-medium">{resource.description}</p>
+                      )}
+                      {resource.topic_tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {resource.topic_tags.map((tag) => (
+                            <span
+                              key={tag}
+                              className="bg-swiss-concrete border border-swiss-ink/20 text-[10px] font-bold px-1.5 py-0.5 uppercase"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {resource.url && resource.type !== "note" && (
+                        <a
+                          href={resource.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-auto inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-swiss-signal hover:underline"
+                        >
+                          Open Resource →
+                        </a>
+                      )}
+                      {resource.type === "note" && resource.url && (
+                        <p className="text-xs text-swiss-lead bg-swiss-concrete border border-swiss-ink/10 p-3 whitespace-pre-wrap">
+                          {resource.url}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
       </main>
     </div>
   )

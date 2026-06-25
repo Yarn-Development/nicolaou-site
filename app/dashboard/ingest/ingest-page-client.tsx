@@ -4,16 +4,19 @@ import { useState } from "react"
 import { IngestClient } from "./ingest-client"
 import { ShadowPaperUploader } from "./shadow-paper-uploader"
 import { SmartDigitizer } from "./smart-digitizer"
-import { Scissors, Sparkles, FileSearch } from "lucide-react"
+import { IYGBBulkIngestor } from "./iygb-bulk-ingestor"
+import { Scissors, Sparkles, FileSearch, Layers } from "lucide-react"
+import type { DigitizedPaper } from "@/app/actions/external-assignment"
 
-type IngestMode = "manual" | "shadow" | "digitize"
+type IngestMode = "manual" | "shadow" | "digitize" | "iygb"
 
 interface IngestPageClientProps {
   classes: Array<{ id: string; name: string }>
+  digitizedPapers: DigitizedPaper[]
   initialMode?: IngestMode
 }
 
-export function IngestPageClient({ classes, initialMode = "manual" }: IngestPageClientProps) {
+export function IngestPageClient({ classes, digitizedPapers, initialMode = "manual" }: IngestPageClientProps) {
   const [mode, setMode] = useState<IngestMode>(initialMode)
 
   const getModeTitle = () => {
@@ -21,6 +24,7 @@ export function IngestPageClient({ classes, initialMode = "manual" }: IngestPage
       case "manual": return "PAST PAPER INGESTION"
       case "shadow": return "SHADOW PAPER GENERATOR"
       case "digitize": return "SMART DIGITIZER"
+      case "iygb": return "IYGB BULK IMPORT"
     }
   }
 
@@ -29,6 +33,7 @@ export function IngestPageClient({ classes, initialMode = "manual" }: IngestPage
       case "manual": return "Upload and tag questions from official exam papers"
       case "shadow": return "AI-powered question cloning from existing papers"
       case "digitize": return "Upload an exam paper and auto-map question structure"
+      case "iygb": return "Bulk-import IYGB papers from Madas Maths into the question bank"
     }
   }
 
@@ -87,6 +92,17 @@ export function IngestPageClient({ classes, initialMode = "manual" }: IngestPage
         >
           <Scissors className="w-5 h-5" />
           MANUAL INGEST
+        </button>
+        <button
+          onClick={() => setMode("iygb")}
+          className={`flex-1 px-6 py-4 flex items-center justify-center gap-3 font-black uppercase tracking-wider transition-colors border-l-2 border-swiss-ink ${
+            mode === "iygb"
+              ? "bg-swiss-ink text-white"
+              : "bg-swiss-paper text-swiss-ink hover:bg-swiss-concrete"
+          }`}
+        >
+          <Layers className="w-5 h-5" />
+          IYGB BULK
         </button>
       </div>
 
@@ -157,7 +173,7 @@ export function IngestPageClient({ classes, initialMode = "manual" }: IngestPage
       {mode === "shadow" && (
         <>
           {/* Shadow Paper Tool */}
-          <ShadowPaperUploader classes={classes} />
+          <ShadowPaperUploader classes={classes} digitizedPapers={digitizedPapers} />
 
           {/* Shadow Paper Instructions */}
           <div className="grid md:grid-cols-2 gap-4">
@@ -283,12 +299,19 @@ export function IngestPageClient({ classes, initialMode = "manual" }: IngestPage
                     <span className="px-2 py-1 bg-swiss-ink text-white text-xs font-bold uppercase">Edexcel</span>
                     <span className="px-2 py-1 bg-swiss-ink text-white text-xs font-bold uppercase">OCR</span>
                     <span className="px-2 py-1 bg-swiss-ink text-white text-xs font-bold uppercase">MEI</span>
+                    <span className="px-2 py-1 bg-swiss-ink text-white text-xs font-bold uppercase">WJEC</span>
+                    <span className="px-2 py-1 bg-swiss-ink text-white text-xs font-bold uppercase">CIE</span>
+                    <span className="px-2 py-1 bg-swiss-ink text-white text-xs font-bold uppercase">IB</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
         </>
+      )}
+
+      {mode === "iygb" && (
+        <IYGBBulkIngestor />
       )}
     </div>
   )

@@ -1,13 +1,21 @@
 /**
  * Word Document Exporter for Exam Builder
- * 
+ *
  * Exports exam questions to a .docx file using the docx library.
- * Handles all content types:
- *   - image_ocr: Scanned past paper images with optional OCR text
- *   - generated_text: AI-generated text-only questions
- *   - synthetic_image: AI-generated questions with diagrams (text + image)
- *   - official_past_paper: Official exam board questions
- * Converts LaTeX to readable Unicode math notation for Word.
+ * Matches the Pearson Edexcel GCSE Maths paper design system used in the
+ * on-screen / print preview (exam-paper-client.tsx).
+ *
+ * Layout decisions that mirror the print design:
+ *  - A4 page, 20 mm inner margins (left/right), 15 mm top, 15 mm bottom
+ *  - Each question is a 3-column table: [number col | content col | mark-box col]
+ *  - Mark box: 40×40 pt bordered cell, mark count in 9 pt gray, top of cell
+ *  - Working lines: N dotted-bottom paragraphs, count driven by mark value
+ *  - Answer line: heavier dotted border, right-aligned, 280 pt wide
+ *  - "(Total for Question N is X marks)" right-aligned after each answer line
+ *  - Thin gray separator between questions
+ *  - End-of-paper "TOTAL FOR PAPER IS X MARKS" banner
+ *  - Running footer: paper ref | page number | "Turn over ▶"
+ *  - Mark scheme on a separate section
  */
 
 import {
@@ -15,11 +23,18 @@ import {
   Packer,
   Paragraph,
   TextRun,
-  HeadingLevel,
   AlignmentType,
   BorderStyle,
   ImageRun,
-  PageBreak,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  Footer,
+  PageNumber,
+  VerticalAlign,
+  TableBorders,
+  convertMillimetersToTwip,
 } from "docx"
 import { saveAs } from "file-saver"
 
@@ -51,827 +66,758 @@ export interface ExportOptions {
   schoolName?: string
   examDate?: string
   timeAllowed?: string
-  preserveLatex?: boolean  // If true, keeps raw LaTeX; if false, converts to Unicode
+  preserveLatex?: boolean
 }
 
 // =====================================================
-// LaTeX to Unicode Conversion
+// Constants — mirror the print design token values
 // =====================================================
 
-/**
- * Unicode superscript and subscript maps
- */
+/** Arial font applied to every TextRun */
+const FONT = "Arial"
+/** Content column question text: 11 pt = 22 half-points */
+const SIZE_QUESTION = 22
+/** Question number: 12 pt = 24 half-points */
+const SIZE_Q_NUMBER = 24
+/** Mark total line: 10 pt = 20 half-points */
+const SIZE_MARK_TOTAL = 20
+/** Mark box digit: 9 pt = 18 half-points */
+const SIZE_MARK_BOX = 18
+/** General small text: 9 pt */
+const SIZE_SMALL = 18
+/** Working line height in twips: 24 px ≈ 18 pt = 360 twips */
+const WORKING_LINE_HEIGHT = 360
+/** Mark-box column width in twips: 40 pt × 20 = 800 twips */
+const MARK_BOX_COL = 800
+/** Question number column width in twips: 40 pt × 20 = 800 twips */
+const Q_NUM_COL = 800
+/** A4 width in twips: 11906 */
+const A4_WIDTH_TWIPS = 11906
+/** Inner margin (left + right): 20 mm each */
+const MARGIN_INNER = convertMillimetersToTwip(20)
+/** Top/bottom margin: 15 mm */
+const MARGIN_TOP = convertMillimetersToTwip(15)
+/** Footer height reserved */
+const MARGIN_FOOTER = convertMillimetersToTwip(15)
+/** Usable content width in twips */
+const CONTENT_WIDTH = A4_WIDTH_TWIPS - MARGIN_INNER * 2
+/** Content middle-column width */
+const CONTENT_COL = CONTENT_WIDTH - Q_NUM_COL - MARK_BOX_COL
+
+// =====================================================
+// LaTeX → Unicode conversion (unchanged from original)
+// =====================================================
+
 const superscriptMap: Record<string, string> = {
-  '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
-  '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
-  '+': '⁺', '-': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
-  'n': 'ⁿ', 'i': 'ⁱ', 'x': 'ˣ', 'y': 'ʸ',
+  "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+  "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+  "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+  n: "ⁿ", i: "ⁱ", x: "ˣ", y: "ʸ",
 }
 
 const subscriptMap: Record<string, string> = {
-  '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
-  '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
-  '+': '₊', '-': '₋', '=': '₌', '(': '₍', ')': '₎',
-  'a': 'ₐ', 'e': 'ₑ', 'o': 'ₒ', 'x': 'ₓ',
-  'i': 'ᵢ', 'j': 'ⱼ', 'n': 'ₙ', 'm': 'ₘ',
+  "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+  "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+  "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+  a: "ₐ", e: "ₑ", o: "ₒ", x: "ₓ",
+  i: "ᵢ", j: "ⱼ", n: "ₙ", m: "ₘ",
 }
 
-/**
- * Convert a string to superscript Unicode
- */
 function toSuperscript(str: string): string {
-  return str.split('').map(c => superscriptMap[c] || c).join('')
+  return str.split("").map((c) => superscriptMap[c] || c).join("")
 }
 
-/**
- * Convert a string to subscript Unicode
- */
 function toSubscript(str: string): string {
-  return str.split('').map(c => subscriptMap[c] || c).join('')
+  return str.split("").map((c) => subscriptMap[c] || c).join("")
 }
 
-/**
- * Convert LaTeX to readable Unicode math notation
- * Preserves readability while using proper mathematical symbols
- */
-function latexToUnicode(latex: string | null): string {
+export function latexToUnicode(latex: string | null): string {
   if (!latex) return ""
-  
+
   let text = latex
-  
-  // Remove display math delimiters first
-  text = text.replace(/\$\$/g, "")
-  text = text.replace(/\$/g, "")
-  text = text.replace(/\\\[/g, "")
-  text = text.replace(/\\\]/g, "")
-  text = text.replace(/\\\(/g, "")
-  text = text.replace(/\\\)/g, "")
-  
-  // Fractions: \frac{a}{b} → a/b or (a)/(b)
+
+  // Remove display math delimiters
+  text = text.replace(/\$\$/g, "").replace(/\$/g, "")
+  text = text.replace(/\\\[/g, "").replace(/\\\]/g, "")
+  text = text.replace(/\\\(/g, "").replace(/\\\)/g, "")
+
+  // Fractions
   text = text.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, (_, num, den) => {
-    const cleanNum = num.trim()
-    const cleanDen = den.trim()
-    // Simple fractions don't need parentheses
-    if (cleanNum.length <= 2 && cleanDen.length <= 2) {
-      return `${cleanNum}/${cleanDen}`
-    }
-    return `(${cleanNum})/(${cleanDen})`
+    const n = num.trim(), d = den.trim()
+    return n.length <= 2 && d.length <= 2 ? `${n}/${d}` : `(${n})/(${d})`
   })
-  
-  // Square roots: \sqrt{x} → √x or √(x)
-  text = text.replace(/\\sqrt\{([^{}]+)\}/g, (_, content) => {
-    const clean = content.trim()
-    if (clean.length <= 2) {
-      return `√${clean}`
-    }
-    return `√(${clean})`
+
+  // Square roots
+  text = text.replace(/\\sqrt\{([^{}]+)\}/g, (_, c) =>
+    c.trim().length <= 2 ? `√${c.trim()}` : `√(${c.trim()})`
+  )
+  text = text.replace(/\\sqrt\[(\d+)\]\{([^{}]+)\}/g, (_, n, c) =>
+    `${toSuperscript(n)}√(${c.trim()})`
+  )
+
+  // Superscripts / subscripts
+  text = text.replace(/\^(\d)/g, (_, d) => toSuperscript(d))
+  text = text.replace(/\^\{([^{}]+)\}/g, (_, e) => {
+    const cv = toSuperscript(e.trim())
+    return cv !== e.trim() ? cv : `^(${e.trim()})`
   })
-  
-  // Nth roots: \sqrt[n]{x} → ⁿ√x
-  text = text.replace(/\\sqrt\[(\d+)\]\{([^{}]+)\}/g, (_, n, content) => {
-    return `${toSuperscript(n)}√(${content.trim()})`
+  text = text.replace(/_(\d)/g, (_, d) => toSubscript(d))
+  text = text.replace(/_\{([^{}]+)\}/g, (_, s) => {
+    const cv = toSubscript(s.trim())
+    return cv !== s.trim() ? cv : `_(${s.trim()})`
   })
-  
-  // Superscripts: x^2 → x² or x^{ab} → x^(ab)
-  text = text.replace(/\^(\d)/g, (_, digit) => toSuperscript(digit))
-  text = text.replace(/\^\{([^{}]+)\}/g, (_, exp) => {
-    const clean = exp.trim()
-    // Try to convert to Unicode superscript
-    const converted = toSuperscript(clean)
-    if (converted !== clean) {
-      return converted
-    }
-    return `^(${clean})`
-  })
-  
-  // Subscripts: x_2 → x₂ or x_{ab} → x_(ab)
-  text = text.replace(/_(\d)/g, (_, digit) => toSubscript(digit))
-  text = text.replace(/_\{([^{}]+)\}/g, (_, sub) => {
-    const clean = sub.trim()
-    const converted = toSubscript(clean)
-    if (converted !== clean) {
-      return converted
-    }
-    return `_(${clean})`
-  })
-  
-  // Greek letters
-  text = text.replace(/\\alpha/g, "α")
-  text = text.replace(/\\beta/g, "β")
-  text = text.replace(/\\gamma/g, "γ")
-  text = text.replace(/\\delta/g, "δ")
-  text = text.replace(/\\epsilon/g, "ε")
-  text = text.replace(/\\zeta/g, "ζ")
-  text = text.replace(/\\eta/g, "η")
-  text = text.replace(/\\theta/g, "θ")
-  text = text.replace(/\\iota/g, "ι")
-  text = text.replace(/\\kappa/g, "κ")
-  text = text.replace(/\\lambda/g, "λ")
-  text = text.replace(/\\mu/g, "μ")
-  text = text.replace(/\\nu/g, "ν")
-  text = text.replace(/\\xi/g, "ξ")
-  text = text.replace(/\\pi/g, "π")
-  text = text.replace(/\\rho/g, "ρ")
-  text = text.replace(/\\sigma/g, "σ")
-  text = text.replace(/\\tau/g, "τ")
-  text = text.replace(/\\upsilon/g, "υ")
-  text = text.replace(/\\phi/g, "φ")
-  text = text.replace(/\\chi/g, "χ")
-  text = text.replace(/\\psi/g, "ψ")
-  text = text.replace(/\\omega/g, "ω")
-  
-  // Capital Greek
-  text = text.replace(/\\Gamma/g, "Γ")
-  text = text.replace(/\\Delta/g, "Δ")
-  text = text.replace(/\\Theta/g, "Θ")
-  text = text.replace(/\\Lambda/g, "Λ")
-  text = text.replace(/\\Xi/g, "Ξ")
-  text = text.replace(/\\Pi/g, "Π")
-  text = text.replace(/\\Sigma/g, "Σ")
-  text = text.replace(/\\Phi/g, "Φ")
-  text = text.replace(/\\Psi/g, "Ψ")
-  text = text.replace(/\\Omega/g, "Ω")
-  
-  // Mathematical operators
-  text = text.replace(/\\times/g, "×")
-  text = text.replace(/\\cdot/g, "·")
-  text = text.replace(/\\div/g, "÷")
-  text = text.replace(/\\pm/g, "±")
-  text = text.replace(/\\mp/g, "∓")
-  text = text.replace(/\\neq/g, "≠")
-  text = text.replace(/\\leq/g, "≤")
-  text = text.replace(/\\geq/g, "≥")
-  text = text.replace(/\\le/g, "≤")
-  text = text.replace(/\\ge/g, "≥")
-  text = text.replace(/\\approx/g, "≈")
-  text = text.replace(/\\equiv/g, "≡")
-  text = text.replace(/\\sim/g, "∼")
-  text = text.replace(/\\propto/g, "∝")
-  
-  // Set notation
-  text = text.replace(/\\in/g, "∈")
-  text = text.replace(/\\notin/g, "∉")
-  text = text.replace(/\\subset/g, "⊂")
-  text = text.replace(/\\supset/g, "⊃")
-  text = text.replace(/\\subseteq/g, "⊆")
-  text = text.replace(/\\supseteq/g, "⊇")
-  text = text.replace(/\\cup/g, "∪")
-  text = text.replace(/\\cap/g, "∩")
-  text = text.replace(/\\emptyset/g, "∅")
-  
-  // Logic
-  text = text.replace(/\\forall/g, "∀")
-  text = text.replace(/\\exists/g, "∃")
-  text = text.replace(/\\nexists/g, "∄")
-  text = text.replace(/\\land/g, "∧")
-  text = text.replace(/\\lor/g, "∨")
-  text = text.replace(/\\neg/g, "¬")
-  text = text.replace(/\\implies/g, "⇒")
-  text = text.replace(/\\iff/g, "⇔")
-  text = text.replace(/\\therefore/g, "∴")
-  text = text.replace(/\\because/g, "∵")
-  
-  // Arrows
-  text = text.replace(/\\rightarrow/g, "→")
-  text = text.replace(/\\leftarrow/g, "←")
-  text = text.replace(/\\leftrightarrow/g, "↔")
-  text = text.replace(/\\Rightarrow/g, "⇒")
-  text = text.replace(/\\Leftarrow/g, "⇐")
-  text = text.replace(/\\Leftrightarrow/g, "⇔")
-  text = text.replace(/\\to/g, "→")
-  
-  // Calculus
-  text = text.replace(/\\infty/g, "∞")
-  text = text.replace(/\\partial/g, "∂")
-  text = text.replace(/\\nabla/g, "∇")
-  text = text.replace(/\\int/g, "∫")
-  text = text.replace(/\\iint/g, "∬")
-  text = text.replace(/\\iiint/g, "∭")
-  text = text.replace(/\\oint/g, "∮")
-  text = text.replace(/\\sum/g, "Σ")
-  text = text.replace(/\\prod/g, "Π")
-  
-  // Special symbols
-  text = text.replace(/\\degree/g, "°")
-  text = text.replace(/\\circ/g, "°")
-  text = text.replace(/\\angle/g, "∠")
-  text = text.replace(/\\perp/g, "⊥")
-  text = text.replace(/\\parallel/g, "∥")
-  text = text.replace(/\\triangle/g, "△")
-  text = text.replace(/\\square/g, "□")
-  text = text.replace(/\\diamond/g, "◇")
-  
-  // Number sets (blackboard bold)
-  text = text.replace(/\\mathbb\{R\}/g, "ℝ")
-  text = text.replace(/\\mathbb\{N\}/g, "ℕ")
-  text = text.replace(/\\mathbb\{Z\}/g, "ℤ")
-  text = text.replace(/\\mathbb\{Q\}/g, "ℚ")
-  text = text.replace(/\\mathbb\{C\}/g, "ℂ")
-  text = text.replace(/\\R/g, "ℝ")
-  text = text.replace(/\\N/g, "ℕ")
-  text = text.replace(/\\Z/g, "ℤ")
-  
-  // Text formatting
+
+  // Greek
+  const greek: Record<string, string> = {
+    alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε",
+    zeta: "ζ", eta: "η", theta: "θ", iota: "ι", kappa: "κ",
+    lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π", rho: "ρ",
+    sigma: "σ", tau: "τ", upsilon: "υ", phi: "φ", chi: "χ",
+    psi: "ψ", omega: "ω", Gamma: "Γ", Delta: "Δ", Theta: "Θ",
+    Lambda: "Λ", Xi: "Ξ", Pi: "Π", Sigma: "Σ", Phi: "Φ",
+    Psi: "Ψ", Omega: "Ω",
+  }
+  for (const [cmd, sym] of Object.entries(greek)) {
+    text = text.replace(new RegExp(`\\\\${cmd}(?![a-zA-Z])`, "g"), sym)
+  }
+
+  // Operators and symbols
+  const symbols: Record<string, string> = {
+    times: "×", cdot: "·", div: "÷", pm: "±", mp: "∓",
+    neq: "≠", leq: "≤", geq: "≥", le: "≤", ge: "≥",
+    approx: "≈", equiv: "≡", sim: "∼", propto: "∝",
+    in: "∈", notin: "∉", subset: "⊂", supset: "⊃",
+    subseteq: "⊆", supseteq: "⊇", cup: "∪", cap: "∩", emptyset: "∅",
+    forall: "∀", exists: "∃", nexists: "∄", land: "∧", lor: "∨",
+    neg: "¬", implies: "⇒", iff: "⇔", therefore: "∴", because: "∵",
+    rightarrow: "→", leftarrow: "←", leftrightarrow: "↔",
+    Rightarrow: "⇒", Leftarrow: "⇐", Leftrightarrow: "⇔", to: "→",
+    infty: "∞", partial: "∂", nabla: "∇",
+    int: "∫", iint: "∬", iiint: "∭", oint: "∮",
+    sum: "Σ", prod: "Π",
+    degree: "°", circ: "°", angle: "∠", perp: "⊥",
+    parallel: "∥", triangle: "△", square: "□", diamond: "◇",
+  }
+  for (const [cmd, sym] of Object.entries(symbols)) {
+    text = text.replace(new RegExp(`\\\\${cmd}(?![a-zA-Z])`, "g"), sym)
+  }
+
+  // Blackboard bold
+  text = text.replace(/\\mathbb\{R\}/g, "ℝ").replace(/\\mathbb\{N\}/g, "ℕ")
+    .replace(/\\mathbb\{Z\}/g, "ℤ").replace(/\\mathbb\{Q\}/g, "ℚ")
+    .replace(/\\mathbb\{C\}/g, "ℂ")
+
+  // Text formatting wrappers
   text = text.replace(/\\textbf\{([^{}]+)\}/g, "$1")
-  text = text.replace(/\\textit\{([^{}]+)\}/g, "$1")
-  text = text.replace(/\\text\{([^{}]+)\}/g, "$1")
-  text = text.replace(/\\mathrm\{([^{}]+)\}/g, "$1")
-  
-  // Trigonometric functions (keep as-is but remove backslash)
-  text = text.replace(/\\sin/g, "sin")
-  text = text.replace(/\\cos/g, "cos")
-  text = text.replace(/\\tan/g, "tan")
-  text = text.replace(/\\cot/g, "cot")
-  text = text.replace(/\\sec/g, "sec")
-  text = text.replace(/\\csc/g, "csc")
-  text = text.replace(/\\arcsin/g, "arcsin")
-  text = text.replace(/\\arccos/g, "arccos")
-  text = text.replace(/\\arctan/g, "arctan")
-  text = text.replace(/\\sinh/g, "sinh")
-  text = text.replace(/\\cosh/g, "cosh")
-  text = text.replace(/\\tanh/g, "tanh")
-  text = text.replace(/\\log/g, "log")
-  text = text.replace(/\\ln/g, "ln")
-  text = text.replace(/\\exp/g, "exp")
-  text = text.replace(/\\lim/g, "lim")
-  text = text.replace(/\\max/g, "max")
-  text = text.replace(/\\min/g, "min")
-  
+    .replace(/\\textit\{([^{}]+)\}/g, "$1")
+    .replace(/\\text\{([^{}]+)\}/g, "$1")
+    .replace(/\\mathrm\{([^{}]+)\}/g, "$1")
+
+  // Trig / log functions
+  for (const fn of ["sin","cos","tan","cot","sec","csc","arcsin","arccos",
+    "arctan","sinh","cosh","tanh","log","ln","exp","lim","max","min"]) {
+    text = text.replace(new RegExp(`\\\\${fn}(?![a-zA-Z])`, "g"), fn)
+  }
+
   // Brackets
-  text = text.replace(/\\left\(/g, "(")
-  text = text.replace(/\\right\)/g, ")")
-  text = text.replace(/\\left\[/g, "[")
-  text = text.replace(/\\right\]/g, "]")
-  text = text.replace(/\\left\{/g, "{")
-  text = text.replace(/\\right\}/g, "}")
-  text = text.replace(/\\left\|/g, "|")
-  text = text.replace(/\\right\|/g, "|")
-  text = text.replace(/\\lfloor/g, "⌊")
-  text = text.replace(/\\rfloor/g, "⌋")
-  text = text.replace(/\\lceil/g, "⌈")
-  text = text.replace(/\\rceil/g, "⌉")
-  
-  // Spacing commands
-  text = text.replace(/\\quad/g, "  ")
-  text = text.replace(/\\qquad/g, "    ")
-  text = text.replace(/\\,/g, " ")
-  text = text.replace(/\\;/g, " ")
-  text = text.replace(/\\!/g, "")
-  text = text.replace(/\\ /g, " ")
-  text = text.replace(/\\newline/g, "\n")
-  text = text.replace(/\\\\/g, "\n")
-  
-  // Remove any remaining backslash commands
-  text = text.replace(/\\[a-zA-Z]+/g, "")
-  
-  // Clean up braces
-  text = text.replace(/\{|\}/g, "")
-  
-  // Normalize whitespace
-  text = text.replace(/\s+/g, " ").trim()
-  
-  return text
+  text = text.replace(/\\left\(/g, "(").replace(/\\right\)/g, ")")
+    .replace(/\\left\[/g, "[").replace(/\\right\]/g, "]")
+    .replace(/\\left\{/g, "{").replace(/\\right\}/g, "}")
+    .replace(/\\left\|/g, "|").replace(/\\right\|/g, "|")
+    .replace(/\\lfloor/g, "⌊").replace(/\\rfloor/g, "⌋")
+    .replace(/\\lceil/g, "⌈").replace(/\\rceil/g, "⌉")
+
+  // Spacing
+  text = text.replace(/\\quad/g, "  ").replace(/\\qquad/g, "    ")
+    .replace(/\\,/g, " ").replace(/\\;/g, " ").replace(/\\!/g, "")
+    .replace(/\\ /g, " ").replace(/\\newline/g, "\n").replace(/\\\\/g, "\n")
+
+  // Remove remaining backslash commands and braces
+  text = text.replace(/\\[a-zA-Z]+/g, "").replace(/[{}]/g, "")
+
+  return text.replace(/\s+/g, " ").trim()
 }
 
-/**
- * Legacy function for backward compatibility
- */
-function cleanLatexForText(latex: string | null): string {
+/** @deprecated Use latexToUnicode */
+export function cleanLatexForText(latex: string | null): string {
   return latexToUnicode(latex)
 }
 
 // =====================================================
-// Helper Functions
+// Helpers
 // =====================================================
 
-/**
- * Fetch image from URL and convert to buffer
- */
 async function fetchImageAsBuffer(url: string): Promise<ArrayBuffer | null> {
   try {
-    const response = await fetch(url)
-    if (!response.ok) {
-      console.error(`Failed to fetch image: ${response.status}`)
-      return null
-    }
-    return await response.arrayBuffer()
-  } catch (error) {
-    console.error("Error fetching image:", error)
+    const res = await fetch(url, { cache: "no-store" })
+    if (!res.ok) { console.error(`Failed to fetch image: ${res.status} ${url}`); return null }
+    return await res.arrayBuffer()
+  } catch (e) {
+    console.error("Error fetching image:", e)
     return null
   }
 }
 
-/**
- * Create a styled header paragraph
- */
-function createHeader(text: string, level: typeof HeadingLevel[keyof typeof HeadingLevel] = HeadingLevel.HEADING_1) {
-  return new Paragraph({
-    text,
-    heading: level,
-    alignment: AlignmentType.CENTER,
-    spacing: { after: 200 },
-  })
+/** Returns true if the URL points to an SVG file. */
+function isSvgUrl(url: string): boolean {
+  return url.toLowerCase().split("?")[0].endsWith(".svg")
+}
+
+/** Returns the raster ImageRun type based on URL extension. */
+function rasterImageType(url: string): "png" | "jpg" | "gif" {
+  const lower = url.toLowerCase().split("?")[0]
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "jpg"
+  if (lower.endsWith(".gif")) return "gif"
+  return "png"
 }
 
 /**
- * Create a question number paragraph
+ * Embeds an image from URL into the paragraph list.
+ * SVG images are skipped with a note — docx SVG embedding requires a pre-rendered
+ * PNG fallback which is not available server-side without a canvas library.
  */
-function createQuestionNumber(num: number, marks: number | null) {
-  const marksText = marks ? ` [${marks} mark${marks !== 1 ? "s" : ""}]` : ""
+async function embedImage(
+  url: string,
+  width: number,
+  height: number,
+  paragraphs: Paragraph[],
+  fallbackText: string,
+): Promise<void> {
+  // SVG cannot be directly embedded without a raster fallback in docx format
+  if (isSvgUrl(url)) {
+    paragraphs.push(new Paragraph({
+      children: [new TextRun({ text: "[Diagram — see on-screen version for full display]", italics: true, color: "888888", font: { name: FONT }, size: SIZE_SMALL })],
+    }))
+    return
+  }
+
+  const buf = await fetchImageAsBuffer(url)
+  if (!buf) {
+    paragraphs.push(new Paragraph({
+      children: [new TextRun({ text: fallbackText, italics: true, color: "888888", font: { name: FONT }, size: SIZE_SMALL })],
+    }))
+    return
+  }
+  try {
+    paragraphs.push(new Paragraph({
+      spacing: { before: 120, after: 120 },
+      children: [new ImageRun({ data: buf, transformation: { width, height }, type: rasterImageType(url) })],
+    }))
+  } catch {
+    paragraphs.push(new Paragraph({
+      children: [new TextRun({ text: fallbackText, italics: true, color: "888888", font: { name: FONT }, size: SIZE_SMALL })],
+    }))
+  }
+}
+
+/** Working-line count driven by mark value — matches print design */
+function workingLineCount(marks: number | null): number {
+  const m = marks ?? 2
+  if (m <= 1) return 3
+  if (m <= 2) return 5
+  if (m <= 3) return 7
+  if (m <= 4) return 9
+  if (m <= 6) return 12
+  return 15
+}
+
+/** Single dotted-border working line paragraph */
+function workingLine(): Paragraph {
   return new Paragraph({
+    text: "",
+    spacing: { before: 0, after: 0, line: WORKING_LINE_HEIGHT, lineRule: "exact" },
+    border: {
+      bottom: { style: BorderStyle.DOTTED, size: 2, color: "CCCCCC", space: 0 },
+    },
+  })
+}
+
+/** Heavier final answer line — right-aligned, 280 pt wide */
+function answerLine(): Paragraph {
+  return new Paragraph({
+    alignment: AlignmentType.RIGHT,
+    spacing: { before: 120, after: 120 },
     children: [
       new TextRun({
-        text: `Question ${num}`,
-        bold: true,
-        size: 24, // 12pt
-      }),
-      new TextRun({
-        text: marksText,
-        bold: true,
-        size: 20, // 10pt
+        text: "\u00A0".repeat(45), // ~280pt wide with Arial 11pt
+        font: { name: FONT },
+        size: SIZE_QUESTION,
+        underline: { type: "dotted", color: "000000" },
       }),
     ],
-    spacing: { before: 400, after: 200 },
+  })
+}
+
+/** "(Total for Question N is X marks)" right-aligned line */
+function markTotalLine(questionNum: number, marks: number | null): Paragraph {
+  const m = marks ?? 0
+  const label = `(Total for Question ${questionNum} is ${m} ${m === 1 ? "mark" : "marks"})`
+  return new Paragraph({
+    alignment: AlignmentType.RIGHT,
+    spacing: { before: 60, after: 120 },
+    children: [
+      new TextRun({
+        text: label,
+        bold: true,
+        font: { name: FONT },
+        size: SIZE_MARK_TOTAL,
+      }),
+    ],
+  })
+}
+
+/** Thin gray separator between questions */
+function questionSeparator(): Paragraph {
+  return new Paragraph({
+    text: "",
+    spacing: { before: 120, after: 240 },
     border: {
-      bottom: {
-        color: "000000",
-        space: 1,
-        style: BorderStyle.SINGLE,
-        size: 6,
-      },
+      bottom: { style: BorderStyle.SINGLE, size: 4, color: "D1D5DB", space: 0 },
     },
   })
 }
 
 /**
- * Create paragraphs for question content (handles multi-line and math)
+ * Build the content-column paragraphs for one question
+ * (question text + optional diagram + working lines + answer line + mark total)
  */
-function createQuestionContent(latex: string | null, preserveLatex: boolean = false): Paragraph[] {
-  const text = preserveLatex ? (latex || "") : latexToUnicode(latex)
-  
-  // Split by newlines to create multiple paragraphs
-  const lines = text.split('\n').filter(line => line.trim())
-  
-  return lines.map(line => new Paragraph({
-    children: [
-      new TextRun({
-        text: line.trim(),
-        size: 22, // 11pt
-      }),
-    ],
-    spacing: { after: 120 },
-  }))
-}
-
-/**
- * Create a single text paragraph
- */
-function createQuestionText(text: string): Paragraph {
-  return new Paragraph({
-    children: [
-      new TextRun({
-        text,
-        size: 22, // 11pt
-      }),
-    ],
-    spacing: { after: 200 },
-  })
-}
-
-/**
- * Create metadata paragraph (topic, difficulty, calculator)
- * Only shown in mark scheme / teacher editions, NOT on student exam papers
- */
-function createMetadata(question: ExamQuestion, forTeacher: boolean = false) {
-  if (!forTeacher) {
-    // On student exam paper: no metadata shown (matches Edexcel style)
-    return new Paragraph({ text: "", spacing: { after: 100 } })
-  }
-
-  const parts = []
-  
-  if (question.topic_name || question.topic) {
-    parts.push(`Topic: ${question.topic_name || question.topic}`)
-  }
-  if (question.sub_topic_name) {
-    parts.push(`Sub-topic: ${question.sub_topic_name}`)
-  }
-  parts.push(`Tier: ${question.difficulty}`)
-  parts.push(`Calculator: ${question.calculator_allowed ? "Allowed" : "Not Allowed"}`)
-  
-  return new Paragraph({
-    children: [
-      new TextRun({
-        text: parts.join(" • "),
-        size: 18, // 9pt
-        italics: true,
-        color: "666666",
-      }),
-    ],
-    spacing: { after: 300 },
-  })
-}
-
-/**
- * Create answer/mark scheme section with proper Unicode math
- */
-function createAnswerSection(question: ExamQuestion, preserveLatex: boolean = false): Paragraph[] {
+async function buildContentColumn(
+  question: ExamQuestion,
+  questionNum: number,
+  preserveLatex: boolean,
+): Promise<Paragraph[]> {
   const paragraphs: Paragraph[] = []
-  
-  if (question.answer_key?.answer) {
-    const answerText = preserveLatex 
-      ? question.answer_key.answer 
-      : latexToUnicode(question.answer_key.answer)
-    
+
+  // — Question text —
+  const raw = preserveLatex ? (question.question_latex ?? "") : latexToUnicode(question.question_latex)
+  const lines = raw.split("\n").filter((l) => l.trim())
+
+  for (const line of lines) {
     paragraphs.push(
       new Paragraph({
+        spacing: { after: 80 },
         children: [
-          new TextRun({
-            text: "Answer: ",
-            bold: true,
-            size: 20,
-          }),
-          new TextRun({
-            text: answerText,
-            size: 20,
-          }),
+          new TextRun({ text: line.trim(), font: { name: FONT }, size: SIZE_QUESTION }),
         ],
-        spacing: { before: 200 },
       })
     )
   }
-  
-  if (question.answer_key?.explanation) {
-    const explanationText = preserveLatex 
-      ? question.answer_key.explanation 
-      : latexToUnicode(question.answer_key.explanation)
-    
-    paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: "Explanation: ",
-            bold: true,
-            size: 20,
-          }),
-          new TextRun({
-            text: explanationText,
-            size: 20,
-          }),
-        ],
-        spacing: { before: 100 },
-      })
-    )
+
+  // — Diagram image (all content types that have an image_url) —
+  if (question.image_url) {
+    if (
+      question.content_type === "synthetic_image" ||
+      question.content_type === "generated_text"
+    ) {
+      // Generated diagram (SVG or PNG) — shown at 220×220 to match print preview
+      await embedImage(question.image_url, 220, 220, paragraphs, "[Diagram could not be embedded]")
+    } else if (
+      question.content_type === "image_ocr" ||
+      question.content_type === "official_past_paper"
+    ) {
+      // Full question image from a scanned/uploaded paper — wider display
+      await embedImage(question.image_url, 380, 280, paragraphs, "[Image could not be embedded]")
+    }
   }
-  
-  if (question.answer_key?.mark_scheme) {
-    paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: "Mark Scheme: ",
-            bold: true,
-            size: 20,
-          }),
-          new TextRun({
-            text: question.answer_key.mark_scheme,
-            size: 20,
-          }),
-        ],
-        spacing: { before: 100 },
-      })
-    )
+
+  // — Working lines —
+  const lineCount = workingLineCount(question.marks)
+  for (let i = 0; i < lineCount; i++) {
+    paragraphs.push(workingLine())
   }
-  
+
+  // — Answer line —
+  paragraphs.push(answerLine())
+
+  // — Mark total —
+  paragraphs.push(markTotalLine(questionNum, question.marks))
+
   return paragraphs
 }
 
-// =====================================================
-// Main Export Function
-// =====================================================
+/** Mark box cell: 40×40 pt bordered box with mark count in 9 pt gray */
+function markBoxCell(marks: number | null): TableCell {
+  return new TableCell({
+    width: { size: MARK_BOX_COL, type: WidthType.DXA },
+    verticalAlign: VerticalAlign.TOP,
+    borders: {
+      top: { style: BorderStyle.NONE },
+      bottom: { style: BorderStyle.NONE },
+      left: { style: BorderStyle.NONE },
+      right: { style: BorderStyle.NONE },
+    },
+    children: [
+      new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        spacing: { before: 0, after: 0 },
+        children: [
+          new TextRun({
+            text: `${marks ?? ""}`,
+            font: { name: FONT },
+            size: SIZE_MARK_BOX,
+            color: "9CA3AF", // gray-400
+          }),
+        ],
+        border: {
+          top: { style: BorderStyle.SINGLE, size: 8, color: "000000", space: 0 },
+          bottom: { style: BorderStyle.SINGLE, size: 8, color: "000000", space: 0 },
+          left: { style: BorderStyle.SINGLE, size: 8, color: "000000", space: 0 },
+          right: { style: BorderStyle.SINGLE, size: 8, color: "000000", space: 0 },
+        },
+      }),
+    ],
+  })
+}
 
 /**
- * Exports an array of questions to a Word document
- * 
- * @param questions - Array of exam questions to export
- * @param title - Title of the exam
- * @param options - Export options (mark scheme, answers, metadata)
+ * Build one question as a 3-column table row:
+ * [question number | question content | mark box]
  */
+async function buildQuestionTable(
+  question: ExamQuestion,
+  questionNum: number,
+  preserveLatex: boolean,
+): Promise<Table> {
+  const contentParagraphs = await buildContentColumn(question, questionNum, preserveLatex)
+
+  return new Table({
+    width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+    borders: TableBorders.NONE,
+    rows: [
+      new TableRow({
+        children: [
+          // Col 1: Question number
+          new TableCell({
+            width: { size: Q_NUM_COL, type: WidthType.DXA },
+            verticalAlign: VerticalAlign.TOP,
+            borders: {
+              top: { style: BorderStyle.NONE },
+              bottom: { style: BorderStyle.NONE },
+              left: { style: BorderStyle.NONE },
+              right: { style: BorderStyle.NONE },
+            },
+            children: [
+              new Paragraph({
+                spacing: { before: 0, after: 0 },
+                children: [
+                  new TextRun({
+                    text: String(questionNum),
+                    bold: true,
+                    font: { name: FONT },
+                    size: SIZE_Q_NUMBER,
+                  }),
+                ],
+              }),
+            ],
+          }),
+
+          // Col 2: Question content
+          new TableCell({
+            width: { size: CONTENT_COL, type: WidthType.DXA },
+            verticalAlign: VerticalAlign.TOP,
+            borders: {
+              top: { style: BorderStyle.NONE },
+              bottom: { style: BorderStyle.NONE },
+              left: { style: BorderStyle.NONE },
+              right: { style: BorderStyle.NONE },
+            },
+            children: contentParagraphs,
+          }),
+
+          // Col 3: Mark box
+          markBoxCell(question.marks),
+        ],
+      }),
+    ],
+  })
+}
+
+// =====================================================
+// Document-level structural blocks
+// =====================================================
+
+function examHeader(title: string, totalMarks: number, examDate: string, paperRef: string): Paragraph[] {
+  return [
+    // Subject title
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 0, after: 120 },
+      children: [
+        new TextRun({ text: "Mathematics", bold: true, font: { name: FONT }, size: 72 }), // 36pt
+      ],
+    }),
+    // Exam title
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 0, after: 120 },
+      children: [
+        new TextRun({ text: title, bold: true, font: { name: FONT }, size: 32 }), // 16pt
+      ],
+    }),
+    // Date + paper ref on the same line (split by tab)
+    new Paragraph({
+      alignment: AlignmentType.LEFT,
+      spacing: { before: 0, after: 200 },
+      border: {
+        bottom: { style: BorderStyle.SINGLE, size: 6, color: "D1D5DB", space: 0 },
+      },
+      children: [
+        new TextRun({ text: examDate, font: { name: FONT }, size: SIZE_QUESTION, color: "374151" }),
+        new TextRun({ text: "     Paper Reference: ", font: { name: FONT }, size: SIZE_QUESTION, color: "374151" }),
+        new TextRun({ text: paperRef, bold: true, font: { name: FONT }, size: SIZE_QUESTION }),
+        new TextRun({ text: `     Total Marks: ${totalMarks}`, bold: true, font: { name: FONT }, size: SIZE_QUESTION }),
+      ],
+    }),
+    // Instructions line
+    new Paragraph({
+      alignment: AlignmentType.LEFT,
+      spacing: { before: 120, after: 240 },
+      border: {
+        bottom: { style: BorderStyle.SINGLE, size: 6, color: "D1D5DB", space: 0 },
+      },
+      children: [
+        new TextRun({ text: "Answer ALL questions.  ", bold: true, font: { name: FONT }, size: SIZE_QUESTION }),
+        new TextRun({ text: "Write your answers in the spaces provided.  ", font: { name: FONT }, size: SIZE_QUESTION }),
+        new TextRun({ text: "You must write down all the stages in your working.", bold: true, font: { name: FONT }, size: SIZE_QUESTION }),
+      ],
+    }),
+  ]
+}
+
+function endOfPaperBanner(totalMarks: number): Paragraph {
+  return new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 400, after: 200 },
+    border: {
+      top: { style: BorderStyle.THICK, size: 12, color: "000000", space: 0 },
+    },
+    children: [
+      new TextRun({
+        text: `TOTAL FOR PAPER IS ${totalMarks} MARKS`,
+        bold: true,
+        font: { name: FONT },
+        size: SIZE_Q_NUMBER,
+      }),
+    ],
+  })
+}
+
+function markSchemeHeader(): Paragraph {
+  return new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 0, after: 300 },
+    children: [
+      new TextRun({ text: "Mark Scheme / Answers", bold: true, font: { name: FONT }, size: 32 }),
+    ],
+    border: {
+      bottom: { style: BorderStyle.SINGLE, size: 6, color: "000000", space: 0 },
+    },
+  })
+}
+
+function markSchemeEntry(question: ExamQuestion, questionNum: number, preserveLatex: boolean): Paragraph[] {
+  const paragraphs: Paragraph[] = []
+
+  // Question heading
+  const m = question.marks ?? 0
+  paragraphs.push(
+    new Paragraph({
+      spacing: { before: 300, after: 100 },
+      children: [
+        new TextRun({ text: `Question ${questionNum}`, bold: true, font: { name: FONT }, size: SIZE_QUESTION }),
+        new TextRun({ text: `  (${m} ${m === 1 ? "mark" : "marks"})`, font: { name: FONT }, size: SIZE_MARK_TOTAL, color: "6B7280" }),
+      ],
+    })
+  )
+
+  const ak = question.answer_key
+  if (!ak?.answer && !ak?.explanation && !ak?.mark_scheme) {
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: "[No mark scheme available]", italics: true, color: "9CA3AF", font: { name: FONT }, size: SIZE_MARK_TOTAL }),
+        ],
+      })
+    )
+    return paragraphs
+  }
+
+  const convert = (s: string) => preserveLatex ? s : latexToUnicode(s)
+
+  if (ak?.answer) {
+    paragraphs.push(
+      new Paragraph({
+        spacing: { before: 80, after: 60 },
+        children: [
+          new TextRun({ text: "Answer:  ", bold: true, font: { name: FONT }, size: SIZE_MARK_TOTAL }),
+          new TextRun({ text: convert(ak.answer), font: { name: FONT }, size: SIZE_MARK_TOTAL }),
+        ],
+      })
+    )
+  }
+  if (ak?.explanation) {
+    paragraphs.push(
+      new Paragraph({
+        spacing: { before: 60, after: 60 },
+        children: [
+          new TextRun({ text: "Explanation:  ", bold: true, font: { name: FONT }, size: SIZE_MARK_TOTAL }),
+          new TextRun({ text: convert(ak.explanation), font: { name: FONT }, size: SIZE_MARK_TOTAL }),
+        ],
+      })
+    )
+  }
+  if (ak?.mark_scheme) {
+    paragraphs.push(
+      new Paragraph({
+        spacing: { before: 60, after: 60 },
+        children: [
+          new TextRun({ text: "Mark Scheme:  ", bold: true, font: { name: FONT }, size: SIZE_MARK_TOTAL }),
+          new TextRun({ text: convert(ak.mark_scheme), font: { name: FONT }, size: SIZE_MARK_TOTAL }),
+        ],
+      })
+    )
+  }
+
+  return paragraphs
+}
+
+/** Generate a short paper reference from the title */
+function generatePaperRef(title: string): string {
+  const hash = title.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase()
+  return `P${hash}A`
+}
+
+// =====================================================
+// Main export function
+// =====================================================
+
 export async function exportExamToWord(
   questions: ExamQuestion[],
   title: string,
-  options: ExportOptions = {}
+  options: ExportOptions = {},
 ): Promise<void> {
   const {
     includeMarkScheme = false,
     includeAnswers = false,
-    schoolName = "",
     examDate = new Date().toLocaleDateString("en-GB"),
-    timeAllowed = "",
     preserveLatex = false,
   } = options
 
-  // Calculate total marks
-  const totalMarks = questions.reduce((sum, q) => sum + (q.marks || 0), 0)
+  const totalMarks = questions.reduce((sum, q) => sum + (q.marks ?? 0), 0)
+  const paperRef = generatePaperRef(title)
 
-  // Build document sections
-  const docChildren: Paragraph[] = []
+  // ---- Build exam paper section children ----
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const examChildren: any[] = []
 
-  // Title page / Header
-  docChildren.push(createHeader(title, HeadingLevel.HEADING_1))
-  
-  if (schoolName) {
-    docChildren.push(
-      new Paragraph({
-        children: [new TextRun({ text: schoolName, size: 24 })],
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 100 },
-      })
-    )
-  }
+  // Header block
+  examChildren.push(...examHeader(title, totalMarks, examDate, paperRef))
 
-  // Exam info table
-  const infoItems: string[] = []
-  infoItems.push(`Date: ${examDate}`)
-  infoItems.push(`Total Questions: ${questions.length}`)
-  infoItems.push(`Total Marks: ${totalMarks}`)
-  if (timeAllowed) {
-    infoItems.push(`Time Allowed: ${timeAllowed}`)
-  }
-
-  docChildren.push(
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: infoItems.join("  |  "),
-          size: 20,
-        }),
-      ],
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 400 },
-      border: {
-        top: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC" },
-        bottom: { style: BorderStyle.SINGLE, size: 6, color: "CCCCCC" },
-      },
-    })
-  )
-
-  // Instructions
-  docChildren.push(
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: "Instructions: Answer ALL questions. Show your working where appropriate.",
-          size: 20,
-          italics: true,
-        }),
-      ],
-      spacing: { before: 200, after: 400 },
-    })
-  )
-
-  // Process each question
+  // Questions
   for (let i = 0; i < questions.length; i++) {
-    const question = questions[i]
-    const questionNum = i + 1
+    const q = questions[i]
+    const num = i + 1
 
-    // Question number and marks
-    docChildren.push(createQuestionNumber(questionNum, question.marks))
+    // 3-column question table
+    const qTable = await buildQuestionTable(q, num, preserveLatex)
+    examChildren.push(qTable)
 
-    // Question content based on type
-    if (question.content_type === "synthetic_image") {
-      // For synthetic_image: render text FIRST, then the diagram image below
-      if (question.question_latex) {
-        const contentParagraphs = createQuestionContent(question.question_latex, preserveLatex)
-        docChildren.push(...contentParagraphs)
-      }
-      
-      // Then render the diagram image
-      if (question.image_url) {
-        const imageBuffer = await fetchImageAsBuffer(question.image_url)
-        if (imageBuffer) {
-          try {
-            docChildren.push(
-              new Paragraph({
-                children: [
-                  new ImageRun({
-                    data: imageBuffer,
-                    transformation: {
-                      width: 350,
-                      height: 280,
-                    },
-                    type: "png",
-                  }),
-                ],
-                alignment: AlignmentType.CENTER,
-                spacing: { before: 200, after: 200 },
-              })
-            )
-          } catch (imgError) {
-            console.error("Error adding diagram to document:", imgError)
-            docChildren.push(
-              createQuestionText(`[Diagram: ${question.image_url}]`)
-            )
-          }
-        } else {
-          docChildren.push(
-            createQuestionText(`[Diagram could not be loaded: ${question.image_url}]`)
-          )
-        }
-      }
-    } else if (question.content_type === "image_ocr" || question.content_type === "official_past_paper") {
-      // For image_ocr and official_past_paper: show image first, then optional text
-      if (question.image_url) {
-        const imageBuffer = await fetchImageAsBuffer(question.image_url)
-        
-        if (imageBuffer) {
-          try {
-            docChildren.push(
-              new Paragraph({
-                children: [
-                  new ImageRun({
-                    data: imageBuffer,
-                    transformation: {
-                      width: 400,
-                      height: 300,
-                    },
-                    type: "png",
-                  }),
-                ],
-                spacing: { after: 200 },
-              })
-            )
-          } catch (imgError) {
-            console.error("Error adding image to document:", imgError)
-            docChildren.push(
-              createQuestionText(`[Image: ${question.image_url}]`)
-            )
-          }
-        } else {
-          docChildren.push(
-            createQuestionText(`[Image could not be loaded: ${question.image_url}]`)
-          )
-        }
-      }
-      
-      // Also include LaTeX text if available
-      if (question.question_latex) {
-        const contentParagraphs = createQuestionContent(question.question_latex, preserveLatex)
-        docChildren.push(...contentParagraphs)
-      }
-    } else if (question.question_latex) {
-      // generated_text: Render LaTeX content only
-      const contentParagraphs = createQuestionContent(question.question_latex, preserveLatex)
-      docChildren.push(...contentParagraphs)
-    } else {
-      docChildren.push(
-        createQuestionText("[Question content not available]")
-      )
-    }
-
-    // Metadata line - omitted on student exam paper (Edexcel style)
-    docChildren.push(createMetadata(question, false))
-
-    // Answer space (blank lines for student answers)
-    if (!includeAnswers && !includeMarkScheme) {
-      docChildren.push(
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: "Answer:",
-              bold: true,
-              size: 20,
-            }),
-          ],
-          spacing: { before: 200 },
-        })
-      )
-      // Add blank lines for answer space
-      for (let j = 0; j < 4; j++) {
-        docChildren.push(
-          new Paragraph({
-            text: "",
-            spacing: { after: 200 },
-            border: {
-              bottom: { style: BorderStyle.DOTTED, size: 1, color: "CCCCCC" },
-            },
-          })
-        )
-      }
+    // Separator between questions (not after the last one)
+    if (i < questions.length - 1) {
+      examChildren.push(questionSeparator())
     }
   }
 
-  // Mark Scheme Section (separate page)
+  // End-of-paper banner
+  examChildren.push(endOfPaperBanner(totalMarks))
+
+  // ---- Build mark scheme section children (if requested) ----
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markSchemeChildren: any[] = []
+
   if (includeMarkScheme || includeAnswers) {
-    docChildren.push(
-      new Paragraph({
-        children: [new PageBreak()],
-      })
-    )
-
-    docChildren.push(
-      createHeader("Mark Scheme / Answers", HeadingLevel.HEADING_1)
-    )
-
+    markSchemeChildren.push(markSchemeHeader())
     for (let i = 0; i < questions.length; i++) {
-      const question = questions[i]
-      const questionNum = i + 1
-
-      docChildren.push(
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: `Question ${questionNum}`,
-              bold: true,
-              size: 22,
-            }),
-            new TextRun({
-              text: question.marks ? ` (${question.marks} marks)` : "",
-              size: 20,
-            }),
-          ],
-          spacing: { before: 300, after: 100 },
-        })
-      )
-
-      const answerParagraphs = createAnswerSection(question, preserveLatex)
-      docChildren.push(...answerParagraphs)
-
-      if (answerParagraphs.length === 0) {
-        docChildren.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: "[No mark scheme available]",
-                italics: true,
-                color: "666666",
-                size: 20,
-              }),
-            ],
-          })
-        )
-      }
+      markSchemeChildren.push(...markSchemeEntry(questions[i], i + 1, preserveLatex))
     }
   }
 
-  // Create document
-  const doc = new Document({
-    sections: [
-      {
-        properties: {
-          page: {
-            margin: {
-              top: 1440, // 1 inch
-              right: 1440,
-              bottom: 1440,
-              left: 1440,
-            },
-          },
+  // ---- Running footer: paper ref | page number | "Turn over ▶" ----
+  const examFooter = new Footer({
+    children: [
+      new Paragraph({
+        alignment: AlignmentType.LEFT,
+        border: {
+          top: { style: BorderStyle.SINGLE, size: 4, color: "E5E7EB", space: 0 },
         },
-        children: docChildren,
-      },
+        children: [
+          new TextRun({ text: `${paperRef} © ${new Date().getFullYear()}     `, font: { name: FONT }, size: SIZE_SMALL, color: "9CA3AF" }),
+          new TextRun({ children: [PageNumber.CURRENT], font: { name: FONT }, size: SIZE_SMALL, color: "9CA3AF" }),
+          new TextRun({ text: "     Turn over ▶", font: { name: FONT }, size: SIZE_SMALL, color: "9CA3AF", italics: true }),
+        ],
+      }),
     ],
   })
 
-  // Generate and download
+  // ---- Assemble document ----
+  const sections = [
+    {
+      properties: {
+        page: {
+          size: { width: A4_WIDTH_TWIPS, height: 16838 }, // A4 in twips
+          margin: {
+            top: MARGIN_TOP,
+            bottom: MARGIN_FOOTER,
+            left: MARGIN_INNER,
+            right: MARGIN_INNER,
+          },
+        },
+      },
+      footers: { default: examFooter },
+      children: examChildren,
+    },
+  ]
+
+  if (markSchemeChildren.length > 0) {
+    sections.push({
+      properties: {
+        page: {
+          size: { width: A4_WIDTH_TWIPS, height: 16838 },
+          margin: {
+            top: MARGIN_TOP,
+            bottom: MARGIN_FOOTER,
+            left: MARGIN_INNER,
+            right: MARGIN_INNER,
+          },
+        },
+      },
+      footers: { default: examFooter },
+      children: markSchemeChildren,
+    })
+  }
+
+  const doc = new Document({ sections })
   const blob = await Packer.toBlob(doc)
   const fileName = `${title.replace(/[^a-zA-Z0-9]/g, "_")}_${new Date().toISOString().split("T")[0]}.docx`
   saveAs(blob, fileName)
 }
 
-/**
- * Quick export for basic exam (no mark scheme)
- */
-export async function exportExamQuick(
-  questions: ExamQuestion[],
-  title: string
-): Promise<void> {
-  return exportExamToWord(questions, title, {
-    includeMarkScheme: false,
-    includeAnswers: false,
-  })
+// =====================================================
+// Convenience wrappers (public API unchanged)
+// =====================================================
+
+export async function exportExamQuick(questions: ExamQuestion[], title: string): Promise<void> {
+  return exportExamToWord(questions, title, { includeMarkScheme: false, includeAnswers: false })
 }
 
-/**
- * Export with full mark scheme
- */
-export async function exportExamWithMarkScheme(
-  questions: ExamQuestion[],
-  title: string
-): Promise<void> {
-  return exportExamToWord(questions, title, {
-    includeMarkScheme: true,
-    includeAnswers: true,
-  })
+export async function exportExamWithMarkScheme(questions: ExamQuestion[], title: string): Promise<void> {
+  return exportExamToWord(questions, title, { includeMarkScheme: true, includeAnswers: true })
 }
 
-/**
- * Export preserving raw LaTeX (for teachers who want to edit in Word)
- */
 export async function exportExamWithRawLatex(
   questions: ExamQuestion[],
   title: string,
-  includeMarkScheme: boolean = false
+  includeMarkScheme: boolean = false,
 ): Promise<void> {
   return exportExamToWord(questions, title, {
     includeMarkScheme,
@@ -879,6 +825,3 @@ export async function exportExamWithRawLatex(
     preserveLatex: true,
   })
 }
-
-// Export the conversion function for use elsewhere
-export { latexToUnicode, cleanLatexForText }

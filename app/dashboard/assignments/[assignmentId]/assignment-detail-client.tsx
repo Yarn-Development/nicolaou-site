@@ -1,11 +1,13 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, FileText, CheckCircle, ClipboardList, Calendar, Users, Hash, Calculator, Ban, Printer } from "lucide-react"
+import { ArrowLeft, FileText, CheckCircle, ClipboardList, Calendar, Users, Hash, Calculator, Ban, Printer, Send, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import type { AssignmentDetails } from "@/app/actions/assignments"
+import { publishAssignment, updateAssignment } from "@/app/actions/assignments"
 import "katex/dist/katex.min.css"
 import { InlineMath } from "react-katex"
 
@@ -35,10 +37,24 @@ function renderLatex(text: string) {
 
 export function AssignmentDetailClient({ assignment }: AssignmentDetailClientProps) {
   const router = useRouter()
+  const [status, setStatus] = useState(assignment.status)
+  const [publishing, setPublishing] = useState(false)
 
   const statusColors: Record<string, string> = {
     draft: "bg-amber-100 text-amber-800 border-amber-300",
     published: "bg-green-100 text-green-800 border-green-300",
+  }
+
+  const handlePublishToggle = async () => {
+    setPublishing(true)
+    if (status === "published") {
+      await updateAssignment(assignment.id, { status: "draft" })
+      setStatus("draft")
+    } else {
+      await publishAssignment(assignment.id)
+      setStatus("published")
+    }
+    setPublishing(false)
   }
 
   return (
@@ -65,9 +81,28 @@ export function AssignmentDetailClient({ assignment }: AssignmentDetailClientPro
                 </p>
               </div>
             </div>
-            <Badge className={`${statusColors[assignment.status]} uppercase font-bold text-xs tracking-wider`}>
-              {assignment.status}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge className={`${statusColors[status]} uppercase font-bold text-xs tracking-wider`}>
+                {status}
+              </Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handlePublishToggle}
+                disabled={publishing}
+                className={`border-2 font-bold uppercase text-xs tracking-wider ${
+                  status === "published"
+                    ? "border-amber-600 text-amber-700 hover:bg-amber-50"
+                    : "border-green-600 text-green-700 hover:bg-green-50"
+                }`}
+              >
+                {publishing ? "..." : status === "published" ? (
+                  <><EyeOff className="h-3 w-3 mr-1" />Unpublish</>
+                ) : (
+                  <><Send className="h-3 w-3 mr-1" />Publish</>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

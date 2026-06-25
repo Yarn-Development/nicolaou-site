@@ -1,6 +1,8 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
+import { fetchQuery, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
+import type { Id } from "@/convex/_generated/dataModel"
 
 // =====================================================
 // Types
@@ -40,8 +42,15 @@ export interface AnalyticsData {
 }
 
 // =====================================================
-// Helper Functions
+// Helpers
 // =====================================================
+
+/** Resolve the signed-in Clerk user to a Convex user id, or null. */
+async function currentUserId(): Promise<Id<"users"> | null> {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) return null
+  return getConvexUserIdByClerkId(authUser.clerkId)
+}
 
 /**
  * Safely calculate percentage, handling null/zero values
@@ -82,15 +91,11 @@ export async function getAnalyticsData(
   timeRangeDays: number = 30,
   classId?: string
 ): Promise<{ success: boolean; data?: AnalyticsData; error?: string }> {
-  const supabase = await createClient()
-
-  // Get current user
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  
-  if (userError || !user) {
+  const teacherId = await currentUserId()
+  if (!teacherId) {
     return {
       success: false,
-      error: "You must be logged in to view analytics"
+      error: "You must be logged in to view analytics",
     }
   }
 
@@ -99,32 +104,23 @@ export async function getAnalyticsData(
     const endDate = new Date()
     const startDate = new Date()
     startDate.setDate(startDate.getDate() - timeRangeDays)
-    
+
     // Previous period for comparison
     const prevEndDate = new Date(startDate)
     const prevStartDate = new Date(startDate)
     prevStartDate.setDate(prevStartDate.getDate() - timeRangeDays)
 
     // =====================================================
-    // 1. Get teacher's classes
+    // 1-4. Gather the raw dataset from Convex
     // =====================================================
-    let classesQuery = supabase
-      .from("classes")
-      .select("id")
-      .eq("teacher_id", user.id)
-    
-    if (classId && classId !== "all") {
-      classesQuery = classesQuery.eq("id", classId)
-    }
-    
-    const { data: classes, error: classesError } = await classesQuery
-    
-    if (classesError) {
-      console.error("Error fetching classes:", classesError)
-      return { success: false, error: "Failed to fetch classes" }
-    }
+    const dataset = await fetchQuery(api.analytics.getAnalyticsDataset, {
+      teacherId,
+      classId: classId && classId !== "all" ? (classId as Id<"classes">) : undefined,
+    })
 
-    if (!classes || classes.length === 0) {
+    const { enrollments, assignments, submissions } = dataset
+
+    if (assignments.length === 0 && enrollments.length === 0) {
       return {
         success: true,
         data: {
@@ -138,124 +134,69 @@ export async function getAnalyticsData(
             studentChange: 0,
             completionChange: 0,
             activeChange: 0,
-            scoreChange: 0
+            scoreChange: 0,
           },
-          hasData: false
-        }
+          hasData: false,
+        },
       }
     }
 
-    const classIds = classes.map(c => c.id)
-
-    // =====================================================
-    // 2. Get total students (enrollments)
-    // =====================================================
-    const { data: enrollments, error: enrollmentsError } = await supabase
-      .from("enrollments")
-      .select("student_id, class_id, enrolled_at")
-      .in("class_id", classIds)
-
-    if (enrollmentsError) {
-      console.error("Error fetching enrollments:", enrollmentsError)
-    }
-
-    const uniqueStudents = new Set(enrollments?.map(e => e.student_id) || [])
+    const uniqueStudents = new Set(enrollments.map((e) => e.studentId))
     const totalStudents = uniqueStudents.size
 
-    // =====================================================
-    // 3. Get assignments for these classes
-    // =====================================================
-    const { data: assignments, error: assignmentsError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        class_id,
-        title,
-        content,
-        created_at,
-        status
-      `)
-      .in("class_id", classIds)
-      .eq("status", "published")
+    const assignmentIds = assignments.map((a) => a.id)
 
-    if (assignmentsError) {
-      console.error("Error fetching assignments:", assignmentsError)
-    }
-
-    const assignmentIds = assignments?.map(a => a.id) || []
-
-    // =====================================================
-    // 4. Get submissions with scores
-    // =====================================================
-    const { data: submissions, error: submissionsError } = await supabase
-      .from("submissions")
-      .select(`
-        id,
-        assignment_id,
-        student_id,
-        score,
-        status,
-        submitted_at,
-        graded_at
-      `)
-      .in("assignment_id", assignmentIds)
-
-    if (submissionsError) {
-      console.error("Error fetching submissions:", submissionsError)
-    }
-
-    // Filter submissions by date range
-    const currentSubmissions = submissions?.filter(s => {
-      const submittedDate = new Date(s.submitted_at)
+    // Filter submissions by date range (submittedAt is ms or null).
+    const currentSubmissions = submissions.filter((s) => {
+      if (s.submittedAt == null) return false
+      const submittedDate = new Date(s.submittedAt)
       return submittedDate >= startDate && submittedDate <= endDate
-    }) || []
+    })
 
-    const prevSubmissions = submissions?.filter(s => {
-      const submittedDate = new Date(s.submitted_at)
+    const prevSubmissions = submissions.filter((s) => {
+      if (s.submittedAt == null) return false
+      const submittedDate = new Date(s.submittedAt)
       return submittedDate >= prevStartDate && submittedDate < prevEndDate
-    }) || []
+    })
 
     // =====================================================
     // 5. Calculate Topic Performance (Average Score per Topic)
     // =====================================================
     const topicScores: Record<string, { total: number; count: number; students: Set<string> }> = {}
-    
-    // Map assignment IDs to their topics
+
+    // Map assignment IDs to their topics (derived from question topics in Convex,
+    // falling back to title extraction when none is present).
     const assignmentTopics: Record<string, string> = {}
-    assignments?.forEach(a => {
-      // Try to get topic from content, class subject, or title
-      const content = a.content as Record<string, unknown> | null
-      const topic = (content?.topic as string) || 
-                   (content?.subject as string) || 
-                   extractTopicFromTitle(a.title)
+    assignments.forEach((a) => {
+      const topic = a.topic || extractTopicFromTitle(a.title)
       assignmentTopics[a.id] = topic
     })
 
     // Aggregate scores by topic
-    currentSubmissions.forEach(sub => {
+    currentSubmissions.forEach((sub) => {
       if (sub.score !== null && sub.status === "graded") {
-        const topic = assignmentTopics[sub.assignment_id] || "General"
-        
+        const topic = assignmentTopics[sub.assignmentId] || "General"
+
         if (!topicScores[topic]) {
           topicScores[topic] = { total: 0, count: 0, students: new Set() }
         }
-        
+
         topicScores[topic].total += sub.score
         topicScores[topic].count += 1
-        topicScores[topic].students.add(sub.student_id)
+        topicScores[topic].students.add(sub.studentId)
       }
     })
 
     // Calculate previous period topic scores for improvement
     const prevTopicScores: Record<string, { total: number; count: number }> = {}
-    prevSubmissions.forEach(sub => {
+    prevSubmissions.forEach((sub) => {
       if (sub.score !== null && sub.status === "graded") {
-        const topic = assignmentTopics[sub.assignment_id] || "General"
-        
+        const topic = assignmentTopics[sub.assignmentId] || "General"
+
         if (!prevTopicScores[topic]) {
           prevTopicScores[topic] = { total: 0, count: 0 }
         }
-        
+
         prevTopicScores[topic].total += sub.score
         prevTopicScores[topic].count += 1
       }
@@ -266,12 +207,12 @@ export async function getAnalyticsData(
       const prevData = prevTopicScores[topic]
       const prevAverage = prevData && prevData.count > 0 ? Math.round(prevData.total / prevData.count) : average
       const improvement = average - prevAverage
-      
+
       return {
         topic,
         average,
         improvement,
-        students: data.students.size
+        students: data.students.size,
       }
     }).sort((a, b) => b.average - a.average)
 
@@ -281,16 +222,16 @@ export async function getAnalyticsData(
     const weeklyData: Record<string, { submissions: number; totalScore: number; gradedCount: number }> = {}
     const weekStartReference = getWeekStart(startDate)
 
-    currentSubmissions.forEach(sub => {
-      const weekStart = getWeekStart(new Date(sub.submitted_at))
+    currentSubmissions.forEach((sub) => {
+      const weekStart = getWeekStart(new Date(sub.submittedAt as number))
       const weekKey = weekStart.toISOString().split('T')[0]
-      
+
       if (!weeklyData[weekKey]) {
         weeklyData[weekKey] = { submissions: 0, totalScore: 0, gradedCount: 0 }
       }
-      
+
       weeklyData[weekKey].submissions += 1
-      
+
       if (sub.score !== null && sub.status === "graded") {
         weeklyData[weekKey].totalScore += sub.score
         weeklyData[weekKey].gradedCount += 1
@@ -298,12 +239,12 @@ export async function getAnalyticsData(
     })
 
     // Calculate expected submissions per week (total students * assignments per week)
-    const assignmentsInPeriod = assignments?.filter(a => {
-      const createdDate = new Date(a.created_at)
+    const assignmentsInPeriod = assignments.filter((a) => {
+      const createdDate = new Date(a.createdAt)
       return createdDate >= startDate && createdDate <= endDate
     }).length || 1
 
-    const expectedSubmissionsPerWeek = totalStudents > 0 
+    const expectedSubmissionsPerWeek = totalStudents > 0
       ? Math.max(1, Math.ceil((totalStudents * assignmentsInPeriod) / Math.ceil(timeRangeDays / 7)))
       : 1
 
@@ -315,31 +256,31 @@ export async function getAnalyticsData(
           week: formatWeekLabel(weekDate, weekStartReference),
           weekStart,
           completion: safePercentage(data.submissions, expectedSubmissionsPerWeek),
-          average: data.gradedCount > 0 ? Math.round(data.totalScore / data.gradedCount) : 0
+          average: data.gradedCount > 0 ? Math.round(data.totalScore / data.gradedCount) : 0,
         }
       })
 
     // =====================================================
     // 7. Calculate Overall Stats
     // =====================================================
-    
+
     // Completion rate: submissions / (assignments * enrolled students)
     const expectedTotal = (assignmentIds.length || 1) * totalStudents
     const currentCompletionRate = safePercentage(currentSubmissions.length, expectedTotal)
     const prevCompletionRate = safePercentage(prevSubmissions.length, expectedTotal)
 
     // Active learners: unique students who submitted in period
-    const activeStudents = new Set(currentSubmissions.map(s => s.student_id))
-    const prevActiveStudents = new Set(prevSubmissions.map(s => s.student_id))
+    const activeStudents = new Set(currentSubmissions.map((s) => s.studentId))
+    const prevActiveStudents = new Set(prevSubmissions.map((s) => s.studentId))
 
     // Average score
-    const gradedSubmissions = currentSubmissions.filter(s => s.score !== null && s.status === "graded")
-    const prevGradedSubmissions = prevSubmissions.filter(s => s.score !== null && s.status === "graded")
-    
+    const gradedSubmissions = currentSubmissions.filter((s) => s.score !== null && s.status === "graded")
+    const prevGradedSubmissions = prevSubmissions.filter((s) => s.score !== null && s.status === "graded")
+
     const avgScore = gradedSubmissions.length > 0
       ? Math.round(gradedSubmissions.reduce((sum, s) => sum + (s.score || 0), 0) / gradedSubmissions.length)
       : 0
-    
+
     const prevAvgScore = prevGradedSubmissions.length > 0
       ? Math.round(prevGradedSubmissions.reduce((sum, s) => sum + (s.score || 0), 0) / prevGradedSubmissions.length)
       : 0
@@ -352,13 +293,13 @@ export async function getAnalyticsData(
       studentChange: 0, // Would need historical enrollment data
       completionChange: currentCompletionRate - prevCompletionRate,
       activeChange: activeStudents.size - prevActiveStudents.size,
-      scoreChange: avgScore - prevAvgScore
+      scoreChange: avgScore - prevAvgScore,
     }
 
     // =====================================================
     // 8. Determine if we have meaningful data
     // =====================================================
-    const hasData = totalStudents > 0 && 
+    const hasData = totalStudents > 0 &&
                    (currentSubmissions.length > 0 || topicPerformance.length > 0)
 
     return {
@@ -367,15 +308,15 @@ export async function getAnalyticsData(
         topicPerformance,
         weeklyProgress,
         overallStats,
-        hasData
-      }
+        hasData,
+      },
     }
 
   } catch (error) {
     console.error("Error in getAnalyticsData:", error)
     return {
       success: false,
-      error: "An unexpected error occurred while fetching analytics"
+      error: "An unexpected error occurred while fetching analytics",
     }
   }
 }
@@ -386,17 +327,17 @@ export async function getAnalyticsData(
 function extractTopicFromTitle(title: string): string {
   // Common topic keywords
   const topics = [
-    "Algebra", "Geometry", "Statistics", "Number", "Ratio", 
+    "Algebra", "Geometry", "Statistics", "Number", "Ratio",
     "Probability", "Trigonometry", "Calculus", "Fractions",
     "Decimals", "Percentages", "Equations", "Functions"
   ]
-  
+
   for (const topic of topics) {
     if (title.toLowerCase().includes(topic.toLowerCase())) {
       return topic
     }
   }
-  
+
   // Return first meaningful word from title
   const words = title.split(/\s+/).filter(w => w.length > 3)
   return words[0] || "General"
@@ -405,29 +346,24 @@ function extractTopicFromTitle(title: string): string {
 /**
  * Get list of classes for the dropdown filter
  */
-export async function getTeacherClasses(): Promise<{ 
+export async function getTeacherClasses(): Promise<{
   success: boolean
   data?: Array<{ id: string; name: string; subject: string }>
-  error?: string 
+  error?: string
 }> {
-  const supabase = await createClient()
-
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  
-  if (userError || !user) {
+  const teacherId = await currentUserId()
+  if (!teacherId) {
     return { success: false, error: "You must be logged in" }
   }
 
-  const { data: classes, error: classesError } = await supabase
-    .from("classes")
-    .select("id, name, subject")
-    .eq("teacher_id", user.id)
-    .order("name")
-
-  if (classesError) {
-    console.error("Error fetching classes:", classesError)
+  try {
+    const classes = await fetchQuery(api.analytics.getTeacherClasses, { teacherId })
+    return {
+      success: true,
+      data: classes.map((c) => ({ id: c.id, name: c.name, subject: c.subject })),
+    }
+  } catch (error) {
+    console.error("Error fetching classes:", error)
     return { success: false, error: "Failed to fetch classes" }
   }
-
-  return { success: true, data: classes || [] }
 }

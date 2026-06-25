@@ -14,18 +14,17 @@ import {
 import { Input } from "@/components/ui/input"
 import { Bell, Search, User, LogOut, Sparkles, Database, Plus } from "lucide-react"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { createClient } from "@/lib/supabase/client"
+import { useClerk } from "@clerk/nextjs"
 import { useRouter } from "next/navigation"
 
 export function DashboardHeader() {
   const [searchOpen, setSearchOpen] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
+  const { signOut } = useClerk()
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    await signOut()
     router.push('/')
-    router.refresh()
   }
 
   return (

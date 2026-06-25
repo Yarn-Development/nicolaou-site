@@ -2,8 +2,8 @@
 
 import { LatexPreview } from '@/components/latex-preview'
 import { ImageLightbox } from '@/components/image-lightbox'
-import { FileText, Triangle, Image as ImageIcon, FileCheck } from 'lucide-react'
-import type { Question, ContentType } from '@/lib/types/database'
+import { FileText, Triangle, Image as ImageIcon, FileCheck, BanIcon } from 'lucide-react'
+import type { Question, ContentType, QuestionAnswerKey } from '@/lib/types/database'
 
 interface QuestionDisplayProps {
   question: Question
@@ -11,6 +11,8 @@ interface QuestionDisplayProps {
   variant?: 'card' | 'inline' | 'preview'
   /** Show the source badge */
   showSourceBadge?: boolean
+  /** Show source label (e.g. "Edexcel GCSE Higher — Paper 1, 2023, Q12") */
+  showSourceLabel?: boolean
   /** Show topic/subtopic info */
   showTopicInfo?: boolean
   /** Enable image zoom */
@@ -37,6 +39,7 @@ export function QuestionDisplay({
   question,
   variant = 'card',
   showSourceBadge = true,
+  showSourceLabel = false,
   showTopicInfo = false,
   enableZoom = true,
   className = '',
@@ -49,20 +52,29 @@ export function QuestionDisplay({
   const hasImage = !!image_url
   const hasText = !!question_latex
 
+  // Calculator indicator: use answer_key.source.is_calculator if present, else question.calculator_allowed
+  const answerKey = question.answer_key as QuestionAnswerKey | null
+  const isCalculatorAllowed = answerKey?.source?.is_calculator !== undefined
+    ? answerKey.source.is_calculator
+    : (question.calculator_allowed ?? true)
+
+  // Build source label string
+  const sourceLabel = buildSourceLabel(answerKey)
+
   // Determine container classes based on variant
-  const containerClasses = variant === 'card' 
-    ? 'exam-paper-card' 
-    : variant === 'preview' 
-      ? 'bg-background p-4' 
+  const containerClasses = variant === 'card'
+    ? 'exam-paper-card'
+    : variant === 'preview'
+      ? 'bg-background p-4'
       : ''
 
   return (
-    <div 
+    <div
       className={`question-display ${containerClasses} ${className}`}
       style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}
     >
       {/* Header Row - Badges at top, separated by divider */}
-      {(showSourceBadge || showTopicInfo) && (
+      {(showSourceBadge || showTopicInfo || showSourceLabel) && (
         <div className="exam-paper-header">
           {/* Source Badge */}
           {showSourceBadge && (
@@ -81,12 +93,37 @@ export function QuestionDisplay({
             </span>
           )}
 
+          {/* Legacy spec badge */}
+          {(question.source_spec === 'legacy-modular' || question.source_spec === 'legacy-gcse') && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold uppercase tracking-wider border border-amber-400 text-amber-700 bg-amber-50">
+              ⚠ Legacy spec
+            </span>
+          )}
+
+          {/* Calculator indicator */}
+          {!isCalculatorAllowed && (
+            <span
+              title="Non-calculator question"
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold uppercase tracking-wider border border-red-300 text-red-600 bg-red-50"
+            >
+              <BanIcon className="w-3 h-3" />
+              No Calculator
+            </span>
+          )}
+
           {/* Marks Badge - Always show if available */}
           {question.marks && (
             <span className="ml-auto text-xs font-bold uppercase tracking-wider px-2 py-1 bg-muted text-foreground border border-border/20">
               {question.marks} {question.marks === 1 ? 'mark' : 'marks'}
             </span>
           )}
+        </div>
+      )}
+
+      {/* Source Label Row - "Edexcel GCSE Higher — Paper 1, 2023, Q12" */}
+      {showSourceLabel && sourceLabel && (
+        <div className="px-4 pb-2">
+          <span className="text-xs text-muted-foreground italic">{sourceLabel}</span>
         </div>
       )}
 
@@ -182,6 +219,40 @@ export function QuestionDisplay({
 }
 
 /**
+ * Build a human-readable source label from answer_key.source
+ * e.g. "Edexcel GCSE Higher — Paper 1, 2023, Q12"
+ */
+function buildSourceLabel(answerKey: QuestionAnswerKey | null): string | null {
+  const src = answerKey?.source
+  if (!src) return null
+
+  const parts: string[] = []
+  if (src.exam_board) parts.push(src.exam_board)
+  if (src.level) parts.push(src.level)
+
+  const detail: string[] = []
+  if (src.paper) detail.push(src.paper)
+  if (src.year) detail.push(String(src.year))
+  if (src.question_number) detail.push(src.question_number)
+
+  if (parts.length === 0 && detail.length === 0) return null
+
+  if (detail.length > 0) {
+    return [...parts, detail.join(', ')].join(' — ')
+  }
+  return parts.join(' ')
+}
+
+/**
+ * Source Label component — standalone, reusable
+ */
+export function QuestionSourceLabel({ answerKey, className = '' }: { answerKey: QuestionAnswerKey | null; className?: string }) {
+  const label = buildSourceLabel(answerKey)
+  if (!label) return null
+  return <span className={`text-xs text-muted-foreground italic ${className}`}>{label}</span>
+}
+
+/**
  * Source Badge - Clean, friendly indicator of question origin
  */
 function SourceBadge({ contentType }: { contentType: ContentType }) {
@@ -268,22 +339,38 @@ export function QuestionDisplayCompact({
   return (
     <div className={`question-display-compact ${className}`}>
       {isTextFirst && question_latex ? (
-        <LatexPreview 
-          latex={question_latex} 
-          className="text-sm text-swiss-ink line-clamp-2"
+        <LatexPreview
+          latex={question_latex}
+          className="text-sm text-swiss-ink line-clamp-3"
           showSkeleton={false}
         />
       ) : image_url ? (
-        <div className="flex items-center gap-2">
-          <img 
-            src={image_url} 
-            alt="Question thumbnail" 
-            className="w-12 h-12 object-cover rounded border border-swiss-ink/20"
-          />
-          <span className="text-xs text-swiss-lead italic">Image question</span>
-        </div>
+        <img
+          src={image_url}
+          alt="Question preview"
+          className="max-h-20 w-auto object-contain border border-swiss-ink/20 rounded"
+        />
       ) : (
-        <span className="text-sm text-swiss-lead italic">No preview</span>
+        <div className="flex flex-col gap-0.5 py-0.5">
+          <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">
+            {content_type === 'official_past_paper' ? 'Past Paper' : 'No content'}
+          </span>
+          {(question.sub_topic_name || question.topic_name) && (
+            <span className="text-xs text-swiss-ink font-medium">
+              {question.sub_topic_name || question.topic_name}
+            </span>
+          )}
+          <div className="flex items-center gap-2">
+            {question.marks && (
+              <span className="text-xs text-swiss-lead">
+                {question.marks} {question.marks === 1 ? 'mark' : 'marks'}
+              </span>
+            )}
+            {question.difficulty && (
+              <span className="text-xs text-swiss-lead">{question.difficulty}</span>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )

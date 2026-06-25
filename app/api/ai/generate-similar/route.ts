@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import {
   needsDiagram,
   sanitizeSvg,
   buildDiagramSystemPrompt,
-  uploadSvgToStorage,
 } from '@/lib/diagram-utils'
+import { uploadSvgToConvex } from '@/lib/convex-svg-upload'
 import { repairLatex } from '@/lib/latex-utils'
 
 /**
@@ -172,7 +171,7 @@ Return ONLY the JSON object with exactly ${count} question(s) in the array.`
         'X-Title': 'Nicolaou Maths - Similar Diagram Generator',
       },
       body: JSON.stringify({
-        model: 'anthropic/claude-haiku-4-5',
+        model: 'anthropic/claude-sonnet-4-6',
         messages: [
           { role: 'system', content: buildDiagramSystemPrompt() },
           { role: 'user', content: userPrompt },
@@ -210,10 +209,6 @@ Return ONLY the JSON object with exactly ${count} question(s) in the array.`
   }
 
   // Upload SVGs and build result
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const userId = user?.id || 'anon'
-
   const questions: GeneratedQuestion[] = []
 
   for (const q of parsed.questions) {
@@ -224,7 +219,7 @@ Return ONLY the JSON object with exactly ${count} question(s) in the array.`
     if (q.svg_markup) {
       const sanitized = sanitizeSvg(q.svg_markup)
       if (sanitized.valid) {
-        imageUrl = await uploadSvgToStorage(sanitized.svg, body.topic, userId, supabase)
+        imageUrl = await uploadSvgToConvex(sanitized.svg)
       } else {
         console.warn('[Similar Diagram] SVG sanitization failed:', sanitized.errors)
       }
@@ -323,7 +318,7 @@ Generate exactly ${count} similar question(s). Return ONLY the JSON object.`
       'X-Title': 'Nicolaou Maths - Similar Question Generator',
     },
     body: JSON.stringify({
-      model: 'openai/gpt-oss-120b:free',
+      model: 'anthropic/claude-sonnet-4-6',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },

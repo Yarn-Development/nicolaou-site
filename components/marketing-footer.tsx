@@ -15,7 +15,7 @@ export function MarketingFooter() {
               </span>
             </Link>
             <p className="text-sm leading-relaxed mb-6 text-swiss-paper opacity-75 max-w-xs font-medium">
-              Revolutionizing education with AI-powered learning experiences for students and teachers worldwide.
+              A maths teaching platform for GCSE and A Level — question banks, AI paper generation, marking, and student feedback.
             </p>
             <div className="flex gap-4">
               <Link 
@@ -42,100 +42,66 @@ export function MarketingFooter() {
             </div>
           </div>
 
-          {/* Product Column */}
+          {/* Platform Column */}
           <div className="col-span-6 md:col-span-3 lg:col-span-2">
-            <h3 className="text-xs font-black uppercase tracking-widest mb-6 text-swiss-signal">Product</h3>
+            <h3 className="text-xs font-black uppercase tracking-widest mb-6 text-swiss-signal">Platform</h3>
             <ul className="space-y-3">
               <li>
-                <Link href="/features" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
+                <Link href="/#features" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
                   Features
                 </Link>
               </li>
               <li>
-                <Link href="/pricing" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  Pricing
+                <Link href="/sign-in" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
+                  Sign In
                 </Link>
               </li>
               <li>
-                <Link href="/demo" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  Demo
-                </Link>
-              </li>
-              <li>
-                <Link href="/integrations" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  Integrations
+                <Link href="/dashboard" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
+                  Dashboard
                 </Link>
               </li>
             </ul>
           </div>
 
-          {/* Resources Column */}
+          {/* Contact Column */}
           <div className="col-span-6 md:col-span-3 lg:col-span-2">
-            <h3 className="text-xs font-black uppercase tracking-widest mb-6 text-swiss-signal">Resources</h3>
+            <h3 className="text-xs font-black uppercase tracking-widest mb-6 text-swiss-signal">Contact</h3>
             <ul className="space-y-3">
               <li>
-                <Link href="/blog" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  Blog
+                <Link href="mailto:admin@yarndev.co.uk" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
+                  Get in touch
                 </Link>
               </li>
               <li>
-                <Link href="/help" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  Help Center
+                <Link href="https://yarndev.co.uk/privacy" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
+                  Privacy Policy
                 </Link>
               </li>
               <li>
-                <Link href="/docs" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  Documentation
-                </Link>
-              </li>
-              <li>
-                <Link href="/community" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  Community
+                <Link href="https://yarndev.co.uk/terms" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
+                  Terms
                 </Link>
               </li>
             </ul>
           </div>
 
-          {/* Company Column */}
-          <div className="col-span-6 md:col-span-3 lg:col-span-2">
-            <h3 className="text-xs font-black uppercase tracking-widest mb-6 text-swiss-signal">Company</h3>
-            <ul className="space-y-3">
-              <li>
-                <Link href="/about" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  About
-                </Link>
-              </li>
-              <li>
-                <Link href="/careers" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  Careers
-                </Link>
-              </li>
-              <li>
-                <Link href="/contact" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  Contact
-                </Link>
-              </li>
-              <li>
-                <Link href="/privacy" className="text-sm font-bold uppercase tracking-wider hover:text-swiss-signal transition-colors block">
-                  Privacy
-                </Link>
-              </li>
-            </ul>
-          </div>
-
-          {/* Newsletter Column */}
-          <div className="col-span-12 md:col-span-6 lg:col-span-2">
-            <h3 className="text-xs font-black uppercase tracking-widest mb-6 text-swiss-signal">Newsletter</h3>
-            <p className="text-xs font-medium mb-4 opacity-75">Get updates on new features and releases.</p>
-            <div className="flex flex-col gap-2">
-              <input 
-                type="email" 
-                placeholder="Email address" 
-                className="bg-transparent border-2 border-swiss-paper px-4 py-2 text-sm font-bold placeholder:text-swiss-paper placeholder:opacity-50 focus:border-swiss-signal focus:outline-none transition-colors"
-              />
-              <button className="bg-swiss-signal text-white px-4 py-2 text-xs font-bold uppercase tracking-wider hover:bg-white hover:text-swiss-ink transition-colors">
-                Subscribe
-              </button>
+          {/* Boards + Specs Column */}
+          <div className="col-span-12 md:col-span-6 lg:col-span-4">
+            <h3 className="text-xs font-black uppercase tracking-widest mb-6 text-swiss-signal">Supported Exam Boards</h3>
+            <div className="flex flex-wrap gap-2">
+              {["Edexcel", "AQA", "OCR", "MEI", "WJEC", "CIE / Cambridge", "IB"].map(board => (
+                <span key={board} className="text-xs font-bold uppercase tracking-wider border border-swiss-paper/30 px-3 py-1.5 text-swiss-paper/60">
+                  {board}
+                </span>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2 mt-3">
+              {["GCSE Foundation", "GCSE Higher", "A Level New Spec", "A Level Legacy"].map(spec => (
+                <span key={spec} className="text-xs font-bold uppercase tracking-wider border border-swiss-paper/20 px-3 py-1.5 text-swiss-paper/40">
+                  {spec}
+                </span>
+              ))}
             </div>
           </div>
         </div>

@@ -1,25 +1,18 @@
 import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
+import { getCurrentProfile } from "@/lib/auth/helpers"
 import { getClassList } from "@/app/actions/classes"
 import { CreateAssignmentWizard } from "./create-assignment-wizard"
 
 export default async function CreateAssignmentPage() {
-  const supabase = await createClient()
+  const authUser = await getAuthUser()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    redirect("/login")
+  if (!authUser) {
+    redirect("/sign-in")
   }
 
   // Verify user is a teacher
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single()
+  const profile = await getCurrentProfile()
 
   if (profile?.role !== "teacher") {
     redirect("/student-dashboard")

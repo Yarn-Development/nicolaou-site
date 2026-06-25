@@ -1,6 +1,8 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
+import { fetchQuery, fetchMutation, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
+import type { Id } from "@/convex/_generated/dataModel"
 
 // =====================================================
 // Types
@@ -47,161 +49,72 @@ export interface LoadAssignmentResult {
   error?: string
 }
 
+async function currentStudentId(): Promise<Id<"users"> | null> {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) return null
+  return getConvexUserIdByClerkId(authUser.clerkId)
+}
+
+const toIso = (ms: number | null | undefined): string | null =>
+  ms == null ? null : new Date(ms).toISOString()
+
 // =====================================================
 // Load Assignment for Student
 // =====================================================
 
-/**
- * Loads an assignment for a student to take or review
- * - Verifies enrollment
- * - Fetches assignment details and questions
- * - Checks for existing submission
- * - Returns mode: "answer" if they can still submit, "readonly" if already submitted
- */
 export async function loadAssignment(assignmentId: string): Promise<LoadAssignmentResult> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
+  const studentId = await currentStudentId()
+  if (!studentId) return { success: false, error: "You must be logged in" }
 
   try {
-    // 1. Get assignment details with class info
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        title,
-        due_date,
-        status,
-        mode,
-        class_id,
-        classes!inner (
-          id,
-          name
-        )
-      `)
-      .eq("id", assignmentId)
-      .eq("status", "published")
-      .single()
+    const result = await fetchQuery(api.students.getAssignmentForTaking, {
+      studentId,
+      assignmentId: assignmentId as Id<"assignments">,
+    })
 
-    if (assignmentError || !assignment) {
-      console.error("Assignment error:", assignmentError)
-      return { success: false, error: "Assignment not found or not published" }
-    }
-
-    // 2. Verify student is enrolled in the class
-    const { data: enrollment, error: enrollmentError } = await supabase
-      .from("enrollments")
-      .select("id")
-      .eq("class_id", assignment.class_id)
-      .eq("student_id", user.id)
-      .single()
-
-    if (enrollmentError || !enrollment) {
-      return { success: false, error: "You are not enrolled in this class" }
-    }
-
-    // 3. Get questions using the RPC function
-    const { data: questions, error: questionsError } = await supabase.rpc(
-      "get_assignment_questions",
-      { p_assignment_id: assignmentId }
-    )
-
-    if (questionsError) {
-      console.error("Questions error:", questionsError)
-      return { success: false, error: "Failed to fetch questions" }
-    }
-
-    // Also get the image_url and content_type from questions table
-    const questionIds = (questions || []).map((q: { question_id: string }) => q.question_id)
-    
-    let questionDetails: Record<string, { image_url: string | null; content_type: string }> = {}
-    
-    if (questionIds.length > 0) {
-      const { data: fullQuestions } = await supabase
-        .from("questions")
-        .select("id, image_url, content_type")
-        .in("id", questionIds)
-
-      if (fullQuestions) {
-        questionDetails = Object.fromEntries(
-          fullQuestions.map((q) => [q.id, { image_url: q.image_url, content_type: q.content_type }])
-        )
+    if ("error" in result) {
+      return {
+        success: false,
+        error:
+          result.error === "not_enrolled"
+            ? "You are not enrolled in this class"
+            : "Assignment not found or not published",
       }
     }
 
-    // 4. Check for existing submission
-    const { data: submission } = await supabase
-      .from("submissions")
-      .select("id, status, answers, score, submitted_at, graded_at")
-      .eq("assignment_id", assignmentId)
-      .eq("student_id", user.id)
-      .single()
-
-    // 5. Determine mode - if submission exists, it's readonly (already submitted)
-    const mode: "answer" | "readonly" = submission ? "readonly" : "answer"
-
-    // 6. Calculate total marks
-    const totalMarks = (questions || []).reduce(
-      (sum: number, q: { marks: number }) => sum + (q.marks || 1),
-      0
-    )
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const cls = assignment.classes as any
-
-    // 7. Transform questions
-    const transformedQuestions: WorksheetQuestion[] = (questions || []).map(
-      (q: {
-        question_id: string
-        order_index: number
-        marks: number
-        question_latex: string | null
-        topic: string
-        sub_topic: string | null
-        calculator_allowed: boolean
-      }) => {
-        const details = questionDetails[q.question_id]
-        return {
-          id: q.question_id,
-          order_index: q.order_index,
-          marks: q.marks || 1,
-          question_latex: q.question_latex,
-          image_url: details?.image_url || null,
-          content_type: (details?.content_type as "generated_text" | "image_ocr") || "generated_text",
-          topic: q.topic,
-          sub_topic: q.sub_topic,
-          calculator_allowed: q.calculator_allowed,
-        }
-      }
-    )
+    const sub = result.existingSubmission
+    const mode: "answer" | "readonly" = sub ? "readonly" : "answer"
 
     return {
       success: true,
       data: {
         assignment: {
-          id: assignment.id,
-          title: assignment.title,
-          class_name: cls.name,
-          due_date: assignment.due_date,
-          total_marks: totalMarks,
-          mode: (assignment.mode as "online" | "paper") || "online",
-          questions: transformedQuestions,
+          id: result.id,
+          title: result.title,
+          class_name: result.className,
+          due_date: toIso(result.dueDate),
+          total_marks: result.totalMarks,
+          mode: result.mode as "online" | "paper",
+          questions: result.questions.map((q) => ({
+            id: q.id,
+            order_index: q.orderIndex,
+            marks: q.marks,
+            question_latex: q.questionLatex,
+            image_url: q.imageUrl,
+            content_type: (q.contentType as WorksheetQuestion["content_type"]) ?? "generated_text",
+            topic: q.topic,
+            sub_topic: q.subTopic,
+            calculator_allowed: q.calculatorAllowed,
+          })),
         },
-        submission: submission
+        submission: sub
           ? {
-              id: submission.id,
-              status: submission.status as "submitted" | "graded",
-              answers: (submission.answers as Record<string, string>) || {},
-              score: submission.score,
-              submitted_at: submission.submitted_at,
-              graded_at: submission.graded_at,
+              id: sub.id,
+              status: sub.status === "marked" ? "graded" : "submitted",
+              answers: sub.answers,
+              score: sub.score,
+              submitted_at: toIso(sub.submittedAt),
+              graded_at: toIso(sub.gradedAt),
             }
           : null,
         mode,
@@ -223,84 +136,31 @@ export interface SubmitAssignmentResult {
   error?: string
 }
 
-/**
- * Final submission of assignment
- * - Creates submission in submissions table
- * - Sets status to 'submitted'
- * - Records submission timestamp
- */
 export async function submitAssignment(
   assignmentId: string,
-  answers: Record<string, string>
+  answers: Record<string, string>,
 ): Promise<SubmitAssignmentResult> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
+  const studentId = await currentStudentId()
+  if (!studentId) return { success: false, error: "You must be logged in" }
 
   try {
-    // Verify assignment exists and is published
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .select("id, class_id, status")
-      .eq("id", assignmentId)
-      .eq("status", "published")
-      .single()
+    const result = await fetchMutation(api.students.submitStudentAssignment, {
+      studentId,
+      assignmentId: assignmentId as Id<"assignments">,
+      answers,
+    })
 
-    if (assignmentError || !assignment) {
-      return { success: false, error: "Assignment not found or not published" }
+    if ("error" in result) {
+      const message =
+        result.error === "not_enrolled"
+          ? "You are not enrolled in this class"
+          : result.error === "already_submitted"
+            ? "Assignment already submitted"
+            : "Assignment not found or not published"
+      return { success: false, error: message }
     }
 
-    // Verify enrollment
-    const { data: enrollment, error: enrollmentError } = await supabase
-      .from("enrollments")
-      .select("id")
-      .eq("class_id", assignment.class_id)
-      .eq("student_id", user.id)
-      .single()
-
-    if (enrollmentError || !enrollment) {
-      return { success: false, error: "You are not enrolled in this class" }
-    }
-
-    // Check for existing submission
-    const { data: existingSubmission } = await supabase
-      .from("submissions")
-      .select("id, status")
-      .eq("assignment_id", assignmentId)
-      .eq("student_id", user.id)
-      .single()
-
-    // If already submitted, don't allow resubmission
-    if (existingSubmission) {
-      return { success: false, error: "Assignment already submitted" }
-    }
-
-    // Create new submission
-    const { data: newSubmission, error: insertError } = await supabase
-      .from("submissions")
-      .insert({
-        assignment_id: assignmentId,
-        student_id: user.id,
-        answers,
-        status: "submitted",
-        submitted_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single()
-
-    if (insertError) {
-      console.error("Insert error:", insertError)
-      return { success: false, error: "Failed to submit assignment" }
-    }
-
-    return { success: true, submission_id: newSubmission.id }
+    return { success: true, submission_id: result.submissionId }
   } catch (error) {
     console.error("Error in submitAssignment:", error)
     return { success: false, error: "An unexpected error occurred" }
