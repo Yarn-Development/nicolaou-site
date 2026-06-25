@@ -60,6 +60,15 @@ export interface ExamQuestion {
   } | null
 }
 
+export interface CoverConfig {
+  style?: "standard" | "simple"
+  course?: string
+  title?: string
+  schoolName?: string
+  teacherName?: string
+  showCandidateBoxes?: boolean
+}
+
 export interface ExportOptions {
   includeMarkScheme?: boolean
   includeAnswers?: boolean
@@ -67,6 +76,7 @@ export interface ExportOptions {
   examDate?: string
   timeAllowed?: string
   preserveLatex?: boolean
+  cover?: CoverConfig
 }
 
 // =====================================================
@@ -536,14 +546,24 @@ async function buildQuestionTable(
 // Document-level structural blocks
 // =====================================================
 
-function examHeader(title: string, totalMarks: number, examDate: string, paperRef: string): Paragraph[] {
+function examHeader(title: string, totalMarks: number, examDate: string, paperRef: string, cover?: CoverConfig): Paragraph[] {
+  const heads: Paragraph[] = []
+  // School / centre name (branding)
+  if (cover?.schoolName) {
+    heads.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 0, after: 80 },
+      children: [new TextRun({ text: cover.schoolName.toUpperCase(), bold: true, font: { name: FONT }, size: 26 })],
+    }))
+  }
   return [
-    // Subject title
+    ...heads,
+    // Subject / course title
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { before: 0, after: 120 },
       children: [
-        new TextRun({ text: "Mathematics", bold: true, font: { name: FONT }, size: 72 }), // 36pt
+        new TextRun({ text: cover?.course || "Mathematics", bold: true, font: { name: FONT }, size: 72 }), // 36pt
       ],
     }),
     // Exam title
@@ -554,6 +574,14 @@ function examHeader(title: string, totalMarks: number, examDate: string, paperRe
         new TextRun({ text: title, bold: true, font: { name: FONT }, size: 32 }), // 16pt
       ],
     }),
+    // Teacher (optional)
+    ...(cover?.teacherName
+      ? [new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 0, after: 120 },
+          children: [new TextRun({ text: `Set by ${cover.teacherName}`, font: { name: FONT }, size: SIZE_QUESTION, color: "374151" })],
+        })]
+      : []),
     // Date + paper ref on the same line (split by tab)
     new Paragraph({
       alignment: AlignmentType.LEFT,
@@ -711,7 +739,7 @@ export async function exportExamToWord(
   const examChildren: any[] = []
 
   // Header block
-  examChildren.push(...examHeader(title, totalMarks, examDate, paperRef))
+  examChildren.push(...examHeader(title, totalMarks, examDate, paperRef, options.cover))
 
   // Questions
   for (let i = 0; i < questions.length; i++) {

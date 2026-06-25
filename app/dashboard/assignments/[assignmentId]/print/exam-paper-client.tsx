@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button"
 import { LatexPreview } from "@/components/latex-preview"
 import { exportExamToWord } from "@/lib/docx-exporter"
 import type { ExamQuestion } from "@/lib/docx-exporter"
-import type { AssignmentDetails } from "@/app/actions/assignments"
+import type { AssignmentDetails, CoverConfig } from "@/app/actions/assignments"
+import { saveCoverConfig } from "@/app/actions/assignments"
 import "katex/dist/katex.min.css"
 
 // =====================================================
@@ -104,6 +105,34 @@ export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProp
 
   const [isExporting, setIsExporting] = useState(false)
 
+  // Editable front cover
+  const [showCoverEditor, setShowCoverEditor] = useState(false)
+  const [savingCover, setSavingCover] = useState(false)
+  const [coverSaved, setCoverSaved] = useState(false)
+  const [cover, setCover] = useState<CoverConfig>(
+    assignment.cover_config ?? {
+      style: "standard",
+      course: "Mathematics",
+      title: assignment.title,
+      schoolName: "",
+      teacherName: "",
+      showCandidateBoxes: true,
+    },
+  )
+  const updateCover = (patch: Partial<CoverConfig>) => {
+    setCover((c) => ({ ...c, ...patch }))
+    setCoverSaved(false)
+  }
+  const handleSaveCover = async () => {
+    setSavingCover(true)
+    try {
+      const res = await saveCoverConfig(assignment.id, cover)
+      setCoverSaved(res.success)
+    } finally {
+      setSavingCover(false)
+    }
+  }
+
   const handlePrint = () => {
     window.print()
   }
@@ -126,9 +155,10 @@ export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProp
         answer_key: q.answer_key || null,
       }))
 
-      await exportExamToWord(examQuestions, assignment.title, {
+      await exportExamToWord(examQuestions, cover.title || assignment.title, {
         includeMarkScheme,
         includeAnswers: includeMarkScheme,
+        cover,
       })
     } catch (error) {
       console.error('Export failed:', error)
@@ -215,6 +245,18 @@ export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProp
               Source Labels
             </label>
 
+            {/* Edit Cover (paper view only) */}
+            {view === "paper" && (
+              <Button
+                onClick={() => setShowCoverEditor((s) => !s)}
+                variant="outline"
+                className={`border-2 border-black font-bold uppercase tracking-wider text-xs ${showCoverEditor ? "bg-black text-white" : ""}`}
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Cover
+              </Button>
+            )}
+
             {/* Export Options */}
             <div className="flex items-center gap-2">
               <Button
@@ -248,10 +290,93 @@ export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProp
       </div>
 
       {/* ============================================= */}
+      {/* Cover editor (paper view only)                */}
+      {/* ============================================= */}
+      {view === "paper" && showCoverEditor && (
+        <div className="print-hidden bg-gray-50 border-b-2 border-black px-6 py-4">
+          <div className="max-w-5xl mx-auto">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-black uppercase tracking-wider text-sm">Front Cover</h2>
+              <div className="flex items-center gap-3">
+                {coverSaved && <span className="text-xs font-bold text-green-700 uppercase tracking-wider">Saved ✓</span>}
+                <Button
+                  onClick={handleSaveCover}
+                  disabled={savingCover}
+                  className="bg-black hover:bg-gray-800 text-white font-bold uppercase tracking-wider text-xs"
+                >
+                  {savingCover ? "Saving..." : "Save Cover"}
+                </Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              <label className="text-xs font-bold uppercase tracking-wider">
+                Cover Style
+                <select
+                  value={cover.style}
+                  onChange={(e) => {
+                    const style = e.target.value as CoverConfig["style"]
+                    updateCover({ style, showCandidateBoxes: style === "standard" })
+                  }}
+                  className="mt-1 w-full border-2 border-black px-2 py-1.5 text-sm font-normal normal-case"
+                >
+                  <option value="standard">Standard (exam-board)</option>
+                  <option value="simple">Simple (branded)</option>
+                </select>
+              </label>
+              <label className="text-xs font-bold uppercase tracking-wider">
+                School / Centre
+                <input
+                  value={cover.schoolName}
+                  onChange={(e) => updateCover({ schoolName: e.target.value })}
+                  placeholder="e.g. St Aloysius College"
+                  className="mt-1 w-full border-2 border-black px-2 py-1.5 text-sm font-normal normal-case"
+                />
+              </label>
+              <label className="text-xs font-bold uppercase tracking-wider">
+                Teacher Name
+                <input
+                  value={cover.teacherName}
+                  onChange={(e) => updateCover({ teacherName: e.target.value })}
+                  placeholder="e.g. Mr Nicolaou"
+                  className="mt-1 w-full border-2 border-black px-2 py-1.5 text-sm font-normal normal-case"
+                />
+              </label>
+              <label className="text-xs font-bold uppercase tracking-wider">
+                Course / Qualification
+                <input
+                  value={cover.course}
+                  onChange={(e) => updateCover({ course: e.target.value })}
+                  placeholder="e.g. GCSE Mathematics (Higher)"
+                  className="mt-1 w-full border-2 border-black px-2 py-1.5 text-sm font-normal normal-case"
+                />
+              </label>
+              <label className="text-xs font-bold uppercase tracking-wider md:col-span-2">
+                Paper Title
+                <input
+                  value={cover.title}
+                  onChange={(e) => updateCover({ title: e.target.value })}
+                  placeholder={assignment.title}
+                  className="mt-1 w-full border-2 border-black px-2 py-1.5 text-sm font-normal normal-case"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider md:col-span-3">
+                <input
+                  type="checkbox"
+                  checked={cover.showCandidateBoxes}
+                  onChange={(e) => updateCover({ showCandidateBoxes: e.target.checked })}
+                />
+                Show candidate name / centre-number boxes (exam-board style)
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================= */}
       {/* Content                                       */}
       {/* ============================================= */}
       {view === "paper" && (
-        <ExamPaper assignment={assignment} paperRef={paperRef} showSourceLabels={showSourceLabels} />
+        <ExamPaper assignment={assignment} paperRef={paperRef} showSourceLabels={showSourceLabels} cover={cover} />
       )}
       {view === "marksheet" && (
         <StudentMarksheet assignment={assignment} />
@@ -501,10 +626,12 @@ function ExamPaper({
   assignment,
   paperRef,
   showSourceLabels,
+  cover,
 }: {
   assignment: AssignmentDetails
   paperRef: string
   showSourceLabels: boolean
+  cover: CoverConfig
 }) {
   const calculatorStatus = getPaperCalculatorStatus(assignment.questions)
   return (
@@ -533,47 +660,67 @@ function ExamPaper({
         <div className="exam-content-area flex flex-col justify-between" style={{ minHeight: "calc(297mm - 12mm)" }}>
           {/* Top section: Candidate info + Header */}
           <div>
-            {/* Candidate name and number boxes */}
-            <div className="border border-gray-400 p-4 mb-6">
-              <p className="text-[9pt] text-gray-600 mb-2">Write your name here</p>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                  <p className="text-[8pt] text-gray-500 mb-1">Surname</p>
-                  <div className="border border-black h-[28px]" />
-                </div>
-                <div>
-                  <p className="text-[8pt] text-gray-500 mb-1">Other names</p>
-                  <div className="border border-black h-[28px]" />
-                </div>
-              </div>
-              <div className="flex items-start gap-8">
-                <div>
-                  <p className="text-[8pt] text-gray-500 mb-1">Centre Number</p>
-                  <div className="flex gap-1">
-                    {[...Array(5)].map((_, i) => (
-                      <div key={i} className="w-[24px] h-[28px] border border-black" />
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[8pt] text-gray-500 mb-1">Candidate Number</p>
-                  <div className="flex gap-1">
-                    {[...Array(4)].map((_, i) => (
-                      <div key={i} className="w-[24px] h-[28px] border border-black" />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
+            {/* School / centre name (branding) */}
+            {cover.schoolName && (
+              <p className="text-[13pt] font-bold uppercase tracking-wider mb-4">
+                {cover.schoolName}
+              </p>
+            )}
 
-            {/* Title block - Edexcel style */}
+            {/* Candidate name and number boxes (standard exam-board style only) */}
+            {cover.showCandidateBoxes && (
+              <div className="border border-gray-400 p-4 mb-6">
+                <p className="text-[9pt] text-gray-600 mb-2">Write your name here</p>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div>
+                    <p className="text-[8pt] text-gray-500 mb-1">Surname</p>
+                    <div className="border border-black h-[28px]" />
+                  </div>
+                  <div>
+                    <p className="text-[8pt] text-gray-500 mb-1">Other names</p>
+                    <div className="border border-black h-[28px]" />
+                  </div>
+                </div>
+                <div className="flex items-start gap-8">
+                  <div>
+                    <p className="text-[8pt] text-gray-500 mb-1">Centre Number</p>
+                    <div className="flex gap-1">
+                      {[...Array(5)].map((_, i) => (
+                        <div key={i} className="w-[24px] h-[28px] border border-black" />
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[8pt] text-gray-500 mb-1">Candidate Number</p>
+                    <div className="flex gap-1">
+                      {[...Array(4)].map((_, i) => (
+                        <div key={i} className="w-[24px] h-[28px] border border-black" />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* For the simple/branded cover, give students a plain name line */}
+            {!cover.showCandidateBoxes && (
+              <div className="flex items-end gap-3 mb-6">
+                <p className="text-[11pt]">Name:</p>
+                <div className="flex-1 border-b border-black h-[20px]" />
+              </div>
+            )}
+
+            {/* Title block */}
             <div className="mb-4">
               <h1 className="text-[36pt] font-bold leading-tight mb-1">
-                Mathematics
+                {cover.course || "Mathematics"}
               </h1>
-              <h2 className="text-[16pt] font-bold leading-tight mb-4">
-                {assignment.title}
+              <h2 className="text-[16pt] font-bold leading-tight mb-2">
+                {cover.title || assignment.title}
               </h2>
+              {cover.teacherName && (
+                <p className="text-[10pt] text-gray-600 mb-4">Set by {cover.teacherName}</p>
+              )}
             </div>
 
             {/* Date and Paper Reference row */}
