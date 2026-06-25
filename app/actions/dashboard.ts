@@ -138,14 +138,14 @@ export async function getDashboardData(): Promise<{
       (s) => s.status === "submitted" && s.score === null
     ).length
 
-    // Average score from graded submissions
+    // Average score (%) from graded submissions
     const gradedSubmissions = submissions.filter(
-      (s) => s.status === "marked" && s.score !== null
+      (s) => s.status === "marked" && s.percentage !== null
     )
     const averageScore =
       gradedSubmissions.length > 0
         ? Math.round(
-            gradedSubmissions.reduce((sum, s) => sum + (s.score || 0), 0) /
+            gradedSubmissions.reduce((sum, s) => sum + (s.percentage || 0), 0) /
               gradedSubmissions.length
           )
         : 0
@@ -229,13 +229,13 @@ export async function getDashboardData(): Promise<{
         (s) =>
           classAssignmentIds.includes(s.assignmentId) &&
           s.status === "marked" &&
-          s.score !== null
+          s.percentage !== null
       )
 
       const classAvgScore =
         classSubmissions.length > 0
           ? Math.round(
-              classSubmissions.reduce((sum, s) => sum + (s.score || 0), 0) /
+              classSubmissions.reduce((sum, s) => sum + (s.percentage || 0), 0) /
                 classSubmissions.length
             )
           : 0

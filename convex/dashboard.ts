@@ -103,12 +103,19 @@ export const getTeacherDashboard = query({
         .withIndex("by_class", (q) => q.eq("classId", cls._id))
         .collect()
       for (const a of classAssignments) {
+        const aqs = await ctx.db
+          .query("assignmentQuestions")
+          .withIndex("by_assignment", (q) => q.eq("assignmentId", a._id))
+          .collect()
+        let maxMarks = aqs.reduce((sum, aq) => sum + (aq.marks ?? 1), 0)
+        if (maxMarks === 0 && a.totalMarks) maxMarks = a.totalMarks
         assignments.push({
           id: a._id as string,
           classId: a.classId as string,
           title: a.title,
           status: a.status ?? "draft",
           dueDate: a.dueDate ?? null,
+          maxMarks,
           createdAt: a._creationTime,
           updatedAt: a._creationTime,
         })
@@ -126,11 +133,15 @@ export const getTeacherDashboard = query({
         )
         .collect()
       for (const s of subs) {
+        const score = s.totalMarksAwarded ?? null
+        const percentage =
+          score !== null && a.maxMarks > 0 ? Math.round((score / a.maxMarks) * 100) : null
         submissions.push({
           id: s._id as string,
           assignmentId: s.assignmentId as string,
           studentId: s.studentId as string,
-          score: s.totalMarksAwarded ?? null,
+          score,
+          percentage,
           status: s.status ?? "in_progress",
           submittedAt: s.submittedAt ?? null,
           gradedAt: s.markedAt ?? null,

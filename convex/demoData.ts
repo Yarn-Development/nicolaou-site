@@ -112,10 +112,12 @@ export const seed = mutation({
         markedAt: Date.now() - 1 * 24 * 60 * 60 * 1000,
         markedBy: teacherId,
       })
+      // Award each mark-point independently with probability `perf` so totals
+      // land near perf×maxMarks with realistic spread (works for 1-mark Qs too).
       let total = 0
       for (const { id, marks } of aqs) {
-        const base = Math.floor(marks * perf)
-        const score = Math.max(0, Math.min(marks, base + (Math.floor(Math.random() * 3) - 1)))
+        let score = 0
+        for (let m = 0; m < marks; m++) if (Math.random() < perf) score++
         total += score
         await ctx.db.insert("submissionAnswers", {
           submissionId,
