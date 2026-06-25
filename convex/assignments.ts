@@ -288,6 +288,7 @@ export const getAssignmentDetails = query({
       })
     }
 
+    const metadata = (assignment.metadata as Record<string, unknown> | undefined) ?? {}
     return {
       id: assignment._id,
       title: assignment.title,
@@ -296,8 +297,26 @@ export const getAssignmentDetails = query({
       subject: cls.subject ?? "Maths",
       dueDate: assignment.dueDate ?? null,
       status: assignment.status,
+      coverConfig: (metadata.coverConfig as unknown) ?? null,
       questions,
     }
+  },
+})
+
+/** Persist the editable front-cover config on an assignment (teacher-owned). */
+export const setCoverConfig = mutation({
+  args: {
+    assignmentId: v.id("assignments"),
+    teacherId: v.id("users"),
+    coverConfig: v.any(),
+  },
+  handler: async (ctx, { assignmentId, teacherId, coverConfig }) => {
+    const assignment = await ctx.db.get(assignmentId)
+    if (!assignment) return { error: "not_found" as const }
+    if (assignment.teacherId !== teacherId) return { error: "forbidden" as const }
+    const metadata = (assignment.metadata as Record<string, unknown> | undefined) ?? {}
+    await ctx.db.patch(assignmentId, { metadata: { ...metadata, coverConfig } })
+    return { success: true as const }
   },
 })
 

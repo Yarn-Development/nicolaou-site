@@ -91,6 +91,16 @@ export interface QuestionWithDetails {
   content_type: string
 }
 
+export interface CoverConfig {
+  /** "standard" = exam-board candidate cover; "simple" = clean branded cover. */
+  style: "standard" | "simple"
+  course: string
+  title: string
+  schoolName: string
+  teacherName: string
+  showCandidateBoxes: boolean
+}
+
 export interface AssignmentDetails {
   id: string
   title: string
@@ -102,6 +112,7 @@ export interface AssignmentDetails {
   total_marks: number
   question_count: number
   questions: QuestionWithDetails[]
+  cover_config: CoverConfig | null
 }
 
 // =====================================================
@@ -645,11 +656,67 @@ export async function getAssignmentDetails(
         total_marks: totalMarks,
         question_count: questions.length,
         questions,
+        cover_config: (result.coverConfig as CoverConfig | null) ?? null,
       },
     }
   } catch (error) {
     console.error("Error in getAssignmentDetails:", error)
     return { success: false, error: "An unexpected error occurred" }
+  }
+}
+
+/**
+ * Saves the editable front-cover config for an assignment.
+ */
+export async function saveCoverConfig(
+  assignmentId: string,
+  config: CoverConfig,
+): Promise<{ success: boolean; error?: string }> {
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
+  try {
+    const result = await fetchMutation(api.assignments.setCoverConfig, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: ctx.teacherId,
+      coverConfig: config,
+    })
+    if ("error" in result) {
+      return { success: false, error: result.error === "forbidden" ? "Permission denied" : "Assignment not found" }
+    }
+    return { success: true }
+  } catch (error) {
+    console.error("Error in saveCoverConfig:", error)
+    return { success: false, error: "Failed to save cover" }
+  }
+}
+
+/**
+ * Generate a shorter, easier pre-homework practice test from an assessment.
+ */
+export async function generatePracticeTest(
+  assignmentId: string,
+): Promise<{ success: boolean; assignmentId?: string; error?: string }> {
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
+  try {
+    const result = await fetchMutation(api.practice.generateFromAssignment, {
+      teacherId: ctx.teacherId,
+      sourceAssignmentId: assignmentId as Id<"assignments">,
+    })
+    if ("error" in result) {
+      const msg =
+        result.error === "no_questions" || result.error === "no_topics"
+          ? "Not enough questions in these topics to build a practice test."
+          : result.error === "forbidden"
+            ? "Permission denied"
+            : "Assignment not found"
+      return { success: false, error: msg }
+    }
+    revalidatePath("/dashboard/library")
+    return { success: true, assignmentId: result.id }
+  } catch (error) {
+    console.error("Error in generatePracticeTest:", error)
+    return { success: false, error: "Failed to generate practice test" }
   }
 }
 

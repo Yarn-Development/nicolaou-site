@@ -413,11 +413,23 @@ export const getDetail = query({
       })
     }
 
+    let assignmentTitle: string | null = null
+    let className: string | null = null
+    if (list.assignmentId) {
+      const a = await ctx.db.get(list.assignmentId)
+      assignmentTitle = a?.title ?? null
+      if (a?.classId) className = (await ctx.db.get(a.classId))?.name ?? null
+    }
+    if (!className && list.classId) className = (await ctx.db.get(list.classId))?.name ?? null
+
     return {
       revisionList: {
         id: list._id,
         title: list.title,
         description: list.description ?? null,
+        assignmentId: list.assignmentId ?? null,
+        assignmentTitle,
+        className,
         createdAt: list._creationTime,
       },
       questions,
