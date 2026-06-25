@@ -453,17 +453,157 @@ export const getTeacherRevisionLists = query({
           q.eq("revisionListId", list._id),
         )
         .collect()
+      let assignmentTitle: string | null = null
+      let className: string | null = null
+      if (list.assignmentId) {
+        const a = await ctx.db.get(list.assignmentId)
+        assignmentTitle = a?.title ?? null
+        if (a?.classId) className = (await ctx.db.get(a.classId))?.name ?? null
+      }
+      if (!className && list.classId) className = (await ctx.db.get(list.classId))?.name ?? null
       rows.push({
         id: list._id,
         title: list.title,
         description: list.description ?? null,
         questionCount: links.length,
         studentCount: allocs.length,
+        assignmentId: list.assignmentId ?? null,
+        assignmentTitle,
+        className,
         createdAt: list._creationTime,
       })
     }
 
     return rows.sort((a, b) => b.createdAt - a.createdAt)
+  },
+})
+
+/**
+ * Create (or refresh) the revision list linked to an assignment, from a set of
+ * existing question ids (the targeted revision questions from feedback). Idempotent:
+ * if a list already exists for the assignment, its questions are replaced.
+ * Allocates the list to every enrolled student in the assignment's class.
+ */
+export const createForAssignment = mutation({
+  args: {
+    teacherId: v.id("users"),
+    assignmentId: v.id("assignments"),
+    title: v.string(),
+    questionIds: v.array(v.id("questions")),
+  },
+  handler: async (ctx, { teacherId, assignmentId, title, questionIds }) => {
+    const assignment = await ctx.db.get(assignmentId)
+    if (!assignment) return { error: "not_found" as const }
+    if (assignment.teacherId !== teacherId) return { error: "forbidden" as const }
+    const classId = assignment.classId
+
+    const existing = await ctx.db
+      .query("revisionLists")
+      .withIndex("by_assignment", (q) => q.eq("assignmentId", assignmentId))
+      .first()
+
+    let listId
+    if (existing) {
+      listId = existing._id
+      const oldLinks = await ctx.db
+        .query("revisionListQuestions")
+        .withIndex("by_revision_list", (q) => q.eq("revisionListId", listId))
+        .collect()
+      for (const l of oldLinks) await ctx.db.delete(l._id)
+      await ctx.db.patch(listId, { title })
+    } else {
+      listId = await ctx.db.insert("revisionLists", {
+        createdBy: teacherId,
+        title,
+        assignmentId,
+        classId,
+      })
+    }
+
+    let order = 0
+    for (const qid of questionIds) {
+      await ctx.db.insert("revisionListQuestions", {
+        revisionListId: listId,
+        questionId: qid,
+        order: order++,
+      })
+    }
+
+    // Allocate to every enrolled student that doesn't already have it.
+    const enrollments = await ctx.db
+      .query("enrollments")
+      .withIndex("by_class", (q) => q.eq("classId", classId))
+      .collect()
+    for (const e of enrollments) {
+      const has = await ctx.db
+        .query("revisionAllocations")
+        .withIndex("by_student_list", (q) =>
+          q.eq("studentId", e.studentId).eq("revisionListId", listId),
+        )
+        .unique()
+      if (!has) {
+        await ctx.db.insert("revisionAllocations", {
+          revisionListId: listId,
+          studentId: e.studentId,
+          classId,
+          status: "pending",
+          progress: {},
+          allocatedAt: Date.now(),
+        })
+      }
+    }
+
+    return { id: listId, questionCount: questionIds.length }
+  },
+})
+
+/** The revision list linked to an assignment (with its questions + allocations). */
+export const getForAssignment = query({
+  args: { assignmentId: v.id("assignments") },
+  handler: async (ctx, { assignmentId }) => {
+    const list = await ctx.db
+      .query("revisionLists")
+      .withIndex("by_assignment", (q) => q.eq("assignmentId", assignmentId))
+      .first()
+    if (!list) return null
+
+    const links = await ctx.db
+      .query("revisionListQuestions")
+      .withIndex("by_revision_list", (q) => q.eq("revisionListId", list._id))
+      .collect()
+    links.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+
+    const questions = []
+    for (const l of links) {
+      const q = await ctx.db.get(l.questionId)
+      if (!q) continue
+      questions.push({
+        id: q._id as string,
+        questionLatex: q.questionLatex ?? "",
+        imageUrl: q.imageUrl ?? null,
+        marks: q.marks ?? 1,
+        topic: q.topic ?? q.topicName ?? "General",
+        subTopic: q.subTopic ?? "",
+        difficulty: q.difficulty ?? "Foundation",
+      })
+    }
+
+    const allocs = await ctx.db
+      .query("revisionAllocations")
+      .withIndex("by_revision_list", (q) => q.eq("revisionListId", list._id))
+      .collect()
+
+    return {
+      id: list._id as string,
+      title: list.title,
+      description: list.description ?? null,
+      createdAt: list._creationTime,
+      questions,
+      allocations: allocs.map((a) => ({
+        studentId: a.studentId as string,
+        status: a.status ?? "pending",
+      })),
+    }
   },
 })
 

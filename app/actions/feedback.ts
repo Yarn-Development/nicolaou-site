@@ -907,6 +907,20 @@ export async function releaseFeedbackAndGeneratePacks(assignmentId: string): Pro
       }
     }
 
+    // Persist a revision list linked to this assignment (union of the targeted
+    // revision questions across students) so it appears in the library/assignment.
+    const revisionQuestionIds = [
+      ...new Set(studentFeedback.flatMap((s) => s.revisionPack.map((q) => q.id))),
+    ] as Id<"questions">[]
+    if (revisionQuestionIds.length > 0) {
+      await fetchMutation(api.revisionLists.createForAssignment, {
+        teacherId: userId,
+        assignmentId: assignmentId as Id<"assignments">,
+        title: `Revision: ${assignment.title}`,
+        questionIds: revisionQuestionIds,
+      }).catch((e) => console.error("Failed to persist revision list:", e))
+    }
+
     return {
       success: true,
       data: {

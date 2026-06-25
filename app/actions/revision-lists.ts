@@ -318,12 +318,51 @@ export async function getAssignmentRevisionList(
   } | null
   error?: string
 }> {
-  void assignmentId
   const userId = await currentUserId()
   if (!userId) return { success: false, error: "You must be logged in" }
 
-  // No assignment linkage exists in the Convex schema; report none.
-  return { success: true, data: null }
+  try {
+    const rl = await fetchQuery(api.revisionLists.getForAssignment, {
+      assignmentId: assignmentId as Id<"assignments">,
+    })
+    if (!rl) return { success: true, data: null }
+
+    return {
+      success: true,
+      data: {
+        revisionList: {
+          id: rl.id,
+          title: rl.title,
+          description: rl.description,
+          createdAt: toIso(rl.createdAt),
+        },
+        questions: rl.questions.map((q, i) =>
+          mapQuestion({
+            questionId: q.id,
+            orderIndex: i,
+            questionLatex: q.questionLatex,
+            imageUrl: q.imageUrl,
+            topic: q.topic,
+            subTopic: q.subTopic,
+            difficulty: q.difficulty,
+            marks: q.marks,
+            answerKey: null,
+            calculatorAllowed: null,
+          }),
+        ),
+        allocations: rl.allocations.map((a) => ({
+          studentId: a.studentId,
+          studentName: "",
+          status: a.status,
+          completedQuestions: 0,
+          totalQuestions: rl.questions.length,
+        })),
+      },
+    }
+  } catch (error) {
+    console.error("Error in getAssignmentRevisionList:", error)
+    return { success: false, error: "An unexpected error occurred" }
+  }
 }
 
 // =====================================================
@@ -363,11 +402,10 @@ export async function getTeacherRevisionLists(): Promise<{
       id: rl.id,
       title: rl.title,
       description: rl.description,
-      // No assignment / class linkage in the Convex schema.
-      assignment_id: "",
-      assignment_title: "Unknown",
-      class_name: "Unknown",
-      subject: "Unknown",
+      assignment_id: rl.assignmentId ?? "",
+      assignment_title: rl.assignmentTitle ?? "—",
+      class_name: rl.className ?? "—",
+      subject: "Maths",
       question_count: rl.questionCount,
       student_count: rl.studentCount,
       created_at: toIso(rl.createdAt),
