@@ -691,6 +691,36 @@ export async function saveCoverConfig(
 }
 
 /**
+ * Generate a shorter, easier pre-homework practice test from an assessment.
+ */
+export async function generatePracticeTest(
+  assignmentId: string,
+): Promise<{ success: boolean; assignmentId?: string; error?: string }> {
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
+  try {
+    const result = await fetchMutation(api.practice.generateFromAssignment, {
+      teacherId: ctx.teacherId,
+      sourceAssignmentId: assignmentId as Id<"assignments">,
+    })
+    if ("error" in result) {
+      const msg =
+        result.error === "no_questions" || result.error === "no_topics"
+          ? "Not enough questions in these topics to build a practice test."
+          : result.error === "forbidden"
+            ? "Permission denied"
+            : "Assignment not found"
+      return { success: false, error: msg }
+    }
+    revalidatePath("/dashboard/library")
+    return { success: true, assignmentId: result.id }
+  } catch (error) {
+    console.error("Error in generatePracticeTest:", error)
+    return { success: false, error: "Failed to generate practice test" }
+  }
+}
+
+/**
  * Updates the questions linked to an assignment
  */
 export async function updateAssignmentQuestions(

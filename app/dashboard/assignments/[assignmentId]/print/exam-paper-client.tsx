@@ -2,13 +2,13 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Printer, FileText, ClipboardList, Download, FileDown } from "lucide-react"
+import { ArrowLeft, Printer, FileText, ClipboardList, Download, FileDown, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LatexPreview } from "@/components/latex-preview"
 import { exportExamToWord } from "@/lib/docx-exporter"
 import type { ExamQuestion } from "@/lib/docx-exporter"
 import type { AssignmentDetails, CoverConfig } from "@/app/actions/assignments"
-import { saveCoverConfig } from "@/app/actions/assignments"
+import { saveCoverConfig, generatePracticeTest } from "@/app/actions/assignments"
 import "katex/dist/katex.min.css"
 
 // =====================================================
@@ -133,6 +133,21 @@ export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProp
     }
   }
 
+  const [genPractice, setGenPractice] = useState(false)
+  const handlePracticeTest = async () => {
+    setGenPractice(true)
+    try {
+      const res = await generatePracticeTest(assignment.id)
+      if (res.success && res.assignmentId) {
+        router.push(`/dashboard/assignments/${res.assignmentId}/print`)
+      } else {
+        alert(res.error || "Failed to generate practice test")
+      }
+    } finally {
+      setGenPractice(false)
+    }
+  }
+
   const handlePrint = () => {
     window.print()
   }
@@ -254,6 +269,19 @@ export function ExamPaperClient({ assignment, initialView }: ExamPaperClientProp
               >
                 <FileText className="h-4 w-4 mr-2" />
                 Cover
+              </Button>
+            )}
+
+            {/* Generate pre-homework practice test (paper view only) */}
+            {view === "paper" && (
+              <Button
+                onClick={handlePracticeTest}
+                disabled={genPractice}
+                variant="outline"
+                className="border-2 border-black font-bold uppercase tracking-wider text-xs"
+              >
+                <Sparkles className="h-4 w-4 mr-2" />
+                {genPractice ? "Building..." : "Practice Test"}
               </Button>
             )}
 
