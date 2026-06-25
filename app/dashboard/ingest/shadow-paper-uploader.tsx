@@ -4,7 +4,9 @@ import { useState, useCallback } from "react"
 import { useDropzone } from "react-dropzone"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
-import { createClient } from "@/lib/supabase/client"
+import { useConvex } from "convex/react"
+import { api } from "@/convex/_generated/api"
+import type { Id } from "@/convex/_generated/dataModel"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -28,7 +30,9 @@ import {
   Calendar,
   GraduationCap,
   Users,
+  Library,
 } from "lucide-react"
+import type { DigitizedPaper } from "@/app/actions/external-assignment"
 
 // =====================================================
 // Types
@@ -54,35 +58,171 @@ const YEARS = Array.from(
 const TARGET_STREAMS = [
   { value: "GCSE Foundation", label: "GCSE Foundation" },
   { value: "GCSE Higher", label: "GCSE Higher" },
-  { value: "A-Level Pure", label: "A Level Pure" },
-  { value: "A-Level Statistics", label: "A Level Statistics" },
-  { value: "A-Level Mechanics", label: "A Level Mechanics" },
+  { value: "AS Level", label: "AS Level" },
+  { value: "A Level", label: "A Level" },
+  { value: "IGCSE", label: "IGCSE" },
+  { value: "IB SL", label: "IB SL" },
+  { value: "IB HL", label: "IB HL" },
 ]
 
 // =====================================================
 // Props
 // =====================================================
 
+type PaperSource = "upload" | "library"
+type SourceMode = "ai_only" | "bank_only" | "mixed"
+
 interface ShadowPaperUploaderProps {
   classes: Array<{ id: string; name: string }>
+  digitizedPapers: DigitizedPaper[]
+}
+
+// =====================================================
+// TargetSettings sub-component (shared between upload/library views)
+// =====================================================
+
+interface TargetSettingsProps {
+  classes: Array<{ id: string; name: string }>
+  selectedClassId: string
+  setSelectedClassId: (v: string) => void
+  targetStream: string
+  setTargetStream: (v: string) => void
+  targetYear: string
+  setTargetYear: (v: string) => void
+  isProcessing: boolean
+}
+
+function TargetSettings({
+  classes, selectedClassId, setSelectedClassId,
+  targetStream, setTargetStream,
+  targetYear, setTargetYear,
+  isProcessing,
+}: TargetSettingsProps) {
+  return (
+    <div className="border-2 border-swiss-ink bg-swiss-paper p-4 space-y-4 flex-shrink-0">
+      <h3 className="text-sm font-black uppercase tracking-widest text-swiss-ink">TARGET SETTINGS</h3>
+      <div className="grid grid-cols-3 gap-4">
+        <div className="space-y-2">
+          <label className="text-xs font-bold uppercase tracking-widest text-swiss-lead flex items-center gap-1">
+            <Users className="w-3 h-3" />
+            ASSIGN TO CLASS *
+          </label>
+          <Select value={selectedClassId} onValueChange={setSelectedClassId} disabled={isProcessing}>
+            <SelectTrigger className="border-2 border-swiss-ink bg-white">
+              <SelectValue placeholder="Select..." />
+            </SelectTrigger>
+            <SelectContent>
+              {classes.map(c => (
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-bold uppercase tracking-widest text-swiss-lead flex items-center gap-1">
+            <GraduationCap className="w-3 h-3" />
+            TARGET STREAM *
+          </label>
+          <Select value={targetStream} onValueChange={setTargetStream} disabled={isProcessing}>
+            <SelectTrigger className="border-2 border-swiss-ink bg-white">
+              <SelectValue placeholder="Select..." />
+            </SelectTrigger>
+            <SelectContent>
+              {TARGET_STREAMS.map(s => (
+                <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-bold uppercase tracking-widest text-swiss-lead flex items-center gap-1">
+            <Calendar className="w-3 h-3" />
+            TARGET YEAR
+          </label>
+          <Select value={targetYear} onValueChange={setTargetYear} disabled={isProcessing}>
+            <SelectTrigger className="border-2 border-swiss-ink bg-white">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {YEARS.map(y => (
+                <SelectItem key={y} value={y}>{y}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// =====================================================
+// Source Mode Selector sub-component
+// =====================================================
+
+interface SourceModeSelectorProps {
+  sourceMode: SourceMode
+  setSourceMode: (v: SourceMode) => void
+  isProcessing: boolean
+}
+
+const SOURCE_MODE_OPTIONS: { value: SourceMode; label: string; description: string }[] = [
+  { value: "ai_only", label: "AI Only", description: "New questions generated by AI, matching exam style" },
+  { value: "bank_only", label: "Bank Only", description: "Questions drawn from your question bank by topic" },
+  { value: "mixed", label: "Mixed", description: "Half from the bank, half AI-generated" },
+]
+
+function SourceModeSelector({ sourceMode, setSourceMode, isProcessing }: SourceModeSelectorProps) {
+  return (
+    <div className="border-2 border-swiss-ink bg-swiss-paper p-4 space-y-3 flex-shrink-0">
+      <h3 className="text-sm font-black uppercase tracking-widest text-swiss-ink">QUESTION SOURCE</h3>
+      <div className="grid grid-cols-3 gap-2">
+        {SOURCE_MODE_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => setSourceMode(opt.value)}
+            disabled={isProcessing}
+            className={`border-2 p-3 text-left transition-colors ${
+              sourceMode === opt.value
+                ? "border-swiss-signal bg-swiss-signal/5"
+                : "border-swiss-ink/30 bg-white hover:border-swiss-ink"
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
+          >
+            <div className={`text-xs font-black uppercase tracking-wider mb-1 ${sourceMode === opt.value ? "text-swiss-signal" : "text-swiss-ink"}`}>
+              {opt.label}
+            </div>
+            <div className="text-[10px] text-swiss-lead leading-tight">{opt.description}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 // =====================================================
 // Component
 // =====================================================
 
-export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
+export function ShadowPaperUploader({ classes, digitizedPapers }: ShadowPaperUploaderProps) {
   const router = useRouter()
-  
+  const convex = useConvex()
+
+  // Source toggle: upload a new PDF or pick from library
+  const [paperSource, setPaperSource] = useState<PaperSource>("upload")
+  const [loadingLibraryPaper, setLoadingLibraryPaper] = useState(false)
+
   // File state
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  
+  const [selectedLibraryPaperId, setSelectedLibraryPaperId] = useState<string | null>(null)
+
   // Settings state
   const [targetYear, setTargetYear] = useState(new Date().getFullYear().toString())
   const [targetStream, setTargetStream] = useState("")
   const [selectedClassId, setSelectedClassId] = useState("")
-  
+  const [sourceMode, setSourceMode] = useState<SourceMode>("ai_only")
+
   // Processing state
   const [progress, setProgress] = useState<ProcessingProgress>({
     status: "idle",
@@ -131,6 +271,43 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
   })
 
   // =====================================================
+  // Load a PDF from the library by URL
+  // =====================================================
+
+  const handleSelectLibraryPaper = async (paper: DigitizedPaper) => {
+    try {
+      setLoadingLibraryPaper(true)
+      setSelectedLibraryPaperId(paper.id)
+
+      const response = await fetch(paper.resource_url)
+      if (!response.ok) throw new Error("Failed to download paper from library")
+
+      const blob = await response.blob()
+      const pdfFile = new File([blob], `${paper.title}.pdf`, { type: "application/pdf" })
+
+      setFile(pdfFile)
+      setPreviewUrl(URL.createObjectURL(pdfFile))
+      setProgress({ status: "idle", message: "", currentStep: 0, totalSteps: 4 })
+      setResultAssignmentId(null)
+
+      // Pre-fill stream from paper metadata
+      if (paper.level) setTargetStream(paper.level)
+      if (paper.year) setTargetYear(paper.year)
+
+      toast.success("PAPER LOADED", {
+        description: `${paper.title} ready for shadow generation`
+      })
+    } catch (error) {
+      toast.error("LOAD FAILED", {
+        description: error instanceof Error ? error.message : "Could not load paper"
+      })
+      setSelectedLibraryPaperId(null)
+    } finally {
+      setLoadingLibraryPaper(false)
+    }
+  }
+
+  // =====================================================
   // PDF to Images conversion
   // =====================================================
 
@@ -172,36 +349,36 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
   }
 
   // =====================================================
-  // Helper: Upload page images to Supabase Storage
+  // Helper: Upload page images to Convex file storage.
+  // Returns the Convex storageIds — the /api/ai/shadow-paper route resolves
+  // served URLs (and cleans them up) from these ids.
   // =====================================================
 
   const uploadPageImages = async (images: string[]): Promise<string[]> => {
-    const supabase = createClient()
-    const timestamp = Date.now()
-    const uploadedPaths: string[] = []
+    const storageIds: string[] = []
 
     for (let i = 0; i < images.length; i++) {
       // Convert base64 data URL to Blob
       const response = await fetch(images[i])
       const blob = await response.blob()
 
-      const filePath = `shadow-pages/${timestamp}/page-${i + 1}.png`
+      // 1. Request an upload URL from Convex.
+      const { uploadUrl } = await convex.mutation(api.files.generateUploadUrl, {})
 
-      const { error } = await supabase.storage
-        .from("exam-papers")
-        .upload(filePath, blob, {
-          contentType: "image/png",
-          upsert: false,
-        })
-
-      if (error) {
-        throw new Error(`Failed to upload page ${i + 1}: ${error.message}`)
+      // 2. POST the page image directly to Convex storage.
+      const uploadRes = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": "image/png" },
+        body: blob,
+      })
+      if (!uploadRes.ok) {
+        throw new Error(`Failed to upload page ${i + 1}: status ${uploadRes.status}`)
       }
-
-      uploadedPaths.push(filePath)
+      const { storageId } = (await uploadRes.json()) as { storageId: Id<"_storage"> }
+      storageIds.push(storageId)
     }
 
-    return uploadedPaths
+    return storageIds
   }
 
   // =====================================================
@@ -231,7 +408,7 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
         throw new Error("Failed to convert PDF to images")
       }
 
-      // Step 1b: Upload images to Supabase Storage
+      // Step 1b: Upload images to Convex storage
       setProgress({
         status: "uploading",
         message: `Uploading ${pageImages.length} page images...`,
@@ -241,7 +418,7 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
 
       const imagePaths = await uploadPageImages(pageImages)
 
-      // Step 2: Send storage paths to API for extraction
+      // Step 2: Send Convex served URLs to API for extraction
       setProgress({
         status: "extracting",
         message: `Extracting questions from ${imagePaths.length} pages...`,
@@ -260,6 +437,7 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
           targetStream,
           classId: selectedClassId,
           originalFilename: file.name,
+          sourceMode,
         }),
       })
 
@@ -307,6 +485,7 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
   const handleReset = () => {
     setFile(null)
     setPreviewUrl(null)
+    setSelectedLibraryPaperId(null)
     setProgress({ status: "idle", message: "", currentStep: 0, totalSteps: 4 })
     setResultAssignmentId(null)
     setResultTitle("")
@@ -320,7 +499,7 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Left Panel: File Upload */}
+      {/* Left Panel: Paper Source */}
       <Card className="border-2 border-swiss-ink bg-swiss-paper h-[700px] flex flex-col">
         <CardHeader className="border-b-2 border-swiss-ink flex-shrink-0">
           <div className="flex items-center gap-2">
@@ -330,140 +509,201 @@ export function ShadowPaperUploader({ classes }: ShadowPaperUploaderProps) {
             </CardTitle>
           </div>
           <CardDescription className="font-bold text-xs uppercase tracking-wider text-swiss-lead">
-            Upload a past paper to generate similar practice questions
+            Choose a past paper to generate similar practice questions
           </CardDescription>
+
+          {/* Source toggle */}
+          <div className="flex border-2 border-swiss-ink mt-2">
+            <button
+              type="button"
+              onClick={() => { setPaperSource("upload"); handleReset() }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+                paperSource === "upload"
+                  ? "bg-swiss-ink text-white"
+                  : "hover:bg-swiss-concrete"
+              }`}
+            >
+              <Upload className="w-3 h-3" />
+              Upload New
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPaperSource("library"); handleReset() }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold uppercase tracking-wider transition-colors border-l-2 border-swiss-ink ${
+                paperSource === "library"
+                  ? "bg-swiss-ink text-white"
+                  : "hover:bg-swiss-concrete"
+              }`}
+            >
+              <Library className="w-3 h-3" />
+              From Library
+            </button>
+          </div>
         </CardHeader>
 
         <CardContent className="flex-1 p-4 overflow-hidden flex flex-col">
-          {!file ? (
-            /* Dropzone */
-            <div
-              {...getRootProps()}
-              className={`flex-1 border-2 border-dashed flex items-center justify-center cursor-pointer transition-colors ${
-                isDragActive 
-                  ? "border-swiss-signal bg-swiss-signal/10" 
-                  : "border-swiss-ink bg-swiss-concrete hover:bg-swiss-concrete/70"
-              }`}
-            >
-              <input {...getInputProps()} />
-              <div className="text-center space-y-4 p-8">
-                <div className={`w-20 h-20 mx-auto border-2 flex items-center justify-center transition-colors ${
-                  isDragActive ? "border-swiss-signal bg-swiss-signal/20" : "border-swiss-ink bg-swiss-paper"
-                }`}>
-                  <Upload className={`w-10 h-10 ${isDragActive ? "text-swiss-signal" : "text-swiss-lead"}`} />
-                </div>
-                <div>
-                  <p className="text-lg font-black uppercase tracking-wider text-swiss-ink mb-2">
-                    {isDragActive ? "DROP YOUR PAST PAPER HERE" : "DRAG & DROP YOUR PAST PAPER HERE"}
-                  </p>
-                  <p className="text-sm text-swiss-lead">
-                    or click to browse for a PDF file
-                  </p>
-                </div>
-                <div className="flex items-center justify-center gap-2">
-                  <Badge variant="outline" className="border-swiss-ink text-xs">
-                    PDF only
-                  </Badge>
-                  <Badge variant="outline" className="border-swiss-ink text-xs">
-                    Max 50MB
-                  </Badge>
+          {/* ---- UPLOAD SOURCE ---- */}
+          {paperSource === "upload" && (
+            !file ? (
+              /* Dropzone */
+              <div
+                {...getRootProps()}
+                className={`flex-1 border-2 border-dashed flex items-center justify-center cursor-pointer transition-colors ${
+                  isDragActive
+                    ? "border-swiss-signal bg-swiss-signal/10"
+                    : "border-swiss-ink bg-swiss-concrete hover:bg-swiss-concrete/70"
+                }`}
+              >
+                <input {...getInputProps()} />
+                <div className="text-center space-y-4 p-8">
+                  <div className={`w-20 h-20 mx-auto border-2 flex items-center justify-center transition-colors ${
+                    isDragActive ? "border-swiss-signal bg-swiss-signal/20" : "border-swiss-ink bg-swiss-paper"
+                  }`}>
+                    <Upload className={`w-10 h-10 ${isDragActive ? "text-swiss-signal" : "text-swiss-lead"}`} />
+                  </div>
+                  <div>
+                    <p className="text-lg font-black uppercase tracking-wider text-swiss-ink mb-2">
+                      {isDragActive ? "DROP YOUR PAST PAPER HERE" : "DRAG & DROP YOUR PAST PAPER HERE"}
+                    </p>
+                    <p className="text-sm text-swiss-lead">
+                      or click to browse for a PDF file
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-center gap-2">
+                    <Badge variant="outline" className="border-swiss-ink text-xs">PDF only</Badge>
+                    <Badge variant="outline" className="border-swiss-ink text-xs">Max 50MB</Badge>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            /* File Preview & Settings */
-            <div className="flex-1 flex flex-col gap-4">
-              {/* File info */}
-              <div className="border-2 border-swiss-ink bg-swiss-concrete p-4 flex items-center gap-4">
-                <div className="w-12 h-12 border-2 border-swiss-ink bg-swiss-paper flex items-center justify-center">
-                  <FileText className="w-6 h-6 text-swiss-signal" />
+            ) : (
+              /* File selected */
+              <div className="flex-1 flex flex-col gap-4">
+                {/* File info */}
+                <div className="border-2 border-swiss-ink bg-swiss-concrete p-4 flex items-center gap-4 flex-shrink-0">
+                  <div className="w-12 h-12 border-2 border-swiss-ink bg-swiss-paper flex items-center justify-center">
+                    <FileText className="w-6 h-6 text-swiss-signal" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm truncate">{file.name}</p>
+                    <p className="text-xs text-swiss-lead">
+                      {(file.size / (1024 * 1024)).toFixed(2)} MB
+                    </p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={handleReset} disabled={isProcessing} className="border-2 border-swiss-ink">
+                    <X className="w-4 h-4" />
+                  </Button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-sm truncate">{file.name}</p>
-                  <p className="text-xs text-swiss-lead">
-                    {(file.size / (1024 * 1024)).toFixed(2)} MB
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleReset}
-                  disabled={isProcessing}
-                  className="border-2 border-swiss-ink"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
 
-              {/* PDF Preview */}
-              {previewUrl && (
-                <div className="flex-1 border-2 border-swiss-ink bg-white overflow-hidden">
-                  <iframe
-                    src={previewUrl}
-                    className="w-full h-full"
-                    title="PDF Preview"
+                {/* PDF Preview */}
+                {previewUrl && (
+                  <div className="flex-1 border-2 border-swiss-ink bg-white overflow-hidden">
+                    <iframe src={previewUrl} className="w-full h-full" title="PDF Preview" />
+                  </div>
+                )}
+
+                {/* Settings */}
+                <TargetSettings
+                  classes={classes}
+                  selectedClassId={selectedClassId}
+                  setSelectedClassId={setSelectedClassId}
+                  targetStream={targetStream}
+                  setTargetStream={setTargetStream}
+                  targetYear={targetYear}
+                  setTargetYear={setTargetYear}
+                  isProcessing={isProcessing}
+                />
+
+                {/* Source Mode */}
+                <SourceModeSelector sourceMode={sourceMode} setSourceMode={setSourceMode} isProcessing={isProcessing} />
+              </div>
+            )
+          )}
+
+          {/* ---- LIBRARY SOURCE ---- */}
+          {paperSource === "library" && (
+            <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+              {!file ? (
+                /* Paper picker list */
+                <div className="flex-1 overflow-y-auto space-y-2">
+                  {digitizedPapers.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center text-center p-8">
+                      <div className="space-y-3">
+                        <Library className="w-12 h-12 mx-auto text-swiss-lead opacity-50" />
+                        <p className="font-bold text-swiss-ink">No digitized papers yet</p>
+                        <p className="text-sm text-swiss-lead">
+                          Use Smart Digitize to upload papers first, then pick them here.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    digitizedPapers.map(paper => (
+                      <button
+                        key={paper.id}
+                        type="button"
+                        onClick={() => handleSelectLibraryPaper(paper)}
+                        disabled={loadingLibraryPaper}
+                        className={`w-full text-left border-2 p-4 transition-colors hover:bg-swiss-concrete flex items-center gap-4 ${
+                          selectedLibraryPaperId === paper.id
+                            ? "border-swiss-signal bg-swiss-signal/10"
+                            : "border-swiss-ink"
+                        }`}
+                      >
+                        <div className="w-10 h-10 border-2 border-swiss-ink bg-swiss-concrete flex items-center justify-center flex-shrink-0">
+                          {loadingLibraryPaper && selectedLibraryPaperId === paper.id
+                            ? <Loader2 className="w-5 h-5 animate-spin text-swiss-signal" />
+                            : <FileText className="w-5 h-5 text-swiss-lead" />
+                          }
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-sm truncate">{paper.title}</p>
+                          <p className="text-xs text-swiss-lead">
+                            {[paper.exam_board, paper.level, paper.year].filter(Boolean).join(" · ")}
+                          </p>
+                        </div>
+                        {selectedLibraryPaperId === paper.id && !loadingLibraryPaper && (
+                          <Check className="w-5 h-5 text-swiss-signal flex-shrink-0" />
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : (
+                /* Paper loaded from library */
+                <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+                  <div className="border-2 border-swiss-signal bg-swiss-signal/10 p-4 flex items-center gap-4 flex-shrink-0">
+                    <div className="w-12 h-12 border-2 border-swiss-signal bg-white flex items-center justify-center">
+                      <Library className="w-6 h-6 text-swiss-signal" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-sm truncate text-swiss-signal">FROM LIBRARY</p>
+                      <p className="text-xs text-swiss-ink font-bold truncate">{file.name.replace(/\.pdf$/i, "")}</p>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={handleReset} disabled={isProcessing} className="border-2 border-swiss-ink">
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  {previewUrl && (
+                    <div className="flex-1 border-2 border-swiss-ink bg-white overflow-hidden">
+                      <iframe src={previewUrl} className="w-full h-full" title="PDF Preview" />
+                    </div>
+                  )}
+
+                  <TargetSettings
+                    classes={classes}
+                    selectedClassId={selectedClassId}
+                    setSelectedClassId={setSelectedClassId}
+                    targetStream={targetStream}
+                    setTargetStream={setTargetStream}
+                    targetYear={targetYear}
+                    setTargetYear={setTargetYear}
+                    isProcessing={isProcessing}
                   />
+
+                  {/* Source Mode */}
+                  <SourceModeSelector sourceMode={sourceMode} setSourceMode={setSourceMode} isProcessing={isProcessing} />
                 </div>
               )}
-
-              {/* Settings */}
-              <div className="border-2 border-swiss-ink bg-swiss-paper p-4 space-y-4">
-                <h3 className="text-sm font-black uppercase tracking-widest text-swiss-ink">
-                  TARGET SETTINGS
-                </h3>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-lead flex items-center gap-1">
-                      <Users className="w-3 h-3" />
-                      ASSIGN TO CLASS *
-                    </label>
-                    <Select value={selectedClassId} onValueChange={setSelectedClassId} disabled={isProcessing}>
-                      <SelectTrigger className="border-2 border-swiss-ink bg-white">
-                        <SelectValue placeholder="Select..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {classes.map(c => (
-                          <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-lead flex items-center gap-1">
-                      <GraduationCap className="w-3 h-3" />
-                      TARGET STREAM *
-                    </label>
-                    <Select value={targetStream} onValueChange={setTargetStream} disabled={isProcessing}>
-                      <SelectTrigger className="border-2 border-swiss-ink bg-white">
-                        <SelectValue placeholder="Select..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TARGET_STREAMS.map(s => (
-                          <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-lead flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      TARGET YEAR
-                    </label>
-                    <Select value={targetYear} onValueChange={setTargetYear} disabled={isProcessing}>
-                      <SelectTrigger className="border-2 border-swiss-ink bg-white">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {YEARS.map(y => (
-                          <SelectItem key={y} value={y}>{y}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
             </div>
           )}
         </CardContent>

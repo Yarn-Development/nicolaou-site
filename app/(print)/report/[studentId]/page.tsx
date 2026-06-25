@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
+import { fetchQuery, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
+import type { Id } from "@/convex/_generated/dataModel"
 import { getStudentDashboardData } from "@/app/actions/feedback"
 
 interface Props {
@@ -19,22 +21,21 @@ const MOCK_ATTENDANCE = {
 
 export default async function ParentReportPage({ params }: Props) {
   const { studentId } = await params
-  const supabase = await createClient()
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const authUser = await getAuthUser()
 
-  if (!user) {
-    redirect("/login")
+  if (!authUser) {
+    redirect("/sign-in")
   }
 
-  // Get student profile
-  const { data: student } = await supabase
-    .from("profiles")
-    .select("id, full_name, email")
-    .eq("id", studentId)
-    .single()
+  // Get student profile (resolve from the signed-in teacher's roster of students)
+  const teacherId = authUser.clerkId
+    ? await getConvexUserIdByClerkId(authUser.clerkId)
+    : null
+  const students = teacherId
+    ? await fetchQuery(api.users.getStudentsForTeacher, { teacherId })
+    : []
+  const student = students.find((s) => s && s._id === (studentId as Id<"users">)) ?? null
 
   if (!student) {
     return (
@@ -44,11 +45,13 @@ export default async function ParentReportPage({ params }: Props) {
     )
   }
 
+  const studentEmail = student.email ?? ""
+
   // Get dashboard data (using server-side call)
   // Note: This requires the teacher to be logged in or the student themselves
   const result = await getStudentDashboardData()
-  
-  const studentName = student.full_name || student.email.split("@")[0]
+
+  const studentName = student.fullName || studentEmail.split("@")[0]
   const generatedDate = new Date().toLocaleDateString("en-GB", {
     day: "numeric",
     month: "long",
@@ -111,7 +114,7 @@ export default async function ParentReportPage({ params }: Props) {
             STUDENT NAME
           </p>
           <p className="text-2xl font-black uppercase">{studentName}</p>
-          <p className="text-sm text-gray-500 mt-1">{student.email}</p>
+          <p className="text-sm text-gray-500 mt-1">{studentEmail}</p>
         </div>
         
         <div 

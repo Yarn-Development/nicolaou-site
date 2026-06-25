@@ -33,6 +33,8 @@ import {
   Plus,
   Save,
   Eye,
+  Database,
+  ClipboardList,
 } from "lucide-react"
 import type { DetectedQuestion } from "@/app/api/ai/analyze-paper/route"
 import { uploadExamPaper, createExternalAssignment } from "@/app/actions/external-assignment"
@@ -67,14 +69,17 @@ const EXAM_BOARDS = [
   { value: "MEI", label: "MEI" },
   { value: "WJEC", label: "WJEC" },
   { value: "CIE", label: "Cambridge (CIE)" },
+  { value: "IB", label: "IB (International Baccalaureate)" },
 ]
 
 const LEVELS = [
   { value: "GCSE Foundation", label: "GCSE Foundation" },
   { value: "GCSE Higher", label: "GCSE Higher" },
-  { value: "A-Level Pure", label: "A-Level Pure" },
-  { value: "A-Level Statistics", label: "A-Level Statistics" },
-  { value: "A-Level Mechanics", label: "A-Level Mechanics" },
+  { value: "AS Level", label: "AS Level" },
+  { value: "A Level", label: "A Level" },
+  { value: "IGCSE", label: "IGCSE" },
+  { value: "IB SL", label: "IB SL" },
+  { value: "IB HL", label: "IB HL" },
 ]
 
 const TOPIC_OPTIONS = [
@@ -128,6 +133,7 @@ export function SmartDigitizer({ classes }: SmartDigitizerProps) {
   const [analysisError, setAnalysisError] = useState<string | null>(null)
   
   // Assignment state
+  const [saveMode, setSaveMode] = useState<"bank" | "assignment">("assignment")
   const [selectedClassId, setSelectedClassId] = useState<string>("")
   const [assignmentTitle, setAssignmentTitle] = useState<string>("")
   const [resultAssignmentId, setResultAssignmentId] = useState<string | null>(null)
@@ -326,11 +332,6 @@ export function SmartDigitizer({ classes }: SmartDigitizerProps) {
       return
     }
 
-    if (!selectedClassId) {
-      toast.error("NO CLASS SELECTED", { description: "Please select a class" })
-      return
-    }
-
     if (!assignmentTitle.trim()) {
       toast.error("NO TITLE", { description: "Please enter an assignment title" })
       return
@@ -364,22 +365,25 @@ export function SmartDigitizer({ classes }: SmartDigitizerProps) {
       }))
 
       const createResult = await createExternalAssignment({
-        classId: selectedClassId,
+        classId: selectedClassId || undefined,
         title: assignmentTitle,
         resourceUrl: uploadResult.data.url,
         mappedQuestions,
         mode: "paper",
+        examBoard: metadata.examBoard || undefined,
+        level: metadata.level || undefined,
+        year: metadata.year || undefined,
       })
 
       if (!createResult.success || !createResult.data) {
         throw new Error(createResult.error || "Failed to create assignment")
       }
 
-      setResultAssignmentId(createResult.data.id)
+      setResultAssignmentId(createResult.data.id || null)
       setStep("complete")
 
-      toast.success("ASSIGNMENT CREATED", {
-        description: `${questions.length} questions mapped`
+      toast.success(saveMode === "bank" ? "SAVED TO QUESTION BANK" : "ASSIGNMENT CREATED", {
+        description: `${questions.length} questions saved`
       })
 
     } catch (error) {
@@ -887,38 +891,74 @@ export function SmartDigitizer({ classes }: SmartDigitizerProps) {
           </Card>
         </div>
 
-        {/* Bottom: Assignment Settings & Save */}
+        {/* Bottom: Save Options */}
         <Card className="border-2 border-swiss-ink bg-swiss-paper">
-          <CardContent className="p-6">
+          <CardContent className="p-6 space-y-4">
+            {/* Mode toggle */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setSaveMode("bank")}
+                className={`border-2 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${
+                  saveMode === "bank"
+                    ? "bg-swiss-ink text-swiss-paper border-swiss-ink"
+                    : "border-swiss-ink hover:bg-swiss-concrete"
+                }`}
+              >
+                <Database className="w-4 h-4 inline mr-2" />
+                Save to My Bank
+              </button>
+              <button
+                type="button"
+                onClick={() => setSaveMode("assignment")}
+                className={`border-2 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-colors ${
+                  saveMode === "assignment"
+                    ? "bg-swiss-ink text-swiss-paper border-swiss-ink"
+                    : "border-swiss-ink hover:bg-swiss-concrete"
+                }`}
+              >
+                <ClipboardList className="w-4 h-4 inline mr-2" />
+                Save as Assignment
+              </button>
+            </div>
+
+            <p className="text-xs text-swiss-lead">
+              {saveMode === "bank"
+                ? "Questions are saved to your question bank only. You can assign them to a class later from the Question Bank."
+                : "Questions are saved to your bank and also assigned to a class immediately."}
+            </p>
+
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-              <div className="space-y-2">
+              {saveMode === "assignment" && (
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-swiss-lead">
+                    ASSIGN TO CLASS *
+                  </label>
+                  <Select value={selectedClassId} onValueChange={setSelectedClassId}>
+                    <SelectTrigger className="border-2 border-swiss-ink bg-white">
+                      <SelectValue placeholder="Select class..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {classes.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className={`space-y-2 ${saveMode === "assignment" ? "md:col-span-2" : "md:col-span-3"}`}>
                 <label className="text-xs font-bold uppercase tracking-widest text-swiss-lead">
-                  ASSIGN TO CLASS *
-                </label>
-                <Select value={selectedClassId} onValueChange={setSelectedClassId}>
-                  <SelectTrigger className="border-2 border-swiss-ink bg-white">
-                    <SelectValue placeholder="Select class..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {classes.map(c => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-swiss-lead">
-                  ASSIGNMENT TITLE *
+                  {saveMode === "bank" ? "PAPER TITLE *" : "ASSIGNMENT TITLE *"}
                 </label>
                 <Input
                   value={assignmentTitle}
                   onChange={(e) => setAssignmentTitle(e.target.value)}
-                  placeholder="e.g., Practice Paper 1"
+                  placeholder={saveMode === "bank" ? "e.g., Edexcel 2023 Paper 1" : "e.g., Practice Paper 1"}
                   className="border-2 border-swiss-ink bg-white"
                 />
               </div>
-              
+
               <div className="flex gap-2">
                 <Button
                   variant="outline"
@@ -931,7 +971,12 @@ export function SmartDigitizer({ classes }: SmartDigitizerProps) {
                 </Button>
                 <Button
                   onClick={handleSaveAssignment}
-                  disabled={step === "saving" || !selectedClassId || !assignmentTitle.trim() || questions.length === 0}
+                  disabled={
+                    step === "saving" ||
+                    !assignmentTitle.trim() ||
+                    questions.length === 0 ||
+                    (saveMode === "assignment" && !selectedClassId)
+                  }
                   className="flex-1 bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider"
                 >
                   {step === "saving" ? (
@@ -942,7 +987,7 @@ export function SmartDigitizer({ classes }: SmartDigitizerProps) {
                   ) : (
                     <>
                       <Save className="w-4 h-4 mr-2" />
-                      SAVE ASSIGNMENT
+                      {saveMode === "bank" ? "SAVE TO BANK" : "SAVE ASSIGNMENT"}
                     </>
                   )}
                 </Button>
@@ -959,6 +1004,7 @@ export function SmartDigitizer({ classes }: SmartDigitizerProps) {
   // =====================================================
 
   if (step === "complete") {
+    const isBankOnly = saveMode === "bank"
     return (
       <Card className="border-2 border-swiss-ink bg-swiss-paper max-w-xl mx-auto">
         <CardContent className="p-8">
@@ -968,7 +1014,7 @@ export function SmartDigitizer({ classes }: SmartDigitizerProps) {
             </div>
             <div>
               <p className="text-2xl font-black uppercase tracking-wider text-swiss-ink mb-2">
-                ASSIGNMENT CREATED
+                {isBankOnly ? "SAVED TO QUESTION BANK" : "ASSIGNMENT CREATED"}
               </p>
               <p className="text-lg text-swiss-lead mb-4">
                 {assignmentTitle}
@@ -985,15 +1031,25 @@ export function SmartDigitizer({ classes }: SmartDigitizerProps) {
                 </div>
               </div>
             </div>
-            
+
             <div className="space-y-3 pt-4">
-              <Button
-                onClick={() => router.push(`/dashboard/assignments/${resultAssignmentId}`)}
-                className="w-full bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider h-12"
-              >
-                VIEW ASSIGNMENT
-                <ChevronRight className="w-4 h-4 ml-2" />
-              </Button>
+              {isBankOnly ? (
+                <Button
+                  onClick={() => router.push("/dashboard/questions/browse")}
+                  className="w-full bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider h-12"
+                >
+                  <Database className="w-4 h-4 mr-2" />
+                  VIEW QUESTION BANK
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => router.push(`/dashboard/assignments/${resultAssignmentId}`)}
+                  className="w-full bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase tracking-wider h-12"
+                >
+                  VIEW ASSIGNMENT
+                  <ChevronRight className="w-4 h-4 ml-2" />
+                </Button>
+              )}
               <Button
                 onClick={handleReset}
                 variant="outline"

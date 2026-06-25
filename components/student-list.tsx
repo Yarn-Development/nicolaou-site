@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
-import { Search, MoreHorizontal, Users, Trash2 } from "lucide-react"
+import { Search, MoreHorizontal, Users, Trash2, Mail, Check, X } from "lucide-react"
 import { CreateClassModal } from "./create-class-modal"
+import { updateStudentParentEmail } from "@/app/actions/email-feedback"
 
 export function StudentList() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -18,6 +19,9 @@ export function StudentList() {
   const [loading, setLoading] = useState(true)
   const [loadingStudents, setLoadingStudents] = useState(false)
   const [removingStudent, setRemovingStudent] = useState<string | null>(null)
+  const [editingParentEmailId, setEditingParentEmailId] = useState<string | null>(null)
+  const [parentEmailInput, setParentEmailInput] = useState("")
+  const [savingParentEmail, setSavingParentEmail] = useState(false)
 
   // Fetch teacher's classes on mount
   useEffect(() => {
@@ -74,6 +78,15 @@ export function StudentList() {
     }
     
     setRemovingStudent(null)
+  }
+
+  const handleSaveParentEmail = async (studentId: string) => {
+    setSavingParentEmail(true)
+    await updateStudentParentEmail(studentId, parentEmailInput)
+    setSavingParentEmail(false)
+    setEditingParentEmailId(null)
+    // Update local state
+    setStudents(prev => prev.map(s => s.id === studentId ? { ...s, parent_email: parentEmailInput || null } : s))
   }
 
   const filteredStudents = useMemo(() => {
@@ -195,6 +208,9 @@ export function StudentList() {
                     Email
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-swiss-lead">
+                    Parent Email
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-swiss-lead">
                     Joined
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-swiss-lead">
@@ -213,6 +229,54 @@ export function StudentList() {
                     </td>
                     <td className="px-4 py-3 text-sm text-swiss-lead">
                       {student.email}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-swiss-lead">
+                      {editingParentEmailId === student.id ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="email"
+                            value={parentEmailInput}
+                            onChange={e => setParentEmailInput(e.target.value)}
+                            placeholder="parent@email.com"
+                            className="h-7 text-xs border-swiss-ink"
+                            autoFocus
+                            onKeyDown={e => {
+                              if (e.key === "Enter") handleSaveParentEmail(student.id)
+                              if (e.key === "Escape") setEditingParentEmailId(null)
+                            }}
+                          />
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-green-600"
+                            onClick={() => handleSaveParentEmail(student.id)}
+                            disabled={savingParentEmail}
+                          >
+                            <Check className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-6 w-6 text-red-500"
+                            onClick={() => setEditingParentEmailId(null)}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setEditingParentEmailId(student.id)
+                            setParentEmailInput(student.parent_email || "")
+                          }}
+                          className="flex items-center gap-1 text-left hover:text-swiss-ink transition-colors"
+                        >
+                          <Mail className="h-3 w-3 flex-shrink-0" />
+                          <span className={student.parent_email ? "text-swiss-ink" : "text-swiss-lead/50 italic"}>
+                            {student.parent_email || "Click to add"}
+                          </span>
+                        </button>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm text-swiss-lead">
                       {new Date(student.joined_at).toLocaleDateString()}

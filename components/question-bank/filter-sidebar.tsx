@@ -16,7 +16,7 @@ import { ChevronRight, ChevronDown, Sparkles, Upload, X } from "lucide-react"
 // TYPES & DATA STRUCTURES
 // =============================================================================
 
-export type CurriculumLevel = "a-level" | "gcse" | "ks3" | null
+export type CurriculumLevel = "a-level" | "gcse" | "igcse" | "ib" | "ks3" | null
 export type ALevelStream = "pure" | "applied" | null
 export type ALevelYear = "year1" | "year2" | null
 export type GCSETier = "foundation" | "higher" | null
@@ -640,6 +640,32 @@ export function QuestionBankFilterSidebar({ onFilterChange, className }: Questio
           </TreeItem>
         </div>
 
+        {/* IGCSE */}
+        <div className="border-b border-swiss-ink/20 dark:border-swiss-paper/20">
+          <TreeItem
+            label="IGCSE Maths"
+            level={0}
+            isSelected={filters.curriculum === "igcse"}
+            hasChildren={false}
+            isExpanded={false}
+            onSelect={() => setCurriculum(filters.curriculum === "igcse" ? null : "igcse")}
+            onToggle={() => setCurriculum(filters.curriculum === "igcse" ? null : "igcse")}
+          />
+        </div>
+
+        {/* IB */}
+        <div className="border-b border-swiss-ink/20 dark:border-swiss-paper/20">
+          <TreeItem
+            label="IB Maths"
+            level={0}
+            isSelected={filters.curriculum === "ib"}
+            hasChildren={false}
+            isExpanded={false}
+            onSelect={() => setCurriculum(filters.curriculum === "ib" ? null : "ib")}
+            onToggle={() => setCurriculum(filters.curriculum === "ib" ? null : "ib")}
+          />
+        </div>
+
         {/* KS3 */}
         <div className="border-b border-swiss-ink/20 dark:border-swiss-paper/20">
           <TreeItem
@@ -651,7 +677,6 @@ export function QuestionBankFilterSidebar({ onFilterChange, className }: Questio
             onSelect={() => setCurriculum(filters.curriculum === "ks3" ? null : "ks3")}
             onToggle={() => setCurriculum(filters.curriculum === "ks3" ? null : "ks3")}
           >
-            {/* KS3 goes straight to Strands (no tier) */}
             {filters.curriculum === "ks3" && GCSE_KS3_STRANDS.map(strand => (
               <TreeItem
                 key={strand.id}

@@ -1,34 +1,24 @@
 "use client"
 
-import { createClient } from "@/lib/supabase/client"
+import { useSignIn } from "@clerk/nextjs"
 import { useState } from "react"
 
 export function GoogleSignInButton() {
   const [isLoading, setIsLoading] = useState(false)
-  const supabase = createClient()
+  const { signIn, fetchStatus } = useSignIn()
 
   const handleGoogleSignIn = async () => {
+    if (fetchStatus === 'fetching' || isLoading) return
     try {
       setIsLoading(true)
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
-        },
+      await signIn.sso({
+        strategy: 'oauth_google',
+        redirectUrl: '/dashboard',
+        redirectCallbackUrl: '/sso-callback',
       })
-
-      if (error) {
-        console.error('Error signing in with Google:', error.message)
-        alert('Failed to sign in with Google. Please try again.')
-      }
     } catch (error) {
-      console.error('Unexpected error:', error)
-      alert('An unexpected error occurred. Please try again.')
-    } finally {
+      console.error('Error signing in with Google:', error)
+      alert('Failed to sign in with Google. Please try again.')
       setIsLoading(false)
     }
   }
@@ -36,7 +26,7 @@ export function GoogleSignInButton() {
   return (
     <button
       onClick={handleGoogleSignIn}
-      disabled={isLoading}
+      disabled={isLoading || fetchStatus === 'fetching'}
       className="w-full bg-swiss-paper border-2 border-swiss-ink/20 text-swiss-ink hover:border-swiss-signal transition-colors duration-200 px-6 py-3 font-bold uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
     >
       {isLoading ? (

@@ -47,6 +47,9 @@
       ],
       "@/types/*": [
         "./types/*"
+      ],
+      "@/convex/*": [
+        "./convex/*"
       ]
     },
     "allowJs": true,

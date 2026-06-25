@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getAuthUser } from '@/lib/auth'
+import { fetchQuery, fetchMutation, api, getConvexUserIdByClerkId } from '@/lib/convex/server'
+import type { Id } from '@/convex/_generated/dataModel'
 import { sanitize } from '@/lib/question-sanitizer'
 import {
   needsDiagram,
   sanitizeSvg,
   buildDiagramSystemPrompt,
-  uploadSvgToStorage,
 } from '@/lib/diagram-utils'
+import { uploadSvgToConvex } from '@/lib/convex-svg-upload'
 import { repairLatex } from '@/lib/latex-utils'
+import { validateQuestion } from '@/lib/question-validator'
 
 /**
  * Shadow Paper Generation API
  * 
- * Takes uploaded page image paths from Supabase Storage, extracts questions 
+ * Takes uploaded page image storage ids from Convex storage, extracts questions 
  * using vision AI, then generates new "shadow" questions that test the same 
  * skills but with different numbers/contexts.
  * 
@@ -108,6 +111,8 @@ interface ShadowPaperRequest {
   classId: string
   /** Original filename for naming the assignment */
   originalFilename: string
+  /** Source mode: ai_only (default) | bank_only | mixed */
+  sourceMode?: 'ai_only' | 'bank_only' | 'mixed'
 }
 
 interface ExtractedQuestion {
@@ -169,22 +174,21 @@ async function processBatch<T, R>(
 }
 
 // =====================================================
-// Helper: Get signed URL for a storage file
+// Helper: Resolve a served URL for a Convex-stored page image
 // =====================================================
 
-async function getSignedUrl(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  path: string
-): Promise<string | null> {
-  const { data, error } = await supabase.storage
-    .from('exam-papers')
-    .createSignedUrl(path, 600) // 10-minute expiry
-
-  if (error || !data?.signedUrl) {
-    console.error(`[Shadow Paper] Failed to get signed URL for ${path}:`, error?.message)
+async function getStorageUrl(storageId: string): Promise<string | null> {
+  try {
+    const url = await fetchQuery(api.files.getUrl, { storageId: storageId as Id<'_storage'> })
+    if (!url) {
+      console.error(`[Shadow Paper] Failed to resolve URL for storageId ${storageId}`)
+      return null
+    }
+    return url
+  } catch (err) {
+    console.error(`[Shadow Paper] Error resolving URL for storageId ${storageId}:`, err)
     return null
   }
-  return data.signedUrl
 }
 
 // =====================================================
@@ -264,7 +268,7 @@ Return ONLY the JSON object.`
       'X-Title': 'Nicolaou Maths - Shadow Paper OCR',
     },
     body: JSON.stringify({
-      model: 'openai/gpt-4o-mini',
+      model: 'anthropic/claude-sonnet-4-6',
       messages: [
         { role: 'system', content: systemPrompt },
         {
@@ -381,7 +385,7 @@ Return ONLY the JSON object.`
         'X-Title': 'Nicolaou Maths - Shadow Diagram Generator',
       },
       body: JSON.stringify({
-        model: 'anthropic/claude-haiku-4-5',
+        model: 'anthropic/claude-sonnet-4-6',
         messages: [
           { role: 'system', content: buildDiagramSystemPrompt() },
           { role: 'user', content: userPrompt },
@@ -417,14 +421,7 @@ Return ONLY the JSON object.`
     if (parsed.svg_markup) {
       const sanitized = sanitizeSvg(parsed.svg_markup)
       if (sanitized.valid) {
-        const supabase = await createClient()
-        const { data: { user } } = await supabase.auth.getUser()
-        imageUrl = await uploadSvgToStorage(
-          sanitized.svg,
-          original.suggestedTopic,
-          user?.id || 'anon',
-          supabase
-        )
+        imageUrl = await uploadSvgToConvex(sanitized.svg)
       } else {
         console.warn('[Shadow Diagram] SVG sanitization failed for Q', original.questionNumber, sanitized.errors)
       }
@@ -456,7 +453,9 @@ async function generateShadowQuestionTextOnly(
   original: ExtractedQuestion,
   targetStream: string
 ): Promise<GeneratedShadowQuestion | null> {
-  const systemPrompt = `You are an expert UK GCSE Mathematics exam question writer for Pearson Edexcel. Create a "shadow" question — a NEW question that tests the EXACT SAME mathematical skill as the original, but with different numbers, contexts, and variable names.
+  const isALevel = targetStream.toLowerCase().includes('a level') || targetStream.toLowerCase().includes('a-level') || targetStream.toLowerCase().includes('as level')
+  const levelDescriptor = isALevel ? 'A Level Mathematics' : 'GCSE Mathematics'
+  const systemPrompt = `You are an expert UK ${levelDescriptor} exam question writer for Pearson Edexcel. Create a "shadow" question — a NEW question that tests the EXACT SAME mathematical skill as the original, but with different numbers, contexts, and variable names.
 
 CRITICAL REQUIREMENTS — Your question MUST be indistinguishable from a real Edexcel exam question:
 
@@ -515,7 +514,7 @@ Generate the shadow question now. Return ONLY the JSON object.`
         'X-Title': 'Nicolaou Maths - Shadow Question Generator',
       },
       body: JSON.stringify({
-        model: 'openai/gpt-4o-mini',
+        model: 'anthropic/claude-sonnet-4-6',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -545,16 +544,34 @@ Generate the shadow question now. Return ONLY the JSON object.`
       return null
     }
 
+    const repairedLatex = repairLatex(parsed.questionLatex)
+    const repairedAnswer = repairLatex(parsed.answerKey?.answer || '')
+
+    // Verifier pass — skip if answer is empty (proof-type questions)
+    if (repairedAnswer && OPENROUTER_API_KEY) {
+      const validation = await validateQuestion({
+        questionLatex: repairedLatex,
+        markScheme: repairLatex(parsed.answerKey?.explanation || ''),
+        answer: repairedAnswer,
+        commandWord: 'find',
+        verificationExpression: null,
+        apiKey: OPENROUTER_API_KEY as string,
+      })
+      if (!validation.valid) {
+        console.warn(`[shadow] Q${original.questionNumber} validation failed: ${validation.issue}`)
+      }
+    }
+
     return {
       originalQuestionNumber: original.questionNumber,
-      questionLatex: repairLatex(parsed.questionLatex),
+      questionLatex: repairedLatex,
       topic: original.suggestedTopic,
       subTopic: original.suggestedSubTopic,
       marks: original.suggestedMarks,
       difficulty: original.suggestedDifficulty,
       calculatorAllowed: parsed.calculatorAllowed ?? true,
       answerKey: {
-        answer: repairLatex(parsed.answerKey?.answer || ''),
+        answer: repairedAnswer,
         explanation: repairLatex(parsed.answerKey?.explanation || ''),
       },
       imageUrl: null,
@@ -580,10 +597,9 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
     }
 
     // Verify user authentication
-    const supabase = await createClient()
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    const authUser = await getAuthUser()
 
-    if (userError || !user) {
+    if (!authUser?.clerkId) {
       return NextResponse.json(
         { success: false, error: 'You must be logged in' },
         { status: 401 }
@@ -591,16 +607,18 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
     }
 
     // Verify teacher role
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
-    if (!profile || profile.role !== 'teacher') {
+    if (authUser.role !== 'teacher') {
       return NextResponse.json(
         { success: false, error: 'Only teachers can generate shadow papers' },
         { status: 403 }
+      )
+    }
+
+    const teacherId = await getConvexUserIdByClerkId(authUser.clerkId)
+    if (!teacherId) {
+      return NextResponse.json(
+        { success: false, error: 'You must be logged in' },
+        { status: 401 }
       )
     }
 
@@ -629,34 +647,26 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
     }
 
     // Verify teacher owns the class
-    const { data: classData, error: classError } = await supabase
-      .from('classes')
-      .select('id, name, teacher_id')
-      .eq('id', body.classId)
-      .single()
+    const classData = await fetchQuery(api.classes.getClass, {
+      classId: body.classId as Id<'classes'>,
+      teacherId,
+    })
 
-    if (classError || !classData) {
+    if (!classData) {
       return NextResponse.json(
-        { success: false, error: 'Class not found' },
+        { success: false, error: 'Class not found or you do not have permission to create assignments for this class' },
         { status: 404 }
       )
     }
 
-    if (classData.teacher_id !== user.id) {
-      return NextResponse.json(
-        { success: false, error: 'You do not have permission to create assignments for this class' },
-        { status: 403 }
-      )
-    }
+    const { imagePaths, targetYear, targetStream, classId, originalFilename, sourceMode = 'ai_only' } = body
 
-    const { imagePaths, targetYear, targetStream, classId, originalFilename } = body
+    // ---- Step 1: Resolve served URLs for all page images (Convex storage) ----
+    console.log(`[Shadow Paper] Resolving URLs for ${imagePaths.length} pages...`)
 
-    // ---- Step 1: Get signed URLs for all pages (avoids downloading full images) ----
-    console.log(`[Shadow Paper] Getting signed URLs for ${imagePaths.length} pages...`)
-    
     const signedUrls: { url: string; pageNumber: number }[] = []
     for (let i = 0; i < imagePaths.length; i++) {
-      const url = await getSignedUrl(supabase, imagePaths[i])
+      const url = await getStorageUrl(imagePaths[i])
       if (url) {
         signedUrls.push({ url, pageNumber: i + 1 })
       }
@@ -681,13 +691,15 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
     const allExtractedQuestions = extractionResults.flat()
 
     // Clean up uploaded images from storage (fire-and-forget)
-    supabase.storage
-      .from('exam-papers')
-      .remove(imagePaths)
-      .then(({ error }) => {
-        if (error) console.error('[Shadow Paper] Failed to clean up storage files:', error.message)
-        else console.log(`[Shadow Paper] Cleaned up ${imagePaths.length} storage files`)
-      })
+    Promise.all(
+      imagePaths.map((storageId) =>
+        fetchMutation(api.files.remove, { storageId: storageId as Id<'_storage'> })
+      )
+    )
+      .then(() => console.log(`[Shadow Paper] Cleaned up ${imagePaths.length} storage files`))
+      .catch((error) =>
+        console.error('[Shadow Paper] Failed to clean up storage files:', error)
+      )
 
     console.log(`[Shadow Paper] Extracted ${allExtractedQuestions.length} questions`)
 
@@ -698,16 +710,67 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
       )
     }
 
-    // ---- Step 3: Generate shadow questions in parallel batches ----
-    console.log(`[Shadow Paper] Generating ${allExtractedQuestions.length} shadow questions (batch size: ${SHADOW_BATCH_SIZE})...`)
-    
-    const shadowResults = await processBatch(
-      allExtractedQuestions,
-      SHADOW_BATCH_SIZE,
-      async (original) => generateShadowQuestion(original, targetStream)
-    )
-    
-    const shadowQuestions = shadowResults.filter((q): q is GeneratedShadowQuestion => q !== null)
+    // ---- Step 3: Build shadow questions (AI / Bank / Mixed) ----
+    console.log(`[Shadow Paper] Source mode: ${sourceMode}. Extracted ${allExtractedQuestions.length} questions.`)
+
+    // Helper: fetch bank questions matching extracted topics
+    const fetchBankQuestions = async (count: number): Promise<GeneratedShadowQuestion[]> => {
+      const topics = [...new Set(allExtractedQuestions.map(q => q.suggestedTopic).filter(Boolean))]
+      const subTopics = [...new Set(allExtractedQuestions.map(q => q.suggestedSubTopic).filter(Boolean))]
+
+      const bankRows = await fetchQuery(api.questions.getBankQuestionsForShadow, {
+        level: targetStream,
+        topics: topics.length > 0 ? topics : undefined,
+        limit: count * 3,
+      })
+
+      // Shuffle and take what we need
+      const shuffled = [...bankRows].sort(() => Math.random() - 0.5).slice(0, count)
+
+      return shuffled.map((row, idx) => ({
+        originalQuestionNumber: `B${idx + 1}`,
+        questionLatex: row.questionLatex || '',
+        topic: row.topic || subTopics[idx % Math.max(subTopics.length, 1)] || 'Mathematics',
+        subTopic: row.subTopic || '',
+        marks: row.marks || 4,
+        difficulty: (targetStream.includes('Foundation') ? 'Foundation' : 'Higher') as 'Foundation' | 'Higher',
+        calculatorAllowed: row.calculatorAllowed ?? true,
+        answerKey: {
+          answer: (row.answerKey as { answer?: string })?.answer || '',
+          explanation: (row.answerKey as { explanation?: string })?.explanation || '',
+        },
+        imageUrl: null,
+      }))
+    }
+
+    let shadowQuestions: GeneratedShadowQuestion[] = []
+
+    if (sourceMode === 'bank_only') {
+      // Pull all from bank
+      shadowQuestions = await fetchBankQuestions(allExtractedQuestions.length)
+      if (shadowQuestions.length === 0) {
+        console.warn('[Shadow Paper] Bank returned no matching questions — falling back to AI mode')
+        const results = await processBatch(allExtractedQuestions, SHADOW_BATCH_SIZE, async (q) => generateShadowQuestion(q, targetStream))
+        shadowQuestions = results.filter((q): q is GeneratedShadowQuestion => q !== null)
+      }
+    } else if (sourceMode === 'mixed') {
+      // Half from bank, half AI-generated
+      const bankCount = Math.ceil(allExtractedQuestions.length / 2)
+      const aiCount = allExtractedQuestions.length - bankCount
+      const [bankQs, aiResults] = await Promise.all([
+        fetchBankQuestions(bankCount),
+        processBatch(allExtractedQuestions.slice(0, aiCount), SHADOW_BATCH_SIZE, async (q) => generateShadowQuestion(q, targetStream)),
+      ])
+      shadowQuestions = [...bankQs, ...aiResults.filter((q): q is GeneratedShadowQuestion => q !== null)]
+    } else {
+      // ai_only (default)
+      const shadowResults = await processBatch(
+        allExtractedQuestions,
+        SHADOW_BATCH_SIZE,
+        async (original) => generateShadowQuestion(original, targetStream)
+      )
+      shadowQuestions = shadowResults.filter((q): q is GeneratedShadowQuestion => q !== null)
+    }
 
     console.log(`[Shadow Paper] Generated ${shadowQuestions.length} shadow questions`)
 
@@ -719,43 +782,34 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
     }
 
     // ---- Step 4: Save shadow questions to the question bank ----
-    const questionIds: string[] = []
+    const questionIds: Id<'questions'>[] = []
     const difficulty = targetStream.includes('Foundation') ? 'Foundation' : 'Higher'
 
     console.log(`[Shadow Paper] Saving ${shadowQuestions.length} questions to bank...`)
 
-    // Batch insert questions (5 at a time to avoid hitting DB limits)
-    for (let i = 0; i < shadowQuestions.length; i += 5) {
-      const batch = shadowQuestions.slice(i, i + 5)
-      const insertData = batch.map(sq => ({
-        created_by: user.id,
-        content_type: (sq.imageUrl ? 'synthetic_image' : 'generated_text') as 'synthetic_image' | 'generated_text',
-        question_latex: sanitize(sq.questionLatex),
-        image_url: sq.imageUrl || null,
-        topic: sq.topic,
-        sub_topic: sq.subTopic,
-        curriculum_level: targetStream,
-        difficulty: difficulty,
-        marks: sq.marks,
-        calculator_allowed: sq.calculatorAllowed,
-        is_verified: false,
-        answer_key: {
-          answer: sanitize(sq.answerKey.answer),
-          explanation: sanitize(sq.answerKey.explanation),
-          type: 'ai_generated'
-        },
-        meta_tags: ['shadow_paper', `source_q${sq.originalQuestionNumber}`]
-      }))
-
-      const { data: questions, error: insertError } = await supabase
-        .from('questions')
-        .insert(insertData)
-        .select('id')
-
-      if (insertError) {
-        console.error(`[Shadow Paper] Batch insert failed:`, insertError.message)
-      } else if (questions) {
-        questionIds.push(...questions.map(q => q.id))
+    for (const sq of shadowQuestions) {
+      try {
+        const id = await fetchMutation(api.questions.createQuestion, {
+          createdBy: teacherId,
+          contentType: sq.imageUrl ? 'synthetic_image' : 'generated_text',
+          questionLatex: sanitize(sq.questionLatex),
+          imageUrl: sq.imageUrl || undefined,
+          topic: sq.topic,
+          subTopic: sq.subTopic,
+          level: targetStream,
+          difficulty,
+          marks: sq.marks,
+          calculatorAllowed: sq.calculatorAllowed,
+          answerKey: {
+            answer: sanitize(sq.answerKey.answer),
+            explanation: sanitize(sq.answerKey.explanation),
+            type: 'ai_generated',
+          },
+          tags: ['shadow_paper', `source_q${sq.originalQuestionNumber}`],
+        })
+        questionIds.push(id as Id<'questions'>)
+      } catch (insertError) {
+        console.error('[Shadow Paper] Question insert failed:', insertError)
       }
     }
 
@@ -766,54 +820,37 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
       .replace(/\.[^/.]+$/, '') // Remove extension
       .replace(/[^a-zA-Z0-9\s]/g, ' ') // Clean special chars
       .trim()
-    
+
     const assignmentTitle = `Shadow of ${baseFilename} (${targetYear})`
 
-    const { data: assignment, error: assignmentError } = await supabase
-      .from('assignments')
-      .insert({
-        class_id: classId,
-        title: assignmentTitle,
-        status: 'draft',
-        mode: 'paper',
+    const created = await fetchMutation(api.assignments.createAssignmentFull, {
+      classId: classId as Id<'classes'>,
+      teacherId,
+      title: assignmentTitle,
+      mode: 'paper',
+      status: 'draft',
+      questionIds,
+      metadata: {
         assignment_type: 'shadow_paper',
-        content: {
-          question_ids: questionIds,
-          description: `AI-generated shadow paper based on ${baseFilename}`,
-        },
-      })
-      .select('id')
-      .single()
+        question_ids: questionIds,
+        description: `AI-generated shadow paper based on ${baseFilename}`,
+      },
+    })
 
-    if (assignmentError || !assignment) {
-      console.error('Failed to create assignment:', assignmentError)
+    if (!created || 'error' in created) {
+      console.error('Failed to create assignment:', created)
       return NextResponse.json(
         { success: false, error: 'Failed to create assignment' },
         { status: 500 }
       )
     }
 
-    // Link questions to assignment
-    const assignmentQuestions = questionIds.map((qId, index) => ({
-      assignment_id: assignment.id,
-      question_id: qId,
-      order_index: index,
-    }))
-
-    const { error: linkError } = await supabase
-      .from('assignment_questions')
-      .insert(assignmentQuestions)
-
-    if (linkError) {
-      console.error('Failed to link questions to assignment:', linkError)
-    } else {
-      console.log(`[Shadow Paper] Successfully linked ${assignmentQuestions.length} questions to assignment`)
-    }
+    console.log(`[Shadow Paper] Successfully linked ${questionIds.length} questions to assignment`)
 
     return NextResponse.json({
       success: true,
       data: {
-        assignmentId: assignment.id,
+        assignmentId: created.assignmentId as string,
         assignmentTitle,
         questionCount: questionIds.length,
         extractedCount: allExtractedQuestions.length,

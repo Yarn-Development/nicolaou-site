@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
   Select,
   SelectContent,
@@ -49,13 +50,15 @@ import {
   type CurriculumLevel,
 } from "@/lib/curriculum-data"
 
-const EXAM_BOARDS: ExamBoard[] = ["AQA", "Edexcel", "OCR", "MEI"]
+const EXAM_BOARDS: ExamBoard[] = ["AQA", "Edexcel", "OCR", "MEI", "WJEC", "CIE", "IB"]
 const CURRICULUM_LEVELS: CurriculumLevel[] = [
   "GCSE Foundation",
   "GCSE Higher",
-  "A-Level Pure",
-  "A-Level Statistics",
-  "A-Level Mechanics"
+  "AS Level",
+  "A Level",
+  "IGCSE",
+  "IB SL",
+  "IB HL",
 ]
 
 // Generate years from 2015 to current year
@@ -66,7 +69,11 @@ const YEARS = Array.from(
 
 const SESSIONS = ["June", "November", "January", "Sample"]
 const PAPER_NUMBERS = ["Paper 1", "Paper 2", "Paper 3"]
+const PAPER_NUMBERS_ALEVEL_NEW = ["Paper 1 (Pure)", "Paper 2 (Pure)", "Paper 3 (Stats & Mechanics)"]
 const PAPER_VARIANTS = ["none", "H", "F", "A", "B", "C"] // H=Higher, F=Foundation, etc.
+const LEGACY_MODULES = ["C1", "C2", "C3", "C4", "M1", "M2", "S1", "S2", "FP1", "FP2", "D1", "D2"]
+// C1 is always non-calculator; all other legacy modules are calculator
+const NON_CALC_MODULES = new Set(["C1"])
 
 export function IngestClient() {
   // Document/PDF state
@@ -89,6 +96,10 @@ export function IngestClient() {
   const [paperNumber, setPaperNumber] = useState("")
   const [paperVariant, setPaperVariant] = useState("")
   const [questionNumber, setQuestionNumber] = useState("")
+
+  // A Level spec (new-spec or legacy-modular)
+  const [alevelSpec, setAlevelSpec] = useState<"new-spec" | "legacy-modular">("new-spec")
+  const [legacyModule, setLegacyModule] = useState("")
 
   // Curriculum tags
   const [topic, setTopic] = useState("")
@@ -116,11 +127,21 @@ export function IngestClient() {
   const availableTopics = level ? getTopicsForLevel(level) : []
   const availableSubTopics = topic && level ? getSubTopicsForTopic(level, topic) : []
 
+  const isALevel = level === "A Level" || level === "AS Level"
+  const isLegacyModular = isALevel && alevelSpec === "legacy-modular"
+
+  // For legacy modular: calculator is auto-prefilled from module
+  const effectiveCalculator = isLegacyModular && legacyModule
+    ? !NON_CALC_MODULES.has(legacyModule)
+    : calculatorAllowed
+
   // Construct paper reference from components (exclude "none" variant)
-  const paperReference = [session, year, paperNumber, paperVariant === "none" ? "" : paperVariant]
-    .filter(Boolean)
-    .join(" ")
-    .trim()
+  const paperReference = isLegacyModular && legacyModule
+    ? [legacyModule, session, year].filter(Boolean).join(" ").trim()
+    : [session, year, paperNumber, paperVariant === "none" ? "" : paperVariant]
+        .filter(Boolean)
+        .join(" ")
+        .trim()
 
   /**
    * Handle PDF/Image upload for viewing
@@ -180,12 +201,12 @@ export function IngestClient() {
     }
     reader.readAsDataURL(file)
 
-    // Upload to Supabase
+    // Upload to Convex storage
     await uploadSnippet(file)
   }
 
   /**
-   * Upload snippet to Supabase Storage
+   * Upload snippet to Convex storage
    */
   const uploadSnippet = async (file: File) => {
     setUploading(true)
@@ -263,7 +284,8 @@ export function IngestClient() {
         topic: topicObj?.name || topic,
         sub_topic: subTopicObj?.name || subTopic,
         marks,
-        calculator_allowed: calculatorAllowed,
+        calculator_allowed: effectiveCalculator,
+        source_spec: level === "A Level" ? alevelSpec : null,
         answer_key: answerText || explanationText ? {
           answer: answerText,
           explanation: explanationText,
@@ -602,6 +624,38 @@ export function IngestClient() {
               </div>
             </div>
 
+            {/* A Level Specification selector */}
+            {isALevel && (
+              <div className="space-y-2 border-2 border-swiss-signal/30 bg-swiss-signal/5 p-3 rounded">
+                <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
+                  SPECIFICATION
+                </Label>
+                <RadioGroup
+                  value={alevelSpec}
+                  onValueChange={(v) => {
+                    setAlevelSpec(v as "new-spec" | "legacy-modular")
+                    setLegacyModule("")
+                    setPaperNumber("")
+                  }}
+                  className="flex gap-6"
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="new-spec" id="spec-new" />
+                    <Label htmlFor="spec-new" className="text-sm cursor-pointer">New spec (2017 onwards)</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="legacy-modular" id="spec-legacy" />
+                    <Label htmlFor="spec-legacy" className="text-sm cursor-pointer">Legacy modular (pre-2017)</Label>
+                  </div>
+                </RadioGroup>
+                {isLegacyModular && (
+                  <div className="mt-2 text-xs text-swiss-signal bg-swiss-signal/10 p-2 rounded">
+                    Legacy modular questions are tagged against the module-specific topic tree and shown with a (Legacy spec) badge.
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Paper Reference */}
             <div className="grid grid-cols-4 gap-2">
               <div className="space-y-2">
@@ -637,37 +691,60 @@ export function IngestClient() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
-                  PAPER
-                </Label>
-                <Select value={paperNumber} onValueChange={setPaperNumber}>
-                  <SelectTrigger className="border-2 border-swiss-ink bg-white">
-                    <SelectValue placeholder="..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAPER_NUMBERS.map(p => (
-                      <SelectItem key={p} value={p}>{p}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {isLegacyModular ? (
+                <div className="space-y-2 col-span-2">
+                  <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
+                    MODULE
+                  </Label>
+                  <Select value={legacyModule} onValueChange={(v) => {
+                    setLegacyModule(v)
+                    setCalculatorAllowed(!NON_CALC_MODULES.has(v))
+                  }}>
+                    <SelectTrigger className="border-2 border-swiss-ink bg-white">
+                      <SelectValue placeholder="Select module..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LEGACY_MODULES.map(m => (
+                        <SelectItem key={m} value={m}>{m}{NON_CALC_MODULES.has(m) ? " (Non-calc)" : ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
+                      PAPER
+                    </Label>
+                    <Select value={paperNumber} onValueChange={setPaperNumber}>
+                      <SelectTrigger className="border-2 border-swiss-ink bg-white">
+                        <SelectValue placeholder="..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(isALevel ? PAPER_NUMBERS_ALEVEL_NEW : PAPER_NUMBERS).map(p => (
+                          <SelectItem key={p} value={p}>{p}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
-                  VARIANT
-                </Label>
-                <Select value={paperVariant} onValueChange={setPaperVariant}>
-                  <SelectTrigger className="border-2 border-swiss-ink bg-white">
-                    <SelectValue placeholder="..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAPER_VARIANTS.map(v => (
-                      <SelectItem key={v} value={v}>{v === "none" ? "—" : v}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
+                      VARIANT
+                    </Label>
+                    <Select value={paperVariant} onValueChange={setPaperVariant}>
+                      <SelectTrigger className="border-2 border-swiss-ink bg-white">
+                        <SelectValue placeholder="..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAPER_VARIANTS.map(v => (
+                          <SelectItem key={v} value={v}>{v === "none" ? "—" : v}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Question Number */}
@@ -686,10 +763,15 @@ export function IngestClient() {
 
             {/* Preview paper reference */}
             {paperReference && (
-              <div className="bg-swiss-ink text-white px-3 py-2">
+              <div className="bg-swiss-ink text-white px-3 py-2 flex items-center justify-between gap-2">
                 <span className="text-xs font-bold uppercase tracking-widest">
                   Paper Reference: {paperReference} {questionNumber}
                 </span>
+                {isLegacyModular && (
+                  <span className="text-xs font-bold bg-amber-400 text-amber-900 px-2 py-0.5 rounded shrink-0">
+                    ⚠ Legacy modular
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -784,13 +866,17 @@ export function IngestClient() {
                 <div className="flex items-center gap-3 border-2 border-swiss-ink bg-white px-3 py-2">
                   <Calculator className="w-4 h-4 text-swiss-lead" />
                   <span className="text-sm">
-                    {calculatorAllowed ? "Allowed" : "Not allowed"}
+                    {effectiveCalculator ? "Allowed" : "Not allowed"}
                   </span>
-                  <Switch
-                    checked={calculatorAllowed}
-                    onCheckedChange={setCalculatorAllowed}
-                    className="ml-auto"
-                  />
+                  {isLegacyModular && legacyModule ? (
+                    <span className="ml-auto text-xs text-muted-foreground italic">pre-filled</span>
+                  ) : (
+                    <Switch
+                      checked={calculatorAllowed}
+                      onCheckedChange={setCalculatorAllowed}
+                      className="ml-auto"
+                    />
+                  )}
                 </div>
               </div>
             </div>

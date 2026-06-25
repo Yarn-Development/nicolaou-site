@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
 import {
   needsDiagram,
   sanitizeSvg,
@@ -480,20 +478,10 @@ Return ONLY the JSON object.`
     })
   }
 
-  // Upload SVG to Supabase Storage using the service-role client so that RLS
-  // does not block server-side uploads (SVG is already sanitized above).
+  // Upload the (already-sanitized) SVG to Convex file storage.
   let imageUrl: string | null = null
   try {
-    const sessionClient = await createClient()
-    const { data: { user } } = await sessionClient.auth.getUser()
-    const userId = user?.id || 'server'
-
-    imageUrl = await uploadSvgToStorage(
-      sanitized.svg,
-      topic_name || sub_topic,
-      userId,
-      createAdminClient()
-    )
+    imageUrl = await uploadSvgToStorage(sanitized.svg, topic_name || sub_topic)
   } catch (uploadError) {
     console.warn('[Diagram Gen] SVG upload failed — degrading to text-only:', uploadError)
   }

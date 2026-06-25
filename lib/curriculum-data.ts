@@ -4,13 +4,18 @@
  * Based on UK National Curriculum (KS3, GCSE, A-Level)
  */
 
-export type CurriculumLevel = 
+export type CurriculumLevel =
   | 'KS3'
   | 'GCSE Foundation'
   | 'GCSE Higher'
   | 'A-Level Pure'
   | 'A-Level Statistics'
   | 'A-Level Mechanics'
+  | 'AS Level'
+  | 'A Level'
+  | 'IGCSE'
+  | 'IB SL'
+  | 'IB HL'
 
 export type QuestionType = 'Fluency' | 'Problem Solving' | 'Reasoning/Proof'
 
@@ -373,6 +378,111 @@ export const CURRICULUM_DATA: Record<CurriculumLevel, Topic[]> = {
     },
   ],
   
+  'AS Level': [],  // alias — resolved to A-Level Pure + Stats + Mechanics at runtime
+  'A Level': [],   // alias — resolved to A-Level Pure + Stats + Mechanics at runtime
+
+  'IGCSE': [
+    { id: 'igcse-number', name: 'Number', subTopics: [
+      { id: 'igcse-integers', name: 'Integers, Powers and Roots' },
+      { id: 'igcse-fractions', name: 'Fractions, Decimals and Percentages' },
+      { id: 'igcse-standard-form', name: 'Standard Form' },
+      { id: 'igcse-ratio', name: 'Ratio and Proportion' },
+      { id: 'igcse-sets', name: 'Set Language and Notation' },
+    ]},
+    { id: 'igcse-algebra', name: 'Algebra', subTopics: [
+      { id: 'igcse-manipulation', name: 'Algebraic Manipulation' },
+      { id: 'igcse-equations', name: 'Equations and Inequalities' },
+      { id: 'igcse-sequences', name: 'Sequences' },
+      { id: 'igcse-functions', name: 'Functions' },
+      { id: 'igcse-quadratics', name: 'Quadratics and Polynomials' },
+    ]},
+    { id: 'igcse-coord-geom', name: 'Coordinate Geometry', subTopics: [
+      { id: 'igcse-graphs', name: 'Graphs of Functions' },
+      { id: 'igcse-straight-line', name: 'Equation of a Straight Line' },
+      { id: 'igcse-transformations', name: 'Transformations of Functions' },
+    ]},
+    { id: 'igcse-geometry', name: 'Geometry', subTopics: [
+      { id: 'igcse-shapes', name: 'Properties of Shapes' },
+      { id: 'igcse-constructions', name: 'Constructions and Loci' },
+      { id: 'igcse-similarity', name: 'Similarity and Congruence' },
+      { id: 'igcse-circle-theorems', name: 'Circle Theorems' },
+      { id: 'igcse-trig', name: 'Trigonometry' },
+      { id: 'igcse-vectors', name: 'Vectors' },
+    ]},
+    { id: 'igcse-mensuration', name: 'Mensuration', subTopics: [
+      { id: 'igcse-perimeter-area', name: 'Perimeter and Area' },
+      { id: 'igcse-volume', name: 'Volume and Surface Area' },
+    ]},
+    { id: 'igcse-stats-prob', name: 'Statistics and Probability', subTopics: [
+      { id: 'igcse-data', name: 'Data Handling' },
+      { id: 'igcse-probability', name: 'Probability' },
+    ]},
+  ],
+
+  'IB SL': [
+    { id: 'ib-number-algebra', name: 'Number and Algebra', subTopics: [
+      { id: 'ib-sequences', name: 'Sequences and Series' },
+      { id: 'ib-exponents-logs', name: 'Exponents and Logarithms' },
+      { id: 'ib-binomial', name: 'Binomial Theorem' },
+      { id: 'ib-proof', name: 'Proof' },
+    ]},
+    { id: 'ib-functions', name: 'Functions', subTopics: [
+      { id: 'ib-function-concept', name: 'Concept of a Function' },
+      { id: 'ib-linear-quadratic', name: 'Linear and Quadratic Functions' },
+      { id: 'ib-rational', name: 'Rational Functions' },
+      { id: 'ib-exp-log-functions', name: 'Exponential and Logarithmic Functions' },
+    ]},
+    { id: 'ib-geom-trig', name: 'Geometry and Trigonometry', subTopics: [
+      { id: 'ib-trig', name: 'Trigonometry' },
+      { id: 'ib-trig-graphs', name: 'Trigonometric Graphs' },
+      { id: 'ib-circle-geom', name: 'Circle Geometry' },
+      { id: 'ib-vectors', name: 'Vectors' },
+    ]},
+    { id: 'ib-stats-prob', name: 'Statistics and Probability', subTopics: [
+      { id: 'ib-descriptive', name: 'Descriptive Statistics' },
+      { id: 'ib-probability', name: 'Probability' },
+      { id: 'ib-discrete-dist', name: 'Discrete Distributions' },
+      { id: 'ib-normal', name: 'Normal Distribution' },
+    ]},
+    { id: 'ib-calculus', name: 'Calculus', subTopics: [
+      { id: 'ib-diff', name: 'Differentiation' },
+      { id: 'ib-apps-diff', name: 'Applications of Differentiation' },
+      { id: 'ib-integration', name: 'Integration' },
+    ]},
+  ],
+
+  'IB HL': [
+    { id: 'ibhl-number-algebra', name: 'Number and Algebra', subTopics: [
+      { id: 'ibhl-sequences', name: 'Sequences and Series' },
+      { id: 'ibhl-complex', name: 'Complex Numbers' },
+      { id: 'ibhl-binomial', name: 'Binomial Theorem' },
+      { id: 'ibhl-proof', name: 'Proof (Induction & Contradiction)' },
+    ]},
+    { id: 'ibhl-functions', name: 'Functions', subTopics: [
+      { id: 'ibhl-function-concept', name: 'Concept of a Function' },
+      { id: 'ibhl-rational', name: 'Rational Functions' },
+      { id: 'ibhl-exp-log-functions', name: 'Exponential and Logarithmic Functions' },
+    ]},
+    { id: 'ibhl-geom-trig', name: 'Geometry and Trigonometry', subTopics: [
+      { id: 'ibhl-trig', name: 'Trigonometry' },
+      { id: 'ibhl-vectors', name: 'Vectors in 3D' },
+      { id: 'ibhl-vector-equations', name: 'Vector Equations of Lines and Planes' },
+    ]},
+    { id: 'ibhl-stats-prob', name: 'Statistics and Probability', subTopics: [
+      { id: 'ibhl-descriptive', name: 'Descriptive Statistics' },
+      { id: 'ibhl-probability', name: 'Probability' },
+      { id: 'ibhl-distributions', name: 'Statistical Distributions' },
+      { id: 'ibhl-hypothesis', name: 'Hypothesis Testing' },
+      { id: 'ibhl-regression', name: 'Correlation and Regression' },
+    ]},
+    { id: 'ibhl-calculus', name: 'Calculus', subTopics: [
+      { id: 'ibhl-diff', name: 'Differentiation' },
+      { id: 'ibhl-integration', name: 'Integration' },
+      { id: 'ibhl-de', name: 'Differential Equations' },
+      { id: 'ibhl-series', name: 'Maclaurin Series' },
+    ]},
+  ],
+
   'A-Level Mechanics': [
     {
       id: 'alevel-m-kinematics',
@@ -428,6 +538,14 @@ export const CALCULATOR_OPTIONS = [
 
 // Helper function to get topics for a level
 export function getTopicsForLevel(level: CurriculumLevel): Topic[] {
+  // "A Level" and "AS Level" aggregate the three A-Level strands
+  if (level === 'A Level' || level === 'AS Level') {
+    return [
+      ...CURRICULUM_DATA['A-Level Pure'],
+      ...CURRICULUM_DATA['A-Level Statistics'],
+      ...CURRICULUM_DATA['A-Level Mechanics'],
+    ]
+  }
   return CURRICULUM_DATA[level] || []
 }
 
@@ -440,5 +558,5 @@ export function getSubTopicsForTopic(level: CurriculumLevel, topicId: string): S
 
 // Helper to get all levels
 export function getAllLevels(): CurriculumLevel[] {
-  return ['KS3', 'GCSE Foundation', 'GCSE Higher', 'A-Level Pure', 'A-Level Statistics', 'A-Level Mechanics']
+  return ['GCSE Foundation', 'GCSE Higher', 'AS Level', 'A Level', 'IGCSE', 'IB SL', 'IB HL', 'KS3', 'A-Level Pure', 'A-Level Statistics', 'A-Level Mechanics']
 }

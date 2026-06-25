@@ -1,6 +1,8 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
+import { fetchQuery, fetchMutation, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
+import type { Id } from "@/convex/_generated/dataModel"
 import { revalidatePath } from "next/cache"
 import { repairLatex } from "@/lib/latex-utils"
 
@@ -36,6 +38,13 @@ export interface AuditFilters {
   offset: number
 }
 
+/** Resolve the signed-in Clerk user to a Convex user id, or null. */
+async function currentUserId(): Promise<Id<"users"> | null> {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) return null
+  return getConvexUserIdByClerkId(authUser.clerkId)
+}
+
 // =====================================================
 // Fetch questions for audit (paginated)
 // =====================================================
@@ -43,54 +52,36 @@ export interface AuditFilters {
 export async function getAuditQuestions(
   filters: AuditFilters
 ): Promise<{ success: boolean; data?: AuditQuestion[]; total?: number; error?: string }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
   try {
-    let query = supabase
-      .from("questions")
-      .select("*", { count: "exact" })
-      .order("created_at", { ascending: false })
-      .range(filters.offset, filters.offset + filters.limit - 1)
+    const result = await fetchQuery(api.audit.listQuestions, {
+      contentType: filters.contentType,
+      verifiedStatus: filters.verifiedStatus,
+      search: filters.search || undefined,
+      limit: filters.limit,
+      offset: filters.offset,
+    })
 
-    // Content type filter
-    if (filters.contentType !== "all") {
-      query = query.eq("content_type", filters.contentType)
-    }
-
-    // Verified status filter
-    if (filters.verifiedStatus === "verified") {
-      query = query.eq("is_verified", true)
-    } else if (filters.verifiedStatus === "unverified") {
-      query = query.eq("is_verified", false)
-    }
-
-    // Search filter
-    if (filters.search) {
-      query = query.or(
-        `question_latex.ilike.%${filters.search}%,topic.ilike.%${filters.search}%,topic_name.ilike.%${filters.search}%`
-      )
-    }
-
-    const { data: questions, error, count } = await query
-
-    if (error) {
-      console.error("Error fetching audit questions:", error)
-      return { success: false, error: "Failed to fetch questions" }
-    }
-
-    // Tag each question with is_suspect flag
-    const tagged: AuditQuestion[] = (questions || []).map((q) => ({
-      ...q,
-      is_suspect: detectSuspect(q.question_latex),
+    // Map onto the snake_case AuditQuestion shape + tag is_suspect.
+    const tagged: AuditQuestion[] = result.questions.map((q) => ({
+      id: q.id,
+      question_latex: q.questionLatex,
+      image_url: q.imageUrl,
+      content_type: q.contentType,
+      topic: q.topic,
+      topic_name: q.topicName,
+      sub_topic_name: q.subTopicName,
+      difficulty: q.difficulty,
+      marks: q.marks,
+      question_type: q.questionType,
+      calculator_allowed: q.calculatorAllowed,
+      answer_key: q.answerKey,
+      is_verified: q.isVerified,
+      created_at: new Date(q.createdAt).toISOString(),
+      created_by: q.createdBy,
+      is_suspect: detectSuspect(q.questionLatex),
     }))
 
     // If showSuspectFirst, sort suspects to the top (within this page)
@@ -102,7 +93,7 @@ export async function getAuditQuestions(
       })
     }
 
-    return { success: true, data: tagged, total: count ?? 0 }
+    return { success: true, data: tagged, total: result.total }
   } catch (error) {
     console.error("Error in getAuditQuestions:", error)
     return { success: false, error: "An unexpected error occurred" }
@@ -160,33 +151,23 @@ export async function auditUpdateQuestion(
   questionLatex: string,
   answerKey?: { answer: string; explanation: string }
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient()
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
+  const repairedAnswerKey = answerKey
+    ? {
+        answer: repairLatex(answerKey.answer),
+        explanation: repairLatex(answerKey.explanation),
+      }
+    : undefined
 
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
-
-  const payload: Record<string, unknown> = {
-    question_latex: repairLatex(questionLatex),
-  }
-  if (answerKey) {
-    payload.answer_key = {
-      answer: repairLatex(answerKey.answer),
-      explanation: repairLatex(answerKey.explanation),
-    }
-  }
-
-  const { error } = await supabase
-    .from("questions")
-    .update(payload)
-    .eq("id", id)
-
-  if (error) {
+  try {
+    await fetchMutation(api.audit.updateQuestion, {
+      id: id as Id<"questions">,
+      questionLatex: repairLatex(questionLatex),
+      answerKey: repairedAnswerKey,
+    })
+  } catch (error) {
     console.error("Error updating question:", error)
     return { success: false, error: "Failed to update question" }
   }
@@ -202,20 +183,12 @@ export async function auditUpdateQuestion(
 export async function auditDeleteQuestion(
   id: string
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient()
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
-
-  const { error } = await supabase.from("questions").delete().eq("id", id)
-
-  if (error) {
+  try {
+    await fetchMutation(api.audit.deleteQuestion, { id: id as Id<"questions"> })
+  } catch (error) {
     console.error("Error deleting question:", error)
     return { success: false, error: "Failed to delete question" }
   }
@@ -232,23 +205,15 @@ export async function auditToggleVerified(
   id: string,
   isVerified: boolean
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient()
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
-
-  const { error } = await supabase
-    .from("questions")
-    .update({ is_verified: isVerified })
-    .eq("id", id)
-
-  if (error) {
+  try {
+    await fetchMutation(api.audit.setVerified, {
+      id: id as Id<"questions">,
+      isVerified,
+    })
+  } catch (error) {
     console.error("Error toggling verification:", error)
     return { success: false, error: "Failed to update verification" }
   }
@@ -264,24 +229,18 @@ export async function auditToggleVerified(
 export async function auditFixFormatting(
   id: string
 ): Promise<{ success: boolean; newLatex?: string; newAnswerKey?: { answer: string; explanation: string }; error?: string }> {
-  const supabase = await createClient()
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  if (userError || !user) return { success: false, error: "You must be logged in" }
-
-  const { data: question, error: fetchError } = await supabase
-    .from("questions")
-    .select("*")
-    .eq("id", id)
-    .single()
-
-  if (fetchError || !question) return { success: false, error: "Question not found" }
+  const question = await fetchQuery(api.audit.getQuestion, { id: id as Id<"questions"> })
+  if (!question) return { success: false, error: "Question not found" }
 
   const apiKey = process.env.OPENROUTER_API_KEY
   if (!apiKey) return { success: false, error: "AI service not configured" }
 
-  const currentAnswer = (question.answer_key as Record<string, string> | null)?.answer || ""
-  const currentExplanation = (question.answer_key as Record<string, string> | null)?.explanation || ""
+  const answerKey = question.answerKey as Record<string, string> | null
+  const currentAnswer = answerKey?.answer || ""
+  const currentExplanation = answerKey?.explanation || ""
 
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -315,7 +274,7 @@ Respond with JSON only:
           },
           {
             role: "user",
-            content: `Fix the LaTeX formatting of this question and answer.\n\nQuestion:\n${question.question_latex || "[No content]"}\n\nAnswer: ${currentAnswer}\n\nExplanation: ${currentExplanation}`,
+            content: `Fix the LaTeX formatting of this question and answer.\n\nQuestion:\n${question.questionLatex || "[No content]"}\n\nAnswer: ${currentAnswer}\n\nExplanation: ${currentExplanation}`,
           },
         ],
         temperature: 0.1,
@@ -336,18 +295,21 @@ Respond with JSON only:
       return { success: false, error: "AI returned invalid JSON" }
     }
 
-    const newLatex = repairLatex(parsed.question_latex || question.question_latex)
+    const newLatex = repairLatex(parsed.question_latex || question.questionLatex || "")
     const newAnswerKey = {
       answer: repairLatex(parsed.answer || currentAnswer),
       explanation: repairLatex(parsed.explanation || currentExplanation),
     }
 
-    const { error: updateError } = await supabase
-      .from("questions")
-      .update({ question_latex: newLatex, answer_key: newAnswerKey })
-      .eq("id", id)
-
-    if (updateError) return { success: false, error: "Failed to save fixed question" }
+    try {
+      await fetchMutation(api.audit.updateQuestion, {
+        id: id as Id<"questions">,
+        questionLatex: newLatex,
+        answerKey: newAnswerKey,
+      })
+    } catch {
+      return { success: false, error: "Failed to save fixed question" }
+    }
 
     revalidatePath("/dashboard/admin/audit")
     return { success: true, newLatex, newAnswerKey }
@@ -364,27 +326,21 @@ Respond with JSON only:
 export async function auditFullyRegenerateQuestion(
   id: string
 ): Promise<{ success: boolean; newLatex?: string; newAnswerKey?: { answer: string; explanation: string }; error?: string }> {
-  const supabase = await createClient()
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  if (userError || !user) return { success: false, error: "You must be logged in" }
-
-  const { data: question, error: fetchError } = await supabase
-    .from("questions")
-    .select("*")
-    .eq("id", id)
-    .single()
-
-  if (fetchError || !question) return { success: false, error: "Question not found" }
+  const question = await fetchQuery(api.audit.getQuestion, { id: id as Id<"questions"> })
+  if (!question) return { success: false, error: "Question not found" }
 
   const apiKey = process.env.OPENROUTER_API_KEY
   if (!apiKey) return { success: false, error: "AI service not configured" }
 
-  const level = question.curriculum_level || question.difficulty || "GCSE Higher"
-  const subTopic = question.sub_topic_name || question.topic_name || question.topic || "General"
+  // `curriculum_level` is not in the Convex schema; difficulty is the fallback.
+  const level = question.difficulty || "GCSE Higher"
+  const subTopic = question.subTopicName || question.topicName || question.topic || "General"
   const marks = question.marks || 3
-  const questionType = question.question_type || "Fluency"
-  const calcAllowed = question.calculator_allowed ?? true
+  const questionType = question.questionType || "Fluency"
+  const calcAllowed = question.calculatorAllowed ?? true
 
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -449,16 +405,16 @@ JSON format:
       explanation: repairLatex(parsed.explanation || ""),
     }
 
-    const { error: updateError } = await supabase
-      .from("questions")
-      .update({
-        question_latex: newLatex,
-        answer_key: newAnswerKey,
-        is_verified: false, // new content needs re-verification
+    try {
+      await fetchMutation(api.audit.updateQuestion, {
+        id: id as Id<"questions">,
+        questionLatex: newLatex,
+        answerKey: newAnswerKey,
+        isVerified: false, // new content needs re-verification
       })
-      .eq("id", id)
-
-    if (updateError) return { success: false, error: "Failed to save regenerated question" }
+    } catch {
+      return { success: false, error: "Failed to save regenerated question" }
+    }
 
     revalidatePath("/dashboard/admin/audit")
     return { success: true, newLatex, newAnswerKey }

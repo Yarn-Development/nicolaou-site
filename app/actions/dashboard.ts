@@ -1,6 +1,8 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
+import { fetchQuery, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
+import type { Id } from "@/convex/_generated/dataModel"
 
 // =====================================================
 // Types
@@ -51,6 +53,20 @@ export interface DashboardData {
 }
 
 // =====================================================
+// Helpers
+// =====================================================
+
+/** Resolve the signed-in Clerk user to a Convex user id, or null. */
+async function currentTeacherId(): Promise<Id<"users"> | null> {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) return null
+  return getConvexUserIdByClerkId(authUser.clerkId)
+}
+
+const toIso = (ms: number | null | undefined): string | null =>
+  ms == null ? null : new Date(ms).toISOString()
+
+// =====================================================
 // Main Dashboard Data Fetching
 // =====================================================
 
@@ -63,15 +79,8 @@ export async function getDashboardData(): Promise<{
   data?: DashboardData
   error?: string
 }> {
-  const supabase = await createClient()
-
-  // Get current user
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const teacherId = await currentTeacherId()
+  if (!teacherId) {
     return {
       success: false,
       error: "You must be logged in to view dashboard",
@@ -79,30 +88,14 @@ export async function getDashboardData(): Promise<{
   }
 
   try {
-    // =====================================================
-    // 1. Get teacher's classes with enrollment counts
-    // =====================================================
-    const { data: classes, error: classesError } = await supabase
-      .from("classes")
-      .select(
-        `
-        id,
-        name,
-        subject,
-        created_at,
-        enrollments(count)
-      `
-      )
-      .eq("teacher_id", user.id)
-      .order("created_at", { ascending: false })
+    const payload = await fetchQuery(api.dashboard.getTeacherDashboard, {
+      teacherId,
+    })
 
-    if (classesError) {
-      console.error("Error fetching classes:", classesError)
-      return { success: false, error: "Failed to fetch classes" }
-    }
+    const { classes, enrollments, students, assignments, submissions } = payload
 
     // No classes = no data
-    if (!classes || classes.length === 0) {
+    if (classes.length === 0) {
       return {
         success: true,
         data: {
@@ -124,105 +117,31 @@ export async function getDashboardData(): Promise<{
       }
     }
 
-    const classIds = classes.map((c) => c.id)
     const totalClasses = classes.length
 
-    // =====================================================
-    // 2. Get all enrollments for student counts
-    // =====================================================
-    const { data: enrollments, error: enrollmentsError } = await supabase
-      .from("enrollments")
-      .select("student_id, class_id, joined_at")
-      .in("class_id", classIds)
-
-    if (enrollmentsError) {
-      console.error("Error fetching enrollments:", enrollmentsError)
-    }
-
-    // Get unique student IDs to fetch their profiles
-    const uniqueStudentIds = [...new Set(enrollments?.map((e) => e.student_id) || [])]
+    // Student counts
+    const uniqueStudentIds = [...new Set(enrollments.map((e) => e.studentId))]
     const totalStudents = uniqueStudentIds.length
 
-    // Fetch student profiles separately
-    let studentProfiles: { id: string; email: string; full_name: string | null }[] = []
-    if (uniqueStudentIds.length > 0) {
-      const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select("id, email, full_name")
-        .in("id", uniqueStudentIds)
+    // Profile lookup map
+    const profileMap = new Map(students.map((s) => [s.id, s]))
 
-      if (profilesError) {
-        console.error("Error fetching student profiles:", profilesError)
-      } else {
-        studentProfiles = profiles || []
-      }
-    }
+    // Pending assignments (published + not past due)
+    const pendingAssignments = assignments.filter(
+      (a) =>
+        a.status === "published" &&
+        (!a.dueDate || a.dueDate >= Date.now())
+    ).length
 
-    // Create a map for quick profile lookup
-    const profileMap = new Map(studentProfiles.map(p => [p.id, p]))
+    // Grading stats
+    const needsGrading = submissions.filter(
+      (s) => s.status === "submitted" && s.score === null
+    ).length
 
-    // =====================================================
-    // 3. Get all assignments for these classes
-    // =====================================================
-    const { data: assignments, error: assignmentsError } = await supabase
-      .from("assignments")
-      .select(
-        `
-        id,
-        class_id,
-        title,
-        status,
-        due_date,
-        created_at
-      `
-      )
-      .in("class_id", classIds)
-      .order("created_at", { ascending: false })
-
-    if (assignmentsError) {
-      console.error("Error fetching assignments:", assignmentsError)
-    }
-
-    const assignmentIds = assignments?.map((a) => a.id) || []
-    const pendingAssignments =
-      assignments?.filter(
-        (a) =>
-          a.status === "published" &&
-          (!a.due_date || new Date(a.due_date) >= new Date())
-      ).length || 0
-
-    // =====================================================
-    // 4. Get all submissions for grading stats
-    // =====================================================
-    const { data: submissions, error: submissionsError } = await supabase
-      .from("submissions")
-      .select(
-        `
-        id,
-        assignment_id,
-        student_id,
-        score,
-        status,
-        submitted_at,
-        graded_at
-      `
-      )
-      .in("assignment_id", assignmentIds)
-      .order("submitted_at", { ascending: false })
-
-    if (submissionsError) {
-      console.error("Error fetching submissions:", submissionsError)
-    }
-
-    // Calculate grading stats
-    const needsGrading =
-      submissions?.filter((s) => s.status === "submitted" && s.score === null)
-        .length || 0
-
-    // Calculate average score from graded submissions
-    const gradedSubmissions =
-      submissions?.filter((s) => s.status === "graded" && s.score !== null) ||
-      []
+    // Average score from graded submissions
+    const gradedSubmissions = submissions.filter(
+      (s) => s.status === "marked" && s.score !== null
+    )
     const averageScore =
       gradedSubmissions.length > 0
         ? Math.round(
@@ -232,36 +151,35 @@ export async function getDashboardData(): Promise<{
         : 0
 
     // Active students (submitted in last 30 days)
-    const thirtyDaysAgo = new Date()
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
     const activeStudents = new Set(
       submissions
-        ?.filter((s) => new Date(s.submitted_at) >= thirtyDaysAgo)
-        .map((s) => s.student_id) || []
+        .filter((s) => s.submittedAt != null && s.submittedAt >= thirtyDaysAgo)
+        .map((s) => s.studentId)
     ).size
 
     // =====================================================
-    // 5. Build recent activity
+    // Build recent activity
     // =====================================================
     const recentActivity: RecentActivityItem[] = []
 
-    // Add recent submissions
-    const recentSubmissions = submissions?.slice(0, 5) || []
+    // Add recent submissions (submissions already sorted newest-first)
+    const recentSubmissions = submissions.slice(0, 5)
     for (const sub of recentSubmissions) {
-      const assignment = assignments?.find((a) => a.id === sub.assignment_id)
-      const student = profileMap.get(sub.student_id)
+      const assignment = assignments.find((a) => a.id === sub.assignmentId)
+      const student = profileMap.get(sub.studentId)
 
       if (student && assignment) {
         recentActivity.push({
           id: `submission-${sub.id}`,
           type: "submission",
-          studentName: student.full_name || "Unknown Student",
+          studentName: student.fullName || "Unknown Student",
           studentEmail: student.email,
           description:
-            sub.status === "graded"
+            sub.status === "marked"
               ? `Graded: ${assignment.title}`
               : `Submitted: ${assignment.title}`,
-          timestamp: sub.submitted_at,
+          timestamp: toIso(sub.submittedAt) ?? new Date().toISOString(),
           metadata: {
             score: sub.score ?? undefined,
             assignmentTitle: assignment.title,
@@ -271,27 +189,22 @@ export async function getDashboardData(): Promise<{
     }
 
     // Add recent enrollments
-    const recentEnrollments =
-      enrollments
-        ?.sort(
-          (a, b) =>
-            new Date(b.joined_at).getTime() -
-            new Date(a.joined_at).getTime()
-        )
-        .slice(0, 3) || []
+    const recentEnrollments = [...enrollments]
+      .sort((a, b) => b.joinedAt - a.joinedAt)
+      .slice(0, 3)
 
     for (const enrollment of recentEnrollments) {
-      const student = profileMap.get(enrollment.student_id)
-      const classInfo = classes.find((c) => c.id === enrollment.class_id)
+      const student = profileMap.get(enrollment.studentId)
+      const classInfo = classes.find((c) => c.id === enrollment.classId)
 
       if (student && classInfo) {
         recentActivity.push({
-          id: `enrollment-${enrollment.student_id}-${enrollment.class_id}`,
+          id: `enrollment-${enrollment.studentId}-${enrollment.classId}`,
           type: "enrollment",
-          studentName: student.full_name || "Unknown Student",
+          studentName: student.fullName || "Unknown Student",
           studentEmail: student.email,
           description: `Joined: ${classInfo.name}`,
-          timestamp: enrollment.joined_at,
+          timestamp: toIso(enrollment.joinedAt) ?? new Date().toISOString(),
           metadata: {
             className: classInfo.name,
           },
@@ -306,21 +219,18 @@ export async function getDashboardData(): Promise<{
     )
 
     // =====================================================
-    // 6. Build class overview
+    // Build class overview
     // =====================================================
     const classOverview: ClassOverview[] = classes.map((cls) => {
-      const classEnrollments =
-        enrollments?.filter((e) => e.class_id === cls.id) || []
-      const classAssignments =
-        assignments?.filter((a) => a.class_id === cls.id) || []
+      const classEnrollments = enrollments.filter((e) => e.classId === cls.id)
+      const classAssignments = assignments.filter((a) => a.classId === cls.id)
       const classAssignmentIds = classAssignments.map((a) => a.id)
-      const classSubmissions =
-        submissions?.filter(
-          (s) =>
-            classAssignmentIds.includes(s.assignment_id) &&
-            s.status === "graded" &&
-            s.score !== null
-        ) || []
+      const classSubmissions = submissions.filter(
+        (s) =>
+          classAssignmentIds.includes(s.assignmentId) &&
+          s.status === "marked" &&
+          s.score !== null
+      )
 
       const classAvgScore =
         classSubmissions.length > 0
@@ -332,12 +242,9 @@ export async function getDashboardData(): Promise<{
 
       // Find most recent activity for this class
       const lastActivity = submissions
-        ?.filter((s) => classAssignmentIds.includes(s.assignment_id))
-        .sort(
-          (a, b) =>
-            new Date(b.submitted_at).getTime() -
-            new Date(a.submitted_at).getTime()
-        )[0]?.submitted_at
+        .filter((s) => classAssignmentIds.includes(s.assignmentId))
+        .sort((a, b) => (b.submittedAt ?? 0) - (a.submittedAt ?? 0))[0]
+        ?.submittedAt
 
       return {
         id: cls.id,
@@ -346,12 +253,12 @@ export async function getDashboardData(): Promise<{
         studentCount: classEnrollments.length,
         assignmentCount: classAssignments.length,
         averageScore: classAvgScore,
-        recentActivity: lastActivity || null,
+        recentActivity: toIso(lastActivity),
       }
     })
 
     // =====================================================
-    // 7. Determine if we have meaningful data
+    // Determine if we have meaningful data
     // =====================================================
     const hasData = totalStudents > 0 || totalClasses > 0
 
@@ -424,61 +331,22 @@ export async function getPerformanceData(): Promise<{
   data?: PerformanceDataPoint[]
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const teacherId = await currentTeacherId()
+  if (!teacherId) {
     return { success: false, error: "You must be logged in" }
   }
 
   try {
-    // Get teacher's class IDs
-    const { data: classes } = await supabase
-      .from("classes")
-      .select("id")
-      .eq("teacher_id", user.id)
+    const allSubmissions = await fetchQuery(
+      api.dashboard.getPerformanceSubmissions,
+      { teacherId }
+    )
 
-    if (!classes || classes.length === 0) {
-      return { success: true, data: [] }
-    }
+    // Filter to the last 6 weeks (matches previous gte graded_at behaviour)
+    const sixWeeksAgo = Date.now() - 42 * 24 * 60 * 60 * 1000
+    const submissions = allSubmissions.filter((s) => s.gradedAt >= sixWeeksAgo)
 
-    const classIds = classes.map((c) => c.id)
-
-    // Get assignment IDs for these classes
-    const { data: assignments } = await supabase
-      .from("assignments")
-      .select("id")
-      .in("class_id", classIds)
-
-    if (!assignments || assignments.length === 0) {
-      return { success: true, data: [] }
-    }
-
-    const assignmentIds = assignments.map((a) => a.id)
-
-    // Get graded submissions from the last 6 weeks
-    const sixWeeksAgo = new Date()
-    sixWeeksAgo.setDate(sixWeeksAgo.getDate() - 42)
-
-    const { data: submissions, error: submissionsError } = await supabase
-      .from("submissions")
-      .select("score, graded_at")
-      .in("assignment_id", assignmentIds)
-      .eq("status", "graded")
-      .not("score", "is", null)
-      .gte("graded_at", sixWeeksAgo.toISOString())
-      .order("graded_at", { ascending: true })
-
-    if (submissionsError) {
-      console.error("Error fetching submissions:", submissionsError)
-      return { success: false, error: "Failed to fetch performance data" }
-    }
-
-    if (!submissions || submissions.length === 0) {
+    if (submissions.length === 0) {
       return { success: true, data: [] }
     }
 
@@ -486,10 +354,9 @@ export async function getPerformanceData(): Promise<{
     const weeklyData = new Map<number, { total: number; count: number }>()
 
     for (const sub of submissions) {
-      const gradedDate = new Date(sub.graded_at)
       // Calculate week number (0-5 for last 6 weeks)
       const weeksDiff = Math.floor(
-        (Date.now() - gradedDate.getTime()) / (7 * 24 * 60 * 60 * 1000)
+        (Date.now() - sub.gradedAt) / (7 * 24 * 60 * 60 * 1000)
       )
       const weekNum = Math.max(0, 5 - weeksDiff) // Reverse so week 0 is oldest
 
@@ -539,87 +406,35 @@ export async function getRecentAssignments(): Promise<{
   data?: RecentAssignment[]
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const teacherId = await currentTeacherId()
+  if (!teacherId) {
     return { success: false, error: "You must be logged in" }
   }
 
   try {
-    // Get teacher's classes with enrollments count
-    const { data: classes } = await supabase
-      .from("classes")
-      .select("id, name")
-      .eq("teacher_id", user.id)
+    const assignments = await fetchQuery(
+      api.dashboard.getPublishedAssignmentsWithCounts,
+      { teacherId }
+    )
 
-    if (!classes || classes.length === 0) {
+    if (assignments.length === 0) {
       return { success: true, data: [] }
     }
 
-    const classIds = classes.map((c) => c.id)
-    const classMap = new Map(classes.map((c) => [c.id, c.name]))
+    // Most recent 5 published assignments (already newest-first)
+    const recent = assignments.slice(0, 5)
 
-    // Get enrollment counts per class
-    const { data: enrollments } = await supabase
-      .from("enrollments")
-      .select("class_id")
-      .in("class_id", classIds)
-
-    const enrollmentCounts = new Map<string, number>()
-    for (const e of enrollments || []) {
-      enrollmentCounts.set(e.class_id, (enrollmentCounts.get(e.class_id) || 0) + 1)
-    }
-
-    // Get recent published assignments
-    const { data: assignments, error: assignmentsError } = await supabase
-      .from("assignments")
-      .select("id, title, class_id, due_date, status")
-      .in("class_id", classIds)
-      .eq("status", "published")
-      .order("created_at", { ascending: false })
-      .limit(5)
-
-    if (assignmentsError) {
-      console.error("Error fetching assignments:", assignmentsError)
-      return { success: false, error: "Failed to fetch assignments" }
-    }
-
-    if (!assignments || assignments.length === 0) {
-      return { success: true, data: [] }
-    }
-
-    // Get submission counts per assignment
-    const assignmentIds = assignments.map((a) => a.id)
-    const { data: submissions } = await supabase
-      .from("submissions")
-      .select("assignment_id")
-      .in("assignment_id", assignmentIds)
-
-    const submissionCounts = new Map<string, number>()
-    for (const s of submissions || []) {
-      submissionCounts.set(
-        s.assignment_id,
-        (submissionCounts.get(s.assignment_id) || 0) + 1
-      )
-    }
-
-    // Build recent assignments data
-    const recentAssignments: RecentAssignment[] = assignments.map((a) => {
-      const totalStudents = enrollmentCounts.get(a.class_id) || 0
-      const submittedCount = submissionCounts.get(a.id) || 0
-      const isPastDue = a.due_date && new Date(a.due_date) < new Date()
+    const recentAssignments: RecentAssignment[] = recent.map((a) => {
+      const totalStudents = a.enrollmentCount
+      const submittedCount = a.submissions.length
+      const isPastDue = a.dueDate != null && a.dueDate < Date.now()
       const isComplete = submittedCount >= totalStudents && totalStudents > 0
 
       return {
         id: a.id,
         title: a.title,
-        className: classMap.get(a.class_id) || "Unknown Class",
-        dueDate: a.due_date,
+        className: a.className,
+        dueDate: toIso(a.dueDate),
         status: isPastDue || isComplete ? "Completed" : "Active",
         submitted: submittedCount,
         total: totalStudents,
@@ -653,58 +468,42 @@ export async function getUpcomingTasks(): Promise<{
   data?: UpcomingTask[]
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const teacherId = await currentTeacherId()
+  if (!teacherId) {
     return { success: false, error: "You must be logged in" }
   }
 
   try {
     const tasks: UpcomingTask[] = []
 
-    // Get teacher's classes
-    const { data: classes } = await supabase
-      .from("classes")
-      .select("id, name")
-      .eq("teacher_id", user.id)
+    const assignments = await fetchQuery(
+      api.dashboard.getPublishedAssignmentsWithCounts,
+      { teacherId }
+    )
 
-    if (!classes || classes.length === 0) {
-      return { success: true, data: [] }
-    }
-
-    const classIds = classes.map((c) => c.id)
-
-    // Get assignments for grading tasks and upcoming deadlines
-    const { data: assignments } = await supabase
-      .from("assignments")
-      .select("id, title, class_id, due_date, status")
-      .in("class_id", classIds)
-      .eq("status", "published")
-
-    if (assignments && assignments.length > 0) {
-      const assignmentIds = assignments.map((a) => a.id)
-
-      // Get submissions needing grading
-      const { data: pendingSubmissions } = await supabase
-        .from("submissions")
-        .select("id, assignment_id, submitted_at")
-        .in("assignment_id", assignmentIds)
-        .eq("status", "submitted")
-        .is("score", null)
-        .order("submitted_at", { ascending: true })
-        .limit(5)
+    if (assignments.length > 0) {
+      // Collect submissions needing grading (status submitted, no score)
+      const pendingSubmissions: { assignmentId: string; submittedAt: number }[] =
+        []
+      for (const a of assignments) {
+        for (const s of a.submissions) {
+          if (s.status === "submitted" && s.score === null) {
+            pendingSubmissions.push({
+              assignmentId: a.id,
+              submittedAt: s.submittedAt ?? 0,
+            })
+          }
+        }
+      }
+      pendingSubmissions.sort((x, y) => x.submittedAt - y.submittedAt)
+      const limitedPending = pendingSubmissions.slice(0, 5)
 
       // Create grading tasks (group by assignment)
       const gradingByAssignment = new Map<string, number>()
-      for (const sub of pendingSubmissions || []) {
+      for (const sub of limitedPending) {
         gradingByAssignment.set(
-          sub.assignment_id,
-          (gradingByAssignment.get(sub.assignment_id) || 0) + 1
+          sub.assignmentId,
+          (gradingByAssignment.get(sub.assignmentId) || 0) + 1
         )
       }
 
@@ -727,8 +526,8 @@ export async function getUpcomingTasks(): Promise<{
       nextWeek.setDate(nextWeek.getDate() + 7)
 
       for (const assignment of assignments) {
-        if (assignment.due_date) {
-          const dueDate = new Date(assignment.due_date)
+        if (assignment.dueDate != null) {
+          const dueDate = new Date(assignment.dueDate)
           if (dueDate >= now && dueDate <= nextWeek) {
             const isToday = dueDate.toDateString() === now.toDateString()
             const isTomorrow =
@@ -807,74 +606,37 @@ export async function getAssignmentsNeedingAttention(): Promise<{
   data?: AssignmentAction[]
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const teacherId = await currentTeacherId()
+  if (!teacherId) {
     return { success: false, error: "You must be logged in" }
   }
 
   try {
-    // Get teacher's classes
-    const { data: classes } = await supabase
-      .from("classes")
-      .select("id, name")
-      .eq("teacher_id", user.id)
+    const assignments = await fetchQuery(
+      api.dashboard.getPublishedAssignmentsWithCounts,
+      { teacherId }
+    )
 
-    if (!classes || classes.length === 0) {
+    if (assignments.length === 0) {
       return { success: true, data: [] }
     }
-
-    const classIds = classes.map((c) => c.id)
-    const classMap = new Map(classes.map((c) => [c.id, c.name]))
-
-    // Get published assignments with submissions
-    const { data: assignments, error: assignmentsError } = await supabase
-      .from("assignments")
-      .select("id, title, class_id, status")
-      .in("class_id", classIds)
-      .eq("status", "published")
-      .order("created_at", { ascending: false })
-
-    if (assignmentsError) {
-      console.error("Error fetching assignments:", assignmentsError)
-      return { success: false, error: "Failed to fetch assignments" }
-    }
-
-    if (!assignments || assignments.length === 0) {
-      return { success: true, data: [] }
-    }
-
-    const assignmentIds = assignments.map((a) => a.id)
-
-    // Get submissions for these assignments
-    const { data: submissions } = await supabase
-      .from("submissions")
-      .select("id, assignment_id, status, score, feedback_released")
-      .in("assignment_id", assignmentIds)
 
     // Build assignment action data
     const actionQueue: AssignmentAction[] = []
 
     for (const assignment of assignments) {
-      const assignmentSubmissions = (submissions || []).filter(
-        (s) => s.assignment_id === assignment.id
-      )
+      const assignmentSubmissions = assignment.submissions
 
       if (assignmentSubmissions.length === 0) {
         continue // Skip assignments with no submissions
       }
 
       const gradedCount = assignmentSubmissions.filter(
-        (s) => s.status === "graded" && s.score !== null
+        (s) => s.status === "marked" && s.score !== null
       ).length
       const needsGrading = assignmentSubmissions.length - gradedCount
       const allFeedbackReleased = assignmentSubmissions.every(
-        (s) => s.feedback_released === true
+        (s) => s.feedbackReleased === true
       )
 
       // Determine status
@@ -890,7 +652,7 @@ export async function getAssignmentsNeedingAttention(): Promise<{
         actionQueue.push({
           id: assignment.id,
           title: assignment.title,
-          className: classMap.get(assignment.class_id) || "Unknown Class",
+          className: assignment.className,
           submissionCount: assignmentSubmissions.length,
           gradedCount,
           needsGrading,
@@ -936,78 +698,29 @@ export async function getRecentAssignmentActivity(): Promise<{
   data?: RecentAssignmentActivity[]
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const teacherId = await currentTeacherId()
+  if (!teacherId) {
     return { success: false, error: "You must be logged in" }
   }
 
   try {
-    // Get teacher's classes
-    const { data: classes } = await supabase
-      .from("classes")
-      .select("id, name")
-      .eq("teacher_id", user.id)
+    const assignments = await fetchQuery(
+      api.dashboard.getRecentAssignmentActivity,
+      { teacherId }
+    )
 
-    if (!classes || classes.length === 0) {
+    if (assignments.length === 0) {
       return { success: true, data: [] }
-    }
-
-    const classIds = classes.map((c) => c.id)
-    const classMap = new Map(classes.map((c) => [c.id, c.name]))
-
-    // Get recent assignments
-    const { data: assignments, error: assignmentsError } = await supabase
-      .from("assignments")
-      .select("id, title, class_id, status, created_at, updated_at")
-      .in("class_id", classIds)
-      .order("updated_at", { ascending: false })
-      .limit(5)
-
-    if (assignmentsError) {
-      console.error("Error fetching assignments:", assignmentsError)
-      return { success: false, error: "Failed to fetch assignments" }
-    }
-
-    if (!assignments || assignments.length === 0) {
-      return { success: true, data: [] }
-    }
-
-    const assignmentIds = assignments.map((a) => a.id)
-
-    // Get submission counts
-    const { data: submissions } = await supabase
-      .from("submissions")
-      .select("assignment_id, status")
-      .in("assignment_id", assignmentIds)
-
-    const submissionCounts = new Map<string, number>()
-    const gradedCounts = new Map<string, number>()
-    for (const s of submissions || []) {
-      submissionCounts.set(
-        s.assignment_id,
-        (submissionCounts.get(s.assignment_id) || 0) + 1
-      )
-      if (s.status === "graded") {
-        gradedCounts.set(
-          s.assignment_id,
-          (gradedCounts.get(s.assignment_id) || 0) + 1
-        )
-      }
     }
 
     // Build activity data
     const activityData: RecentAssignmentActivity[] = assignments.map((a) => {
-      const subCount = submissionCounts.get(a.id) || 0
-      const gradedCount = gradedCounts.get(a.id) || 0
-      
+      const subCount = a.submissionCount
+      const gradedCount = a.gradedCount
+
       // Determine display status
-      let displayStatus: "draft" | "published" | "graded" = a.status as "draft" | "published"
+      let displayStatus: "draft" | "published" | "graded" =
+        a.status as "draft" | "published"
       if (a.status === "published" && subCount > 0 && gradedCount === subCount) {
         displayStatus = "graded"
       }
@@ -1015,11 +728,11 @@ export async function getRecentAssignmentActivity(): Promise<{
       return {
         id: a.id,
         title: a.title,
-        className: classMap.get(a.class_id) || "Unknown Class",
+        className: a.className,
         status: displayStatus,
         submissionCount: subCount,
-        createdAt: a.created_at,
-        updatedAt: a.updated_at,
+        createdAt: toIso(a.createdAt) ?? new Date().toISOString(),
+        updatedAt: toIso(a.updatedAt) ?? new Date().toISOString(),
       }
     })
 

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
+import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import Image from "next/image"
 import {
@@ -32,6 +33,10 @@ import {
   Monitor,
   FileDown,
   Library,
+  Sparkles,
+  ListChecks,
+  Upload,
+  Tag,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -61,6 +66,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { LatexPreview } from "@/components/latex-preview"
 import { QuestionDisplayCompact, QuestionDisplay, SourceBadge } from "@/components/question-display"
 import type { Question as DatabaseQuestion } from "@/lib/types/database"
@@ -110,6 +116,8 @@ interface SelectedQuestion {
 }
 
 type WizardStep = "builder" | "configuration" | "success"
+
+interface MatchedTopic { subtopic: string; topicName: string; level: string; confidence: "high" | "medium" }
 
 // Wizard steps configuration for stepper
 const WIZARD_STEPS = [
@@ -199,6 +207,26 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
   const [isExporting, setIsExporting] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
 
+  // Panel Mode State
+  const searchParams = useSearchParams()
+  const preloadedTopics = searchParams?.get("revisionTopics") || ""
+  const [leftPanelMode, setLeftPanelMode] = useState<"browse" | "revision-list" | "auto-fill">(preloadedTopics ? "revision-list" : "browse")
+  const [revisionText, setRevisionText] = useState(preloadedTopics ? decodeURIComponent(preloadedTopics) : "")
+  const [revisionImageBase64, setRevisionImageBase64] = useState<string | null>(null)
+  const [revisionImageMime, setRevisionImageMime] = useState<string>("image/jpeg")
+  const [revisionLoading, setRevisionLoading] = useState(false)
+  const [revisionError, setRevisionError] = useState<string | null>(null)
+  const [matchedTopics, setMatchedTopics] = useState<MatchedTopic[]>([])
+  const [revisionQuestions, setRevisionQuestions] = useState<Question[]>([])
+  const [revisionQuestionsLoading, setRevisionQuestionsLoading] = useState(false)
+
+  // Auto-Fill Mode State
+  const [autoTopics, setAutoTopics] = useState<string[]>([])
+  const [autoTargetMarks, setAutoTargetMarks] = useState<string>("40")
+  const [autoTier, setAutoTier] = useState<"Foundation" | "Higher" | "All">("All")
+  const [autoFilling, setAutoFilling] = useState(false)
+  const [autoFillError, setAutoFillError] = useState<string | null>(null)
+
   // =====================================================
   // Data Fetching
   // =====================================================
@@ -255,6 +283,147 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
 
   const removeQuestion = (questionId: string) => {
     setSelectedQuestions((prev) => prev.filter((q) => q.id !== questionId))
+  }
+
+  // Revision List handlers
+  const handleRevisionImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setRevisionImageMime(file.type || "image/jpeg")
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const result = ev.target?.result as string
+      // Strip the data URL prefix
+      const base64 = result.split(",")[1]
+      setRevisionImageBase64(base64)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleExtractTopics = async () => {
+    if (!revisionText.trim() && !revisionImageBase64) {
+      setRevisionError("Enter a topic list or upload an image.")
+      return
+    }
+    setRevisionLoading(true)
+    setRevisionError(null)
+    setMatchedTopics([])
+    setRevisionQuestions([])
+    try {
+      const res = await fetch("/api/ai/extract-topics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: revisionText.trim() || undefined,
+          image_base64: revisionImageBase64 || undefined,
+          image_mime: revisionImageMime,
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || "Failed to extract topics")
+      setMatchedTopics(json.data.matched ?? [])
+    } catch (err) {
+      setRevisionError(err instanceof Error ? err.message : "Unknown error")
+    } finally {
+      setRevisionLoading(false)
+    }
+  }
+
+  const handleFindRevisionQuestions = async () => {
+    if (matchedTopics.length === 0) return
+    setRevisionQuestionsLoading(true)
+    setRevisionQuestions([])
+    try {
+      // Fetch questions for each matched subtopic (first 5 subtopics to avoid too many results)
+      const subtopics = [...new Set(matchedTopics.map((t) => t.subtopic))].slice(0, 5)
+      const allFound: Question[] = []
+      for (const sub of subtopics) {
+        const result = await getQuestionBankQuestions({ search: sub, limit: 5 })
+        if (result.success && result.data) {
+          allFound.push(...result.data.questions)
+        }
+      }
+      // Deduplicate by id
+      const seen = new Set<string>()
+      setRevisionQuestions(allFound.filter((q) => {
+        if (seen.has(q.id)) return false
+        seen.add(q.id)
+        return true
+      }))
+    } catch {
+      setRevisionError("Failed to load questions for these topics.")
+    } finally {
+      setRevisionQuestionsLoading(false)
+    }
+  }
+
+  const handleAutoFill = async () => {
+    const target = parseInt(autoTargetMarks, 10)
+    if (isNaN(target) || target < 1) {
+      setAutoFillError("Enter a valid target marks total.")
+      return
+    }
+    if (autoTopics.length === 0) {
+      setAutoFillError("Select at least one topic.")
+      return
+    }
+    setAutoFilling(true)
+    setAutoFillError(null)
+    try {
+      // Fetch up to 10 questions per topic, then greedily select to hit the marks target
+      const alreadySelectedIds = new Set(selectedQuestions.map(q => q.id))
+      const candidates: Question[] = []
+      for (const topic of autoTopics) {
+        const result = await getQuestionBankQuestions({
+          topic,
+          difficulty: autoTier === "All" ? "All" : autoTier,
+          limit: 10,
+        })
+        if (result.success && result.data) {
+          for (const q of result.data.questions) {
+            if (!alreadySelectedIds.has(q.id) && !candidates.find(c => c.id === q.id)) {
+              candidates.push(q)
+            }
+          }
+        }
+      }
+
+      if (candidates.length === 0) {
+        setAutoFillError("No questions found for these topics. Try different topics or tier.")
+        return
+      }
+
+      // Shuffle for variety then greedily pick until we hit the marks target
+      const shuffled = [...candidates].sort(() => Math.random() - 0.5)
+      const picked: Question[] = []
+      let runningMarks = selectedQuestions.reduce((s, q) => s + q.marks, 0)
+      const topicCount: Record<string, number> = {}
+
+      for (const q of shuffled) {
+        if (runningMarks >= target) break
+        const topicKey = q.topic_name || q.topic || "Other"
+        if ((topicCount[topicKey] || 0) >= 3) continue // max 3 per subtopic
+        if (runningMarks + q.marks > target + 3) continue // allow slight overshoot
+        picked.push(q)
+        runningMarks += q.marks
+        topicCount[topicKey] = (topicCount[topicKey] || 0) + 1
+      }
+
+      if (picked.length === 0) {
+        setAutoFillError("Could not build a balanced paper with these settings. Try increasing the marks target.")
+        return
+      }
+
+      // Add to selection
+      for (const q of picked) {
+        addQuestion(q)
+      }
+      setLeftPanelMode("browse")
+    } catch {
+      setAutoFillError("Failed to load questions. Please try again.")
+    } finally {
+      setAutoFilling(false)
+    }
   }
 
   const moveQuestion = (index: number, direction: "up" | "down") => {
@@ -461,6 +630,275 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
         <div className="flex-1 flex overflow-hidden">
           {/* Left Panel - Question Bank */}
           <div className="w-3/5 border-r-2 border-swiss-ink flex flex-col bg-swiss-paper">
+            {/* Panel Mode Tabs */}
+            <div className="flex border-b-2 border-swiss-ink bg-swiss-concrete">
+              <button
+                onClick={() => setLeftPanelMode("browse")}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-xs font-black uppercase tracking-widest transition-colors ${
+                  leftPanelMode === "browse"
+                    ? "bg-swiss-paper border-b-2 border-swiss-signal text-swiss-ink"
+                    : "text-swiss-lead hover:text-swiss-ink"
+                }`}
+              >
+                <Filter className="w-3.5 h-3.5" />
+                Browse Bank
+              </button>
+              <button
+                onClick={() => setLeftPanelMode("revision-list")}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-xs font-black uppercase tracking-widest transition-colors ${
+                  leftPanelMode === "revision-list"
+                    ? "bg-swiss-paper border-b-2 border-swiss-signal text-swiss-ink"
+                    : "text-swiss-lead hover:text-swiss-ink"
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Revision List
+              </button>
+              <button
+                onClick={() => setLeftPanelMode("auto-fill")}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-xs font-black uppercase tracking-widest transition-colors ${
+                  leftPanelMode === "auto-fill"
+                    ? "bg-swiss-paper border-b-2 border-swiss-signal text-swiss-ink"
+                    : "text-swiss-lead hover:text-swiss-ink"
+                }`}
+              >
+                <ListChecks className="w-3.5 h-3.5" />
+                Auto-Fill
+              </button>
+            </div>
+
+            {/* Auto-Fill Panel */}
+            {leftPanelMode === "auto-fill" && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <p className="text-xs text-swiss-lead font-bold uppercase tracking-widest">
+                  Select topics and a marks target — the system will auto-select a balanced set of questions from the bank.
+                </p>
+
+                {/* Topic multi-select */}
+                <div className="space-y-2">
+                  <label className="text-xs font-black uppercase tracking-widest text-swiss-ink">Topics</label>
+                  <div className="flex flex-wrap gap-2">
+                    {TOPICS.map((topic) => {
+                      const active = autoTopics.includes(topic)
+                      return (
+                        <button
+                          key={topic}
+                          type="button"
+                          onClick={() =>
+                            setAutoTopics(prev =>
+                              active ? prev.filter(t => t !== topic) : [...prev, topic]
+                            )
+                          }
+                          className={`px-3 py-1.5 text-xs font-bold border-2 rounded transition-colors ${
+                            active
+                              ? "border-swiss-signal bg-swiss-signal text-white"
+                              : "border-swiss-ink text-swiss-ink hover:border-swiss-signal"
+                          }`}
+                        >
+                          {topic}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {autoTopics.length > 0 && (
+                    <button
+                      onClick={() => setAutoTopics([])}
+                      className="text-xs text-swiss-lead underline"
+                    >
+                      Clear topics
+                    </button>
+                  )}
+                </div>
+
+                {/* Target marks + tier */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-black uppercase tracking-widest text-swiss-ink">Target Marks</label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={200}
+                      value={autoTargetMarks}
+                      onChange={(e) => setAutoTargetMarks(e.target.value)}
+                      className="border-2 border-swiss-ink h-9"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-black uppercase tracking-widest text-swiss-ink">Tier</label>
+                    <Select value={autoTier} onValueChange={(v) => setAutoTier(v as "Foundation" | "Higher" | "All")}>
+                      <SelectTrigger className="border-2 border-swiss-ink h-9">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="All">Any Tier</SelectItem>
+                        <SelectItem value="Foundation">Foundation</SelectItem>
+                        <SelectItem value="Higher">Higher</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {autoFillError && (
+                  <p className="text-xs text-red-600 font-bold">{autoFillError}</p>
+                )}
+
+                <Button
+                  onClick={handleAutoFill}
+                  disabled={autoFilling || autoTopics.length === 0}
+                  className="w-full bg-swiss-signal text-white hover:bg-swiss-ink font-bold uppercase tracking-wider"
+                >
+                  {autoFilling ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <ListChecks className="w-4 h-4 mr-2" />
+                  )}
+                  Auto-Build Paper ({autoTargetMarks} marks)
+                </Button>
+
+                <p className="text-xs text-swiss-lead">
+                  Questions will be added to your selection. You can remove or swap individual questions afterwards.
+                </p>
+              </div>
+            )}
+
+            {/* Revision List Panel */}
+            {leftPanelMode === "revision-list" && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div>
+                  <p className="text-xs text-swiss-lead font-bold uppercase tracking-widest mb-3">
+                    Paste a revision list or upload a photo — AI will match topics to the question bank.
+                  </p>
+                  <Textarea
+                    placeholder={"e.g.\n- Quadratics\n- Trigonometry\n- Surds\n- Circle theorems"}
+                    value={revisionText}
+                    onChange={(e) => setRevisionText(e.target.value)}
+                    rows={6}
+                    className="border-2 border-swiss-ink font-mono text-sm resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-2 cursor-pointer border-2 border-swiss-ink rounded-md px-3 py-2 text-xs font-bold uppercase tracking-wider hover:bg-swiss-concrete transition-colors">
+                    <Upload className="w-3.5 h-3.5" />
+                    Upload Image
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      onChange={handleRevisionImageUpload}
+                    />
+                  </label>
+                  {revisionImageBase64 && (
+                    <span className="text-xs text-swiss-signal font-bold uppercase tracking-wider">
+                      Image ready
+                    </span>
+                  )}
+                </div>
+
+                {revisionError && (
+                  <p className="text-xs text-red-600 font-bold">{revisionError}</p>
+                )}
+
+                <Button
+                  onClick={handleExtractTopics}
+                  disabled={revisionLoading || (!revisionText.trim() && !revisionImageBase64)}
+                  className="w-full bg-swiss-signal text-white hover:bg-swiss-ink font-bold uppercase tracking-wider"
+                >
+                  {revisionLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 mr-2" />
+                  )}
+                  Extract Topics
+                </Button>
+
+                {matchedTopics.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Tag className="w-4 h-4" />
+                      <h3 className="text-xs font-black uppercase tracking-widest">Matched Topics ({matchedTopics.length})</h3>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {matchedTopics.map((t, i) => (
+                        <div
+                          key={i}
+                          className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-bold border-2 ${
+                            t.confidence === "high"
+                              ? "border-swiss-signal text-swiss-signal bg-swiss-signal/10"
+                              : "border-swiss-lead text-swiss-lead"
+                          }`}
+                        >
+                          <span>{t.subtopic}</span>
+                          <span className="text-[9px] opacity-60 font-normal">{t.level}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <Button
+                      onClick={handleFindRevisionQuestions}
+                      disabled={revisionQuestionsLoading}
+                      variant="outline"
+                      className="w-full border-2 border-swiss-ink font-bold uppercase tracking-wider"
+                    >
+                      {revisionQuestionsLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                      ) : (
+                        <ListChecks className="w-4 h-4 mr-2" />
+                      )}
+                      Find Questions for These Topics
+                    </Button>
+
+                    {revisionQuestions.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-black uppercase tracking-widest text-swiss-lead">
+                          {revisionQuestions.length} questions found
+                        </p>
+                        {revisionQuestions.map((q) => {
+                          const isSelected = selectedIds.has(q.id)
+                          return (
+                            <div
+                              key={q.id}
+                              className={`border-2 rounded-md p-3 flex items-start justify-between gap-2 ${
+                                isSelected ? "border-swiss-signal bg-swiss-signal/5" : "border-swiss-ink"
+                              }`}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <QuestionDisplayCompact question={toDisplayQuestion(q)} />
+                                <div className="flex items-center gap-2 mt-1">
+                                  <Badge variant="outline" className="text-[10px] border-swiss-ink">
+                                    {q.topic_name || q.topic}
+                                  </Badge>
+                                  <span className="text-[10px] text-swiss-lead font-bold">
+                                    {q.marks} marks
+                                  </span>
+                                </div>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant={isSelected ? "secondary" : "default"}
+                                onClick={() => addQuestion(q)}
+                                disabled={isSelected}
+                                className={`h-8 shrink-0 ${
+                                  isSelected
+                                    ? "bg-swiss-signal/20 text-swiss-signal"
+                                    : "bg-swiss-signal text-white hover:bg-swiss-ink"
+                                }`}
+                              >
+                                {isSelected ? <CheckCircle className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                              </Button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Browse Bank Panel */}
+            {leftPanelMode === "browse" && (
+            <>
             {/* Filters Header */}
             <div className="p-4 border-b-2 border-swiss-ink bg-swiss-concrete">
               <div className="flex items-center gap-2 mb-4">
@@ -770,6 +1208,7 @@ export function CreateAssignmentWizard({ classes }: CreateAssignmentWizardProps)
                 </Table>
               )}
             </div>
+            </>)}
           </div>
 
           {/* Right Panel - Selected Questions */}

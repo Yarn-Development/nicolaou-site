@@ -1,6 +1,9 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { getLearningObjective } from "@/lib/topic-taxonomy"
+import { getAuthUser } from "@/lib/auth"
+import { fetchQuery, fetchMutation, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
+import type { Id } from "@/convex/_generated/dataModel"
 
 // =====================================================
 // Types
@@ -59,6 +62,17 @@ export interface AssignmentFeedbackSummary {
 }
 
 // =====================================================
+// Helpers
+// =====================================================
+
+/** Resolve the signed-in Clerk user to a Convex user id, or null. */
+async function currentUserId(): Promise<Id<"users"> | null> {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) return null
+  return getConvexUserIdByClerkId(authUser.clerkId)
+}
+
+// =====================================================
 // Generate Feedback for an Assignment
 // =====================================================
 
@@ -70,127 +84,30 @@ export async function generateFeedback(assignmentId: string): Promise<{
   data?: AssignmentFeedbackSummary
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
   try {
-    // 1. Fetch assignment with class info
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        title,
-        class_id,
-        content,
-        classes!inner(
-          id,
-          name,
-          teacher_id
-        )
-      `)
-      .eq("id", assignmentId)
-      .single()
+    const result = await fetchQuery(api.feedback.getAssignmentFeedback, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: userId,
+    })
 
-    if (assignmentError || !assignment) {
+    if ("error" in result) {
+      if (result.error === "forbidden") return { success: false, error: "Permission denied" }
       return { success: false, error: "Assignment not found" }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const classData = assignment.classes as any
-    if (classData.teacher_id !== user.id) {
-      return { success: false, error: "Permission denied" }
-    }
+    const { assignment, className, questions, submissions } = result
 
-    // 2. Get questions for this assignment
-    const { data: junctionQuestions } = await supabase.rpc(
-      "get_assignment_questions",
-      { p_assignment_id: assignmentId }
-    )
-
-    let questions: {
-      id: string
-      question_latex: string
-      marks: number
-      topic: string
-      sub_topic: string | null
-      difficulty: string
-      is_ghost?: boolean
-    }[] = []
-
-    if (junctionQuestions && junctionQuestions.length > 0) {
-      // Now supports both bank questions and ghost questions (external papers)
-      questions = junctionQuestions.map((q: {
-        question_id: string
-        question_latex: string
-        marks: number
-        topic: string
-        sub_topic: string
-        difficulty: string
-        is_ghost?: boolean
-      }) => ({
-        id: q.question_id,
-        question_latex: q.question_latex,
-        marks: q.marks,
-        topic: q.topic,
-        sub_topic: q.sub_topic,
-        difficulty: q.difficulty,
-        is_ghost: q.is_ghost || false,
-      }))
-    } else {
-      // Fallback to JSONB
-      const questionIds = (assignment.content as { question_ids?: string[] })?.question_ids || []
-      if (questionIds.length > 0) {
-        const { data: questionsData } = await supabase
-          .from("questions")
-          .select("id, question_latex, marks, topic, sub_topic, difficulty")
-          .in("id", questionIds)
-
-        if (questionsData) {
-          questions = questionsData.map(q => ({
-            id: q.id,
-            question_latex: q.question_latex || "",
-            marks: q.marks || 1,
-            topic: q.topic || "General",
-            sub_topic: q.sub_topic || null,
-            difficulty: q.difficulty || "Foundation",
-          }))
-        }
-      }
-    }
-
-    // 3. Get all submissions with student profiles
-    const { data: submissions } = await supabase
-      .from("submissions")
-      .select(`
-        id,
-        student_id,
-        score,
-        grading_data,
-        status,
-        profiles!inner(
-          id,
-          full_name,
-          email
-        )
-      `)
-      .eq("assignment_id", assignmentId)
-      .eq("status", "graded")
-
-    if (!submissions || submissions.length === 0) {
+    // No graded submissions — return empty summary.
+    if (submissions.length === 0) {
       return {
         success: true,
         data: {
           assignmentId,
           assignmentTitle: assignment.title,
-          className: classData.name,
+          className,
           totalStudents: 0,
           gradedStudents: 0,
           averageScore: 0,
@@ -200,27 +117,24 @@ export async function generateFeedback(assignmentId: string): Promise<{
       }
     }
 
-    // 4. Calculate topic performance for each student
     const maxMarks = questions.reduce((sum, q) => sum + q.marks, 0)
     const studentFeedback: StudentFeedback[] = []
     const topicStats: Map<string, { total: number; earned: number; count: number }> = new Map()
 
     for (const submission of submissions) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const profile = submission.profiles as any
-      const gradingData = (submission.grading_data || {}) as Record<string, { score: number }>
+      const earnedMap = submission.earnedByAssignmentQuestionId as Record<string, number>
 
       // Calculate per-topic performance
       const topicPerf: Map<string, TopicPerformance> = new Map()
 
       for (const question of questions) {
         const key = question.topic
-        const earned = gradingData[question.id]?.score || 0
+        const earned = earnedMap[question.assignmentQuestionId] || 0
 
         if (!topicPerf.has(key)) {
           topicPerf.set(key, {
             topic: question.topic,
-            subTopic: question.sub_topic,
+            subTopic: question.subTopic,
             questionsCount: 0,
             totalMarks: 0,
             earnedMarks: 0,
@@ -249,10 +163,10 @@ export async function generateFeedback(assignmentId: string): Promise<{
       const weakTopics: TopicPerformance[] = []
 
       for (const perf of topicPerf.values()) {
-        perf.percentage = perf.totalMarks > 0 
-          ? Math.round((perf.earnedMarks / perf.totalMarks) * 100) 
+        perf.percentage = perf.totalMarks > 0
+          ? Math.round((perf.earnedMarks / perf.totalMarks) * 100)
           : 0
-        
+
         if (perf.percentage < 40) {
           perf.status = "weak"
           weakTopics.push(perf)
@@ -267,51 +181,39 @@ export async function generateFeedback(assignmentId: string): Promise<{
 
       // 5. Fetch revision questions for weak topics
       const revisionQuestions: RevisionQuestion[] = []
-      
+
       if (weakTopics.length > 0) {
         const weakTopicNames = weakTopics.map(t => t.topic)
-        
-        // Get questions from question bank that match weak topics
-        // Only exclude non-ghost questions (ghost questions use assignment_question IDs)
-        const realQuestionIds = questions.filter(q => !q.is_ghost).map(q => q.id)
-        
-        let query = supabase
-          .from("questions")
-          .select("id, question_latex, image_url, marks, topic, sub_topic, difficulty")
-          .in("topic", weakTopicNames)
-          .limit(10)
-        
-        // Only add exclusion filter if there are real questions to exclude
-        if (realQuestionIds.length > 0) {
-          query = query.not("id", "in", `(${realQuestionIds.map(id => `"${id}"`).join(",")})`)
-        }
-        
-        const { data: revisionQs } = await query
+        const excludeIds = questions.map(q => q.id as Id<"questions">)
 
-        if (revisionQs) {
-          for (const q of revisionQs) {
-            revisionQuestions.push({
-              id: q.id,
-              questionLatex: q.question_latex || "",
-              imageUrl: q.image_url,
-              marks: q.marks || 1,
-              topic: q.topic,
-              subTopic: q.sub_topic,
-              difficulty: q.difficulty,
-              targetedTopic: q.topic,
-            })
-          }
+        const revisionQs = await fetchQuery(api.feedback.getRevisionByTopics, {
+          topics: weakTopicNames,
+          excludeIds,
+          limit: 10,
+        })
+
+        for (const q of revisionQs) {
+          revisionQuestions.push({
+            id: q.id,
+            questionLatex: q.questionLatex || "",
+            imageUrl: q.imageUrl,
+            marks: q.marks || 1,
+            topic: q.topic,
+            subTopic: q.subTopic,
+            difficulty: q.difficulty,
+            targetedTopic: q.topic,
+          })
         }
       }
 
-      const overallPercentage = maxMarks > 0 
-        ? Math.round((submission.score || 0) / maxMarks * 100) 
+      const overallPercentage = maxMarks > 0
+        ? Math.round((submission.score || 0) / maxMarks * 100)
         : 0
 
       studentFeedback.push({
-        studentId: profile.id,
-        studentName: profile.full_name || profile.email.split("@")[0],
-        studentEmail: profile.email,
+        studentId: submission.studentId,
+        studentName: submission.studentName || submission.studentEmail.split("@")[0],
+        studentEmail: submission.studentEmail,
         assignmentId,
         assignmentTitle: assignment.title,
         submissionId: submission.id,
@@ -328,10 +230,10 @@ export async function generateFeedback(assignmentId: string): Promise<{
     // 6. Calculate class-wide topic breakdown
     const topicBreakdown: AssignmentFeedbackSummary["topicBreakdown"] = []
     for (const [topic, stats] of topicStats) {
-      const avgPercentage = stats.total > 0 
-        ? Math.round((stats.earned / stats.total) * 100) 
+      const avgPercentage = stats.total > 0
+        ? Math.round((stats.earned / stats.total) * 100)
         : 0
-      
+
       // Count students struggling (< 50% on this topic)
       const studentsStruggling = studentFeedback.filter(s => {
         const topicPerf = s.topicPerformance.find(t => t.topic === topic)
@@ -357,7 +259,7 @@ export async function generateFeedback(assignmentId: string): Promise<{
       data: {
         assignmentId,
         assignmentTitle: assignment.title,
-        className: classData.name,
+        className,
         totalStudents: studentFeedback.length,
         gradedStudents: studentFeedback.length,
         averageScore,
@@ -386,99 +288,47 @@ export async function getStudentAssignmentFeedback(
   data?: StudentFeedback
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
   // If no studentId provided, use current user
-  const targetStudentId = studentId || user.id
+  const targetStudentId = (studentId as Id<"users">) || userId
 
   try {
-    // Get assignment
-    const { data: assignment } = await supabase
-      .from("assignments")
-      .select("id, title")
-      .eq("id", assignmentId)
-      .single()
+    const result = await fetchQuery(api.feedback.getStudentAssignmentFeedback, {
+      assignmentId: assignmentId as Id<"assignments">,
+      studentId: targetStudentId,
+      requesterId: userId,
+    })
 
-    if (!assignment) {
-      return { success: false, error: "Assignment not found" }
+    if ("error" in result) {
+      switch (result.error) {
+        case "not_found":
+          return { success: false, error: "Assignment not found" }
+        case "no_submission":
+          return { success: false, error: "No submission found" }
+        case "no_profile":
+          return { success: false, error: "No submission found" }
+        case "not_released":
+          return { success: false, error: "Feedback not yet released" }
+        default:
+          return { success: false, error: "An unexpected error occurred" }
+      }
     }
 
-    // Get submission
-    const { data: submission } = await supabase
-      .from("submissions")
-      .select("*, profiles!inner(id, full_name, email)")
-      .eq("assignment_id", assignmentId)
-      .eq("student_id", targetStudentId)
-      .single()
-
-    if (!submission) {
-      return { success: false, error: "No submission found" }
-    }
-
-    // Check if feedback is released (unless teacher is viewing)
-    const isTeacher = studentId && studentId !== user.id
-    if (!isTeacher && !submission.feedback_released) {
-      return { success: false, error: "Feedback not yet released" }
-    }
-
-    // Get questions
-    const { data: junctionQuestions } = await supabase.rpc(
-      "get_assignment_questions",
-      { p_assignment_id: assignmentId }
-    )
-
-    let questions: {
-      id: string
-      question_latex: string
-      marks: number
-      topic: string
-      sub_topic: string | null
-      difficulty: string
-    }[] = []
-
-    if (junctionQuestions && junctionQuestions.length > 0) {
-      questions = junctionQuestions.map((q: {
-        question_id: string
-        question_latex: string
-        marks: number
-        topic: string
-        sub_topic: string
-        difficulty: string
-      }) => ({
-        id: q.question_id,
-        question_latex: q.question_latex,
-        marks: q.marks,
-        topic: q.topic,
-        sub_topic: q.sub_topic,
-        difficulty: q.difficulty,
-      }))
-    }
-
-    // Calculate topic performance
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const profile = submission.profiles as any
-    const gradingData = (submission.grading_data || {}) as Record<string, { score: number }>
+    const { assignment, submission, student, questions } = result
     const maxMarks = questions.reduce((sum, q) => sum + q.marks, 0)
 
     const topicPerf: Map<string, TopicPerformance> = new Map()
 
     for (const question of questions) {
       const key = question.topic
-      const earned = gradingData[question.id]?.score || 0
+      const earned = question.earned || 0
 
       if (!topicPerf.has(key)) {
         topicPerf.set(key, {
           topic: question.topic,
-          subTopic: question.sub_topic,
+          subTopic: question.subTopic,
           questionsCount: 0,
           totalMarks: 0,
           earnedMarks: 0,
@@ -497,10 +347,10 @@ export async function getStudentAssignmentFeedback(
     const weakTopics: TopicPerformance[] = []
 
     for (const perf of topicPerf.values()) {
-      perf.percentage = perf.totalMarks > 0 
-        ? Math.round((perf.earnedMarks / perf.totalMarks) * 100) 
+      perf.percentage = perf.totalMarks > 0
+        ? Math.round((perf.earnedMarks / perf.totalMarks) * 100)
         : 0
-      
+
       if (perf.percentage < 40) {
         perf.status = "weak"
         weakTopics.push(perf)
@@ -513,43 +363,41 @@ export async function getStudentAssignmentFeedback(
 
     // Get revision questions
     const revisionQuestions: RevisionQuestion[] = []
-    
+
     if (weakTopics.length > 0) {
       const weakTopicNames = weakTopics.map(t => t.topic)
-      
-      const { data: revisionQs } = await supabase
-        .from("questions")
-        .select("id, question_latex, image_url, marks, topic, sub_topic, difficulty")
-        .in("topic", weakTopicNames)
-        .not("id", "in", `(${questions.map(q => `"${q.id}"`).join(",")})`)
-        .limit(10)
+      const excludeIds = questions.map(q => q.id as Id<"questions">)
 
-      if (revisionQs) {
-        for (const q of revisionQs) {
-          revisionQuestions.push({
-            id: q.id,
-            questionLatex: q.question_latex || "",
-            imageUrl: q.image_url,
-            marks: q.marks || 1,
-            topic: q.topic,
-            subTopic: q.sub_topic,
-            difficulty: q.difficulty,
-            targetedTopic: q.topic,
-          })
-        }
+      const revisionQs = await fetchQuery(api.feedback.getRevisionByTopics, {
+        topics: weakTopicNames,
+        excludeIds,
+        limit: 10,
+      })
+
+      for (const q of revisionQs) {
+        revisionQuestions.push({
+          id: q.id,
+          questionLatex: q.questionLatex || "",
+          imageUrl: q.imageUrl,
+          marks: q.marks || 1,
+          topic: q.topic,
+          subTopic: q.subTopic,
+          difficulty: q.difficulty,
+          targetedTopic: q.topic,
+        })
       }
     }
 
-    const overallPercentage = maxMarks > 0 
-      ? Math.round((submission.score || 0) / maxMarks * 100) 
+    const overallPercentage = maxMarks > 0
+      ? Math.round((submission.score || 0) / maxMarks * 100)
       : 0
 
     return {
       success: true,
       data: {
-        studentId: profile.id,
-        studentName: profile.full_name || profile.email.split("@")[0],
-        studentEmail: profile.email,
+        studentId: student.id,
+        studentName: student.fullName || student.email.split("@")[0],
+        studentEmail: student.email,
         assignmentId,
         assignmentTitle: assignment.title,
         submissionId: submission.id,
@@ -595,6 +443,7 @@ export interface SubTopicBreakdown {
   percentage: number
   status: RAGStatus
   questionIds: string[]
+  learningObjective?: string
 }
 
 export interface RevisionQuestionData {
@@ -627,12 +476,13 @@ export interface StudentFeedbackData {
   overallStatus: RAGStatus
   topicBreakdown: SubTopicBreakdown[]
   revisionPack: RevisionQuestionData[]
+  aiNarrative?: string
   generatedAt: string
 }
 
 /**
  * Generates targeted feedback and revision questions for a specific submission
- * 
+ *
  * Step A: Fetch submission, assignment, and questions
  * Step B: RAG Analysis - group by sub_topic and calculate percentages
  * Step C: Revision Generator - find new questions for weak areas
@@ -643,172 +493,38 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
   data?: StudentFeedbackData
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
   try {
     // =========================================================
     // STEP A: Fetch Data
     // =========================================================
-
-    // A1: Get the submission with grading data
-    const { data: submission, error: submissionError } = await supabase
-      .from("submissions")
-      .select(`
-        id,
-        assignment_id,
-        student_id,
-        score,
-        grading_data,
-        status
-      `)
-      .eq("id", submissionId)
-      .single()
-
-    if (submissionError || !submission) {
-      console.error("Submission error:", submissionError)
-      return { success: false, error: "Submission not found" }
-    }
-
-    // Check submission is graded
-    if (submission.status !== "graded") {
-      return { success: false, error: "Submission has not been graded yet" }
-    }
-
-    // A1b: Get the student profile separately
-    const { data: studentProfile, error: profileError } = await supabase
-      .from("profiles")
-      .select("id, full_name, email")
-      .eq("id", submission.student_id)
-      .single()
-
-    if (profileError || !studentProfile) {
-      console.error("Profile error:", profileError)
-      return { success: false, error: "Student profile not found" }
-    }
-
-    // A2: Get the assignment with class info
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        title,
-        class_id,
-        classes!inner(
-          id,
-          name,
-          teacher_id
-        )
-      `)
-      .eq("id", submission.assignment_id)
-      .single()
-
-    if (assignmentError || !assignment) {
-      return { success: false, error: "Assignment not found" }
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const classData = assignment.classes as any
-
-    // Permission check: user must be the teacher or the student
-    const isTeacher = classData.teacher_id === user.id
-    const isStudent = submission.student_id === user.id
-    
-    if (!isTeacher && !isStudent) {
-      return { success: false, error: "Permission denied" }
-    }
-
-    // A3: Get questions for this assignment
-    const { data: junctionQuestions, error: questionsError } = await supabase.rpc(
-      "get_assignment_questions",
-      { p_assignment_id: submission.assignment_id }
-    )
-
-    if (questionsError) {
-      console.error("Questions error:", questionsError)
-      return { success: false, error: "Failed to fetch questions" }
-    }
-
-    // Get full question details including image_url and content_type
-    const questionIds = (junctionQuestions || []).map((q: { question_id: string }) => q.question_id)
-    
-    let questionDetails: Record<string, { 
-      image_url: string | null
-      content_type: string
-      difficulty: string
-    }> = {}
-
-    if (questionIds.length > 0) {
-      const { data: fullQuestions } = await supabase
-        .from("questions")
-        .select("id, image_url, content_type, difficulty")
-        .in("id", questionIds)
-
-      if (fullQuestions) {
-        questionDetails = Object.fromEntries(
-          fullQuestions.map((q) => [q.id, { 
-            image_url: q.image_url, 
-            content_type: q.content_type,
-            difficulty: q.difficulty 
-          }])
-        )
-      }
-    }
-
-    // Build questions array with all metadata
-    // Now supports both bank questions and ghost questions (external papers)
-    interface QuestionData {
-      id: string
-      questionLatex: string
-      marks: number
-      topic: string
-      subTopic: string
-      difficulty: string
-      imageUrl: string | null
-      contentType: string
-      isGhost: boolean
-      customQuestionNumber: string | null
-    }
-
-    const questions: QuestionData[] = (junctionQuestions || []).map((q: {
-      question_id: string
-      question_latex: string
-      marks: number
-      topic: string
-      sub_topic: string
-      difficulty: string
-      is_ghost?: boolean
-      custom_question_number?: string | null
-    }) => {
-      const isGhost = q.is_ghost || false
-      const details = isGhost ? null : questionDetails[q.question_id]
-      return {
-        id: q.question_id,
-        questionLatex: q.question_latex || "",
-        marks: q.marks || 1,
-        topic: q.topic || "General",
-        subTopic: q.sub_topic || q.topic || "General",
-        difficulty: details?.difficulty || q.difficulty || "Foundation",
-        imageUrl: isGhost ? null : (details?.image_url || null),
-        contentType: isGhost ? "ghost" : (details?.content_type || "generated_text"),
-        isGhost,
-        customQuestionNumber: q.custom_question_number || null,
-      }
+    const result = await fetchQuery(api.feedback.getSubmissionFeedback, {
+      submissionId: submissionId as Id<"submissions">,
+      requesterId: userId,
     })
+
+    if ("error" in result) {
+      switch (result.error) {
+        case "not_found":
+          return { success: false, error: "Submission not found" }
+        case "not_graded":
+          return { success: false, error: "Submission has not been graded yet" }
+        case "no_profile":
+          return { success: false, error: "Student profile not found" }
+        case "forbidden":
+          return { success: false, error: "Permission denied" }
+        default:
+          return { success: false, error: "An unexpected error occurred" }
+      }
+    }
+
+    const { submission, student, assignment, className, questions } = result
 
     // =========================================================
     // STEP B: RAG Analysis - Group by sub_topic
     // =========================================================
-
-    const gradingData = (submission.grading_data || {}) as Record<string, { score: number }>
 
     // Group questions by sub_topic
     const subTopicMap = new Map<string, {
@@ -822,7 +538,7 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
 
     for (const question of questions) {
       const key = `${question.topic}::${question.subTopic}`
-      const earnedScore = gradingData[question.id]?.score || 0
+      const earnedScore = question.earned || 0
 
       if (!subTopicMap.has(key)) {
         subTopicMap.set(key, {
@@ -846,11 +562,12 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
     const weakSubTopics: { subTopic: string; topic: string; difficulty: string }[] = []
 
     for (const [, entry] of subTopicMap) {
-      const percentage = entry.total > 0 
-        ? Math.round((entry.score / entry.total) * 100) 
+      const percentage = entry.total > 0
+        ? Math.round((entry.score / entry.total) * 100)
         : 0
-      
+
       const status = calculateRAGStatusHelper(percentage)
+      const learningObjective = getLearningObjective(entry.subTopic, entry.topic) || undefined
 
       topicBreakdown.push({
         topic: entry.topic,
@@ -860,6 +577,7 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
         percentage,
         status,
         questionIds: entry.questionIds,
+        learningObjective,
       })
 
       // Track weak (red and amber) sub-topics for revision
@@ -880,100 +598,35 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
     // =========================================================
 
     const revisionPack: RevisionQuestionData[] = []
-    // Only exclude real questions (not ghost questions) from revision pack
-    // Ghost questions use assignment_question IDs, not real question IDs
-    const assignmentQuestionIds = questions.filter(q => !q.isGhost).map(q => q.id)
+    // Exclude questions already in the assignment from revision pack.
+    const assignmentQuestionIds = questions.map(q => q.id as Id<"questions">)
 
     for (const weak of weakSubTopics) {
-      // Query for 1-2 NEW questions matching sub_topic and difficulty
-      // Exclude questions already in the assignment (only non-ghost ones)
-      let query = supabase
-        .from("questions")
-        .select(`
-          id,
-          question_latex,
-          image_url,
-          content_type,
-          marks,
-          topic,
-          sub_topic,
-          difficulty,
-          answer_key
-        `)
-        .eq("sub_topic", weak.subTopic)
-        .eq("difficulty", weak.difficulty)
-        .limit(2)
-      
-      // Only add exclusion filter if there are real questions to exclude
-      if (assignmentQuestionIds.length > 0) {
-        query = query.not("id", "in", `(${assignmentQuestionIds.map(id => `"${id}"`).join(",")})`)
-      }
-      
-      const { data: revisionQs } = await query
+      // Query for 1-2 NEW questions matching sub_topic and difficulty,
+      // falling back to topic-level. Excludes questions already in the assignment.
+      const revisionQs = await fetchQuery(api.feedback.getRevisionForSubTopic, {
+        topic: weak.topic,
+        subTopic: weak.subTopic,
+        difficulty: weak.difficulty,
+        excludeIds: assignmentQuestionIds,
+        limit: 2,
+      })
 
-      if (revisionQs && revisionQs.length > 0) {
-        for (const q of revisionQs) {
-          // Avoid duplicates in revision pack
-          if (!revisionPack.find(rq => rq.id === q.id)) {
-            revisionPack.push({
-              id: q.id,
-              questionLatex: q.question_latex || "",
-              imageUrl: q.image_url,
-              contentType: (q.content_type as "generated_text" | "image_ocr") || "generated_text",
-              marks: q.marks || 1,
-              topic: q.topic,
-              subTopic: q.sub_topic,
-              difficulty: q.difficulty,
-              answerKey: q.answer_key as { answer?: string; explanation?: string } | null,
-              targetedSubTopic: weak.subTopic,
-            })
-          }
-        }
-      }
-
-      // If no exact sub_topic match, try topic-level match
-      if (!revisionQs || revisionQs.length === 0) {
-        let topicQuery = supabase
-          .from("questions")
-          .select(`
-            id,
-            question_latex,
-            image_url,
-            content_type,
-            marks,
-            topic,
-            sub_topic,
-            difficulty,
-            answer_key
-          `)
-          .eq("topic", weak.topic)
-          .eq("difficulty", weak.difficulty)
-          .limit(1)
-        
-        // Only add exclusion filter if there are real questions to exclude
-        if (assignmentQuestionIds.length > 0) {
-          topicQuery = topicQuery.not("id", "in", `(${assignmentQuestionIds.map(id => `"${id}"`).join(",")})`)
-        }
-        
-        const { data: topicQs } = await topicQuery
-
-        if (topicQs && topicQs.length > 0) {
-          for (const q of topicQs) {
-            if (!revisionPack.find(rq => rq.id === q.id)) {
-              revisionPack.push({
-                id: q.id,
-                questionLatex: q.question_latex || "",
-                imageUrl: q.image_url,
-                contentType: (q.content_type as "generated_text" | "image_ocr") || "generated_text",
-                marks: q.marks || 1,
-                topic: q.topic,
-                subTopic: q.sub_topic,
-                difficulty: q.difficulty,
-                answerKey: q.answer_key as { answer?: string; explanation?: string } | null,
-                targetedSubTopic: weak.subTopic,
-              })
-            }
-          }
+      for (const q of revisionQs) {
+        // Avoid duplicates in revision pack
+        if (!revisionPack.find(rq => rq.id === q.id)) {
+          revisionPack.push({
+            id: q.id,
+            questionLatex: q.questionLatex || "",
+            imageUrl: q.imageUrl,
+            contentType: (q.contentType as "generated_text" | "image_ocr") || "generated_text",
+            marks: q.marks || 1,
+            topic: q.topic,
+            subTopic: q.subTopic,
+            difficulty: q.difficulty,
+            answerKey: q.answerKey as { answer?: string; explanation?: string } | null,
+            targetedSubTopic: weak.subTopic,
+          })
         }
       }
     }
@@ -985,23 +638,66 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
     const maxMarks = questions.reduce((sum, q) => sum + q.marks, 0)
     const totalScore = submission.score || 0
     const percentage = maxMarks > 0 ? Math.round((totalScore / maxMarks) * 100) : 0
+    const studentName = student.fullName || student.email?.split("@")[0] || "Student"
+
+    // =========================================================
+    // STEP E: AI Narrative (PRD §5.4.1)
+    // =========================================================
+    let aiNarrative: string | undefined
+    try {
+      const strongTopics = topicBreakdown.filter(t => t.status === "green").map(t => t.subTopic)
+      const weakTopics = topicBreakdown.filter(t => t.status === "red" || t.status === "amber").map(t => t.subTopic)
+      const openRouterKey = process.env.OPENROUTER_API_KEY
+      if (openRouterKey) {
+        const narrativePrompt = `Write a 2-3 sentence plain English summary of this maths student's assessment performance.
+Student: ${studentName}
+Assessment: ${assignment.title}
+Score: ${totalScore}/${maxMarks} (${percentage}%)
+Strong areas: ${strongTopics.length > 0 ? strongTopics.join(", ") : "none identified"}
+Needs improvement: ${weakTopics.length > 0 ? weakTopics.join(", ") : "none — excellent performance"}
+
+Rules: encouraging tone, mention specific topics, no markdown, suitable for sharing with parents, end with one concrete next step.`
+        const aiResp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${openRouterKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
+            "X-Title": "Nicolaou Maths - Feedback Narrative",
+          },
+          body: JSON.stringify({
+            model: "anthropic/claude-sonnet-4-6",
+            messages: [{ role: "user", content: narrativePrompt }],
+            temperature: 0.7,
+            max_tokens: 200,
+          }),
+        })
+        if (aiResp.ok) {
+          const aiJson = await aiResp.json()
+          aiNarrative = aiJson.choices?.[0]?.message?.content?.trim()
+        }
+      }
+    } catch {
+      // Narrative is optional — failure is non-fatal
+    }
 
     return {
       success: true,
       data: {
         submissionId: submission.id,
-        studentId: studentProfile.id,
-        studentName: studentProfile.full_name || studentProfile.email?.split("@")[0] || "Student",
-        studentEmail: studentProfile.email || "",
+        studentId: student.id,
+        studentName,
+        studentEmail: student.email || "",
         assignmentId: assignment.id,
         assignmentTitle: assignment.title,
-        className: classData.name,
+        className,
         totalScore,
         maxMarks,
         percentage,
         overallStatus: calculateRAGStatusHelper(percentage),
         topicBreakdown,
         revisionPack,
+        aiNarrative,
         generatedAt: new Date().toISOString(),
       },
     }
@@ -1060,241 +756,43 @@ export async function getStudentDashboardData(): Promise<{
   data?: StudentDashboardData
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
     return { success: false, error: "You must be logged in" }
+  }
+  const studentId = await getConvexUserIdByClerkId(authUser.clerkId)
+  if (!studentId) {
+    return { success: false, error: "Profile not found" }
   }
 
   try {
-    // Get student profile
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id, full_name, email")
-      .eq("id", user.id)
-      .single()
+    const d = await fetchQuery(api.students.getDashboard, { studentId })
 
-    if (!profile) {
-      return { success: false, error: "Profile not found" }
-    }
+    const assignments: StudentDashboardData["assignments"] = d.assignments.map((a) => ({
+      id: a.id,
+      title: a.title,
+      className: a.className,
+      dueDate: a.dueDate == null ? null : new Date(a.dueDate).toISOString(),
+      status: a.status,
+      score: a.score,
+      maxMarks: a.maxMarks,
+      percentage: a.percentage,
+      feedbackReleased: a.feedbackReleased,
+      submissionId: a.submissionId,
+    }))
 
-    // Get enrolled classes (simpler query without nested profile join)
-    const { data: enrollments, error: enrollError } = await supabase
-      .from("enrollments")
-      .select(`
-        class_id,
-        classes!inner(
-          id,
-          name,
-          subject,
-          teacher_id
-        )
-      `)
-      .eq("student_id", user.id)
-
-    if (enrollError) {
-      console.error("Enrollment query error:", enrollError)
-    }
-
-    const enrolledClasses: StudentDashboardData["enrolledClasses"] = []
-    const classIds: string[] = []
-
-    if (enrollments && enrollments.length > 0) {
-      // Get teacher IDs to fetch their profiles separately
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const teacherIds = [...new Set(enrollments.map((e: any) => e.classes.teacher_id))]
-      
-      // Fetch teacher profiles
-      const { data: teachers } = await supabase
-        .from("profiles")
-        .select("id, full_name, email")
-        .in("id", teacherIds)
-
-      const teacherMap = new Map(
-        (teachers || []).map(t => [t.id, t])
-      )
-
-      for (const e of enrollments) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const cls = e.classes as any
-        const teacher = teacherMap.get(cls.teacher_id)
-        
-        enrolledClasses.push({
-          id: cls.id,
-          name: cls.name,
-          subject: cls.subject,
-          teacherName: teacher?.full_name || teacher?.email || "Unknown",
-        })
-        classIds.push(cls.id)
-      }
-    }
-
-    // Get assignments for enrolled classes
-    const assignments: StudentDashboardData["assignments"] = []
-    const topicStats: Map<string, { total: number; correct: number }> = new Map()
-
-    if (classIds.length > 0) {
-      const { data: classAssignments } = await supabase
-        .from("assignments")
-        .select(`
-          id,
-          title,
-          class_id,
-          due_date,
-          status,
-          content,
-          classes!inner(name)
-        `)
-        .in("class_id", classIds)
-        .eq("status", "published")
-        .order("due_date", { ascending: true })
-
-      if (classAssignments) {
-        // Get submissions for these assignments
-        const assignmentIds = classAssignments.map(a => a.id)
-        const { data: submissions } = await supabase
-          .from("submissions")
-          .select("id, assignment_id, score, status, grading_data, feedback_released")
-          .eq("student_id", user.id)
-          .in("assignment_id", assignmentIds)
-
-        const submissionMap = new Map(
-          (submissions || []).map(s => [s.assignment_id, s])
-        )
-
-        for (const a of classAssignments) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const cls = a.classes as any
-          const submission = submissionMap.get(a.id)
-          
-          // Get max marks from questions
-          let maxMarks = 0
-          const questionIds = (a.content as { question_ids?: string[] })?.question_ids || []
-          
-          if (questionIds.length > 0) {
-            const { data: questionData } = await supabase
-              .from("questions")
-              .select("id, marks, topic, sub_topic")
-              .in("id", questionIds)
-
-            if (questionData) {
-              maxMarks = questionData.reduce((sum, q) => sum + (q.marks || 1), 0)
-
-              // Update topic stats if graded
-              if (submission?.status === "graded") {
-                const gradingData = (submission.grading_data || {}) as Record<string, { score: number }>
-                
-                for (const q of questionData) {
-                  // Use sub_topic for more granular tracking, fallback to topic
-                  const key = q.sub_topic || q.topic || "General"
-                  if (!key) continue // Skip if no topic info
-                  
-                  const earned = gradingData[q.id]?.score || 0
-                  const total = q.marks || 1
-
-                  if (!topicStats.has(key)) {
-                    topicStats.set(key, { total: 0, correct: 0 })
-                  }
-                  const stat = topicStats.get(key)!
-                  stat.total += total
-                  stat.correct += earned
-                }
-              }
-            }
-          }
-
-          const status: "pending" | "submitted" | "graded" = !submission 
-            ? "pending" 
-            : submission.status === "graded" 
-              ? "graded" 
-              : "submitted"
-
-          // Calculate percentage - handle 0 scores correctly (not falsy)
-          const percentage = submission?.score !== undefined && submission?.score !== null && maxMarks > 0 
-            ? Math.round((submission.score / maxMarks) * 100) 
-            : null
-
-          assignments.push({
-            id: a.id,
-            title: a.title,
-            className: cls.name,
-            dueDate: a.due_date,
-            status,
-            score: submission?.score ?? null,
-            maxMarks,
-            percentage,
-            feedbackReleased: submission?.feedback_released || false,
-            submissionId: submission?.id || null,
-          })
-        }
-      }
-    }
-
-    // Build topic mastery
-    const topicMastery: StudentDashboardData["topicMastery"] = []
-    let bestTopic: string | null = null
-    let bestPercentage = 0
-    let weakestTopic: string | null = null
-    let weakestPercentage = 100
-
-    for (const [topic, stats] of topicStats) {
-      const percentage = stats.total > 0 
-        ? Math.round((stats.correct / stats.total) * 100) 
-        : 0
-      
-      let status: "weak" | "developing" | "strong" = "strong"
-      if (percentage < 40) status = "weak"
-      else if (percentage < 70) status = "developing"
-
-      topicMastery.push({
-        topic,
-        totalQuestions: stats.total,
-        correctAnswers: stats.correct,
-        percentage,
-        status,
-      })
-
-      if (percentage > bestPercentage) {
-        bestPercentage = percentage
-        bestTopic = topic
-      }
-      if (percentage < weakestPercentage) {
-        weakestPercentage = percentage
-        weakestTopic = topic
-      }
-    }
-
-    // Sort by percentage (worst first)
-    topicMastery.sort((a, b) => a.percentage - b.percentage)
-
-    // Calculate overall stats
-    const completedAssignments = assignments.filter(a => a.status === "graded").length
-    const totalAssignments = assignments.length
-    const gradedAssignments = assignments.filter(a => a.percentage !== null)
-    const averageScore = gradedAssignments.length > 0
-      ? Math.round(gradedAssignments.reduce((sum, a) => sum + (a.percentage || 0), 0) / gradedAssignments.length)
-      : 0
+    // weakest topics first (matches previous display ordering)
+    const topicMastery = [...d.topicMastery].sort((a, b) => a.percentage - b.percentage)
 
     return {
       success: true,
       data: {
-        studentId: profile.id,
-        studentName: profile.full_name || profile.email.split("@")[0],
-        enrolledClasses,
+        studentId: d.studentId,
+        studentName: d.studentName,
+        enrolledClasses: d.enrolledClasses,
         assignments,
         topicMastery,
-        overallStats: {
-          completedAssignments,
-          totalAssignments,
-          averageScore,
-          bestTopic,
-          weakestTopic,
-        },
+        overallStats: d.overallStats,
       },
     }
   } catch (error) {
@@ -1320,10 +818,10 @@ export interface BulkFeedbackResult {
 /**
  * Releases feedback and generates personalized feedback packs for all graded students
  * in an assignment. This is the main action called from the marking grid.
- * 
+ *
  * Steps:
- * 1. Update assignment status to 'graded'
- * 2. Set feedback_released = true for all submissions
+ * 1. Update assignment status to closed (the marked/released state)
+ * 2. Publish feedbackSheets for all graded submissions (feedback_released = true)
  * 3. Generate StudentFeedbackData for each graded submission
  * 4. Return all feedback data for bulk printing
  */
@@ -1332,102 +830,41 @@ export async function releaseFeedbackAndGeneratePacks(assignmentId: string): Pro
   data?: BulkFeedbackResult
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
   try {
-    // 1. Fetch assignment and verify teacher permission
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        title,
-        class_id,
-        status,
-        classes!inner(
-          id,
-          name,
-          teacher_id
-        )
-      `)
-      .eq("id", assignmentId)
-      .single()
+    const result = await fetchMutation(api.feedback.releaseFeedback, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: userId,
+    })
 
-    if (assignmentError || !assignment) {
-      return { success: false, error: "Assignment not found" }
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const classData = assignment.classes as any
-    if (classData.teacher_id !== user.id) {
-      return { success: false, error: "Permission denied" }
-    }
-
-    // 2. Update assignment status to 'graded' if not already
-    if (assignment.status !== "graded") {
-      const { error: updateAssignmentError } = await supabase
-        .from("assignments")
-        .update({ status: "graded" })
-        .eq("id", assignmentId)
-
-      if (updateAssignmentError) {
-        console.error("Failed to update assignment status:", updateAssignmentError)
-        return { success: false, error: "Failed to update assignment status" }
+    if ("error" in result) {
+      switch (result.error) {
+        case "forbidden":
+          return { success: false, error: "Permission denied" }
+        case "no_graded":
+          return { success: false, error: "No graded submissions found. Please grade students first." }
+        default:
+          return { success: false, error: "Assignment not found" }
       }
     }
 
-    // 3. Get all graded submissions for this assignment
-    const { data: submissions, error: submissionsError } = await supabase
-      .from("submissions")
-      .select("id, student_id, status")
-      .eq("assignment_id", assignmentId)
-      .eq("status", "graded")
+    const { assignment, className, submissionIds } = result
 
-    if (submissionsError) {
-      console.error("Failed to fetch submissions:", submissionsError)
-      return { success: false, error: "Failed to fetch submissions" }
-    }
-
-    if (!submissions || submissions.length === 0) {
-      return { 
-        success: false, 
-        error: "No graded submissions found. Please grade students first." 
-      }
-    }
-
-    // 4. Release feedback for all submissions
-    const { error: releaseError } = await supabase
-      .from("submissions")
-      .update({ feedback_released: true })
-      .eq("assignment_id", assignmentId)
-      .eq("status", "graded")
-
-    if (releaseError) {
-      console.error("Failed to release feedback:", releaseError)
-      return { success: false, error: "Failed to release feedback" }
-    }
-
-    // 5. Generate feedback for each student
+    // Generate feedback for each student
     const studentFeedback: StudentFeedbackData[] = []
     let successCount = 0
     let failedCount = 0
 
-    for (const submission of submissions) {
-      const result = await generateStudentFeedback(submission.id)
-      
-      if (result.success && result.data) {
-        studentFeedback.push(result.data)
+    for (const sid of submissionIds) {
+      const fb = await generateStudentFeedback(sid)
+
+      if (fb.success && fb.data) {
+        studentFeedback.push(fb.data)
         successCount++
       } else {
-        console.error(`Failed to generate feedback for submission ${submission.id}:`, result.error)
+        console.error(`Failed to generate feedback for submission ${sid}:`, fb.error)
         failedCount++
       }
     }
@@ -1437,8 +874,8 @@ export async function releaseFeedbackAndGeneratePacks(assignmentId: string): Pro
       data: {
         assignmentId,
         assignmentTitle: assignment.title,
-        className: classData.name,
-        totalStudents: submissions.length,
+        className,
+        totalStudents: submissionIds.length,
         successCount,
         failedCount,
         studentFeedback,
@@ -1467,70 +904,36 @@ export async function getAssignmentFeedbackForPrint(assignmentId: string): Promi
   }
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
+  const userId = await currentUserId()
+  if (!userId) return { success: false, error: "You must be logged in" }
 
   try {
-    // Fetch assignment and verify teacher permission
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        title,
-        class_id,
-        classes!inner(
-          id,
-          name,
-          teacher_id
-        )
-      `)
-      .eq("id", assignmentId)
-      .single()
+    const result = await fetchQuery(api.feedback.getReleasedSubmissions, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: userId,
+    })
 
-    if (assignmentError || !assignment) {
+    if ("error" in result) {
+      if (result.error === "forbidden") return { success: false, error: "Permission denied" }
       return { success: false, error: "Assignment not found" }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const classData = assignment.classes as any
-    if (classData.teacher_id !== user.id) {
-      return { success: false, error: "Permission denied" }
-    }
+    const { assignment, className, submissionIds } = result
 
-    // Get all graded submissions with feedback released
-    const { data: submissions, error: submissionsError } = await supabase
-      .from("submissions")
-      .select("id")
-      .eq("assignment_id", assignmentId)
-      .eq("status", "graded")
-      .eq("feedback_released", true)
-
-    if (submissionsError) {
-      return { success: false, error: "Failed to fetch submissions" }
-    }
-
-    if (!submissions || submissions.length === 0) {
-      return { 
-        success: false, 
-        error: "No feedback available. Please release feedback first." 
+    if (submissionIds.length === 0) {
+      return {
+        success: false,
+        error: "No feedback available. Please release feedback first.",
       }
     }
 
     // Generate feedback for each student
     const studentFeedback: StudentFeedbackData[] = []
 
-    for (const submission of submissions) {
-      const result = await generateStudentFeedback(submission.id)
-      if (result.success && result.data) {
-        studentFeedback.push(result.data)
+    for (const sid of submissionIds) {
+      const fb = await generateStudentFeedback(sid)
+      if (fb.success && fb.data) {
+        studentFeedback.push(fb.data)
       }
     }
 
@@ -1541,7 +944,7 @@ export async function getAssignmentFeedbackForPrint(assignmentId: string): Promi
       success: true,
       data: {
         assignmentTitle: assignment.title,
-        className: classData.name,
+        className,
         studentFeedback,
       },
     }

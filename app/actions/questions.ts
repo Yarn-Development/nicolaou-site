@@ -1,7 +1,10 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { sanitize } from "@/lib/question-sanitizer"
+import { getAuthUser } from "@/lib/auth"
+import { fetchQuery, fetchMutation, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
+import type { Id } from "@/convex/_generated/dataModel"
 
 /**
  * Type definitions for Question system
@@ -16,6 +19,14 @@ export interface QuestionAnswerKey {
   mark_scheme?: string
   marks?: number
   type?: 'generated' | 'manual' | 'ocr'
+  source?: {
+    exam_board?: string
+    level?: string
+    paper?: string
+    year?: number
+    question_number?: string
+    is_calculator?: boolean
+  }
 }
 
 export interface CreateQuestionInput {
@@ -49,137 +60,139 @@ export interface Question extends CreateQuestionInput {
   is_diagram_question?: boolean
 }
 
-/**
- * Creates a new question in the database
- */
-export async function createQuestion(input: CreateQuestionInput) {
-  const supabase = await createClient()
+const toIso = (ms: number | null | undefined): string =>
+  ms == null ? new Date().toISOString() : new Date(ms).toISOString()
 
-  // Get current user
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in to create questions"
-    }
-  }
-
-  // Verify user is a teacher
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single()
-
-  if (profileError || !profile) {
-    return {
-      success: false,
-      error: "Could not verify user profile"
-    }
-  }
-
-  if (profile.role !== "teacher") {
-    return {
-      success: false,
-      error: "Only teachers can create questions"
-    }
-  }
-
-  // Validate answer_key structure
-  if (!input.answer_key.answer || !input.answer_key.explanation) {
-    return {
-      success: false,
-      error: "Answer key must include both answer and explanation"
-    }
-  }
-
-  // Insert question
-  const { data: question, error: insertError } = await supabase
-    .from("questions")
-    .insert({
-      created_by: user.id,
-      content_type: input.content_type,
-      question_latex: input.question_latex,
-      image_url: input.image_url || null,
-      curriculum_level: input.curriculum_level,
-      topic: input.topic,
-      topic_name: input.topic,
-      sub_topic_name: input.sub_topic,
-      difficulty: input.difficulty,
-      marks: input.marks,
-      question_type: input.question_type,
-      calculator_allowed: input.calculator_allowed,
-      answer_key: input.answer_key,
-      is_verified: false
-    })
-    .select()
-    .single()
-
-  if (insertError) {
-    console.error("Error creating question:", insertError)
-    return {
-      success: false,
-      error: "Failed to create question. Please try again."
-    }
-  }
-
-  revalidatePath("/dashboard")
-
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapQuestion(q: any): Question {
   return {
-    success: true,
-    data: question as Question
+    id: q._id,
+    created_at: toIso(q._creationTime),
+    updated_at: toIso(q._creationTime),
+    created_by: q.createdBy ?? null,
+    content_type: (q.contentType as QuestionContentType) ?? "official_past_paper",
+    question_latex: q.questionLatex ?? "",
+    image_url: q.imageUrl ?? null,
+    curriculum_level: q.level ?? "",
+    topic: q.topic ?? "",
+    topic_name: q.topicName ?? q.topic ?? null,
+    sub_topic: q.subTopic ?? "",
+    sub_topic_name: q.subTopic ?? null,
+    difficulty: (q.difficulty as QuestionDifficulty) ?? "Higher",
+    marks: q.marks ?? 1,
+    question_type: (q.questionType as QuestionType) ?? "Fluency",
+    calculator_allowed: q.calculatorAllowed ?? true,
+    answer_key: (q.answerKey as QuestionAnswerKey) ?? { answer: "", explanation: "" },
+    is_verified: q.isVerified ?? false,
   }
 }
 
 /**
- * Uploads an image to the question-images storage bucket
+ * Creates a new question in the database
+ */
+export async function createQuestion(input: CreateQuestionInput) {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
+    return { success: false, error: "You must be logged in to create questions" }
+  }
+  if (authUser.role !== "teacher") {
+    return { success: false, error: "Only teachers can create questions" }
+  }
+  const createdBy = await getConvexUserIdByClerkId(authUser.clerkId)
+  if (!createdBy) {
+    return { success: false, error: "Could not verify user profile" }
+  }
+
+  // OCR questions may have empty answers pending teacher review — only require explanation
+  if (input.content_type !== 'image_ocr' && !input.answer_key.answer) {
+    return { success: false, error: "Answer key must include an answer" }
+  }
+  if (!input.answer_key.explanation) {
+    return { success: false, error: "Answer key must include an explanation" }
+  }
+
+  // Sanitize LaTeX content at save time to ensure exam-ready formatting
+  const cleanLatex = input.question_latex ? sanitize(input.question_latex) : input.question_latex
+  const cleanAnswer = input.answer_key.answer ? sanitize(input.answer_key.answer) : input.answer_key.answer
+  const cleanExplanation = input.answer_key.explanation ? sanitize(input.answer_key.explanation) : input.answer_key.explanation
+
+  try {
+    const question = await fetchMutation(api.questions.createQuestionFull, {
+      createdBy,
+      contentType: input.content_type,
+      questionLatex: cleanLatex,
+      imageUrl: input.image_url || undefined,
+      level: input.curriculum_level,
+      topic: input.topic,
+      topicName: input.topic,
+      subTopic: input.sub_topic,
+      difficulty: input.difficulty,
+      marks: input.marks,
+      questionType: input.question_type,
+      calculatorAllowed: input.calculator_allowed,
+      answerKey: {
+        ...input.answer_key,
+        answer: cleanAnswer,
+        explanation: cleanExplanation,
+      },
+      isVerified: false,
+    })
+
+    revalidatePath("/dashboard")
+
+    return { success: true, data: mapQuestion(question) }
+  } catch (error) {
+    console.error("Error creating question:", error)
+    return { success: false, error: "Failed to create question. Please try again." }
+  }
+}
+
+/**
+ * Uploads an image to Convex file storage.
+ * Returns the stored file's served URL plus its storageId (as `path`).
  */
 export async function uploadQuestionImage(file: File) {
-  const supabase = await createClient()
-
-  // Get current user
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
     return {
       success: false,
       error: "You must be logged in to upload images"
     }
   }
 
-  // Generate unique filename
-  const fileExt = file.name.split('.').pop()
-  const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`
+  try {
+    // 1. Get a short-lived upload URL from Convex.
+    const { uploadUrl } = await fetchMutation(api.files.generateUploadUrl, {})
 
-  // Upload to storage
-  const { data: uploadData, error: uploadError } = await supabase
-    .storage
-    .from("question-images")
-    .upload(fileName, file, {
-      cacheControl: "3600",
-      upsert: false
+    // 2. POST the file directly to Convex storage.
+    const res = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": file.type },
+      body: file,
     })
+    if (!res.ok) {
+      throw new Error(`Upload failed with status ${res.status}`)
+    }
+    const { storageId } = (await res.json()) as { storageId: Id<"_storage"> }
 
-  if (uploadError) {
-    console.error("Error uploading image:", uploadError)
+    // 3. Resolve the served URL for the stored file.
+    const url = await fetchQuery(api.files.getUrl, { storageId })
+    if (!url) {
+      throw new Error("Could not resolve uploaded file URL")
+    }
+
+    return {
+      success: true,
+      data: {
+        path: storageId,
+        url,
+      }
+    }
+  } catch (error) {
+    console.error("Error uploading image:", error)
     return {
       success: false,
       error: "Failed to upload image. Please try again."
-    }
-  }
-
-  // Get public URL
-  const { data: { publicUrl } } = supabase
-    .storage
-    .from("question-images")
-    .getPublicUrl(uploadData.path)
-
-  return {
-    success: true,
-    data: {
-      path: uploadData.path,
-      url: publicUrl
     }
   }
 }
@@ -188,34 +201,21 @@ export async function uploadQuestionImage(file: File) {
  * Gets all questions created by the current user
  */
 export async function getMyQuestions() {
-  const supabase = await createClient()
-
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in"
-    }
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
+    return { success: false, error: "You must be logged in" }
+  }
+  const createdBy = await getConvexUserIdByClerkId(authUser.clerkId)
+  if (!createdBy) {
+    return { success: false, error: "You must be logged in" }
   }
 
-  const { data: questions, error: questionsError } = await supabase
-    .from("questions")
-    .select("*")
-    .eq("created_by", user.id)
-    .order("created_at", { ascending: false })
-
-  if (questionsError) {
-    console.error("Error fetching questions:", questionsError)
-    return {
-      success: false,
-      error: "Failed to fetch questions"
-    }
-  }
-
-  return {
-    success: true,
-    data: questions as Question[]
+  try {
+    const questions = await fetchQuery(api.questions.getMyQuestions, { createdBy })
+    return { success: true, data: questions.map(mapQuestion) }
+  } catch (error) {
+    console.error("Error fetching questions:", error)
+    return { success: false, error: "Failed to fetch questions" }
   }
 }
 
@@ -228,52 +228,22 @@ export async function getAllQuestions(filters?: {
   difficulty?: QuestionDifficulty
   verified_only?: boolean
 }) {
-  const supabase = await createClient()
-
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in"
-    }
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
+    return { success: false, error: "You must be logged in" }
   }
 
-  let query = supabase
-    .from("questions")
-    .select("*")
-    .order("created_at", { ascending: false })
-
-  // Apply filters
-  if (filters?.curriculum_level) {
-    query = query.eq("curriculum_level", filters.curriculum_level)
-  }
-
-  if (filters?.topic) {
-    query = query.eq("topic", filters.topic)
-  }
-
-  if (filters?.difficulty) {
-    query = query.eq("difficulty", filters.difficulty)
-  }
-
-  if (filters?.verified_only) {
-    query = query.eq("is_verified", true)
-  }
-
-  const { data: questions, error: questionsError } = await query
-
-  if (questionsError) {
-    console.error("Error fetching questions:", questionsError)
-    return {
-      success: false,
-      error: "Failed to fetch questions"
-    }
-  }
-
-  return {
-    success: true,
-    data: questions as Question[]
+  try {
+    const questions = await fetchQuery(api.questions.getAllQuestions, {
+      level: filters?.curriculum_level,
+      topic: filters?.topic,
+      difficulty: filters?.difficulty,
+      verifiedOnly: filters?.verified_only,
+    })
+    return { success: true, data: questions.map(mapQuestion) }
+  } catch (error) {
+    console.error("Error fetching questions:", error)
+    return { success: false, error: "Failed to fetch questions" }
   }
 }
 
@@ -281,38 +251,49 @@ export async function getAllQuestions(filters?: {
  * Updates a question (only the creator can update)
  */
 export async function updateQuestion(id: string, updates: Partial<CreateQuestionInput>) {
-  const supabase = await createClient()
-
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in"
-    }
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
+    return { success: false, error: "You must be logged in" }
+  }
+  const createdBy = await getConvexUserIdByClerkId(authUser.clerkId)
+  if (!createdBy) {
+    return { success: false, error: "You must be logged in" }
   }
 
-  const { data: question, error: updateError } = await supabase
-    .from("questions")
-    .update(updates)
-    .eq("id", id)
-    .eq("created_by", user.id)
-    .select()
-    .single()
+  try {
+    const result = await fetchMutation(api.questions.updateQuestion, {
+      questionId: id as Id<"questions">,
+      createdBy,
+      contentType: updates.content_type,
+      questionLatex: updates.question_latex,
+      imageUrl: updates.image_url === undefined ? undefined : updates.image_url ?? null,
+      level: updates.curriculum_level,
+      topic: updates.topic,
+      topicName: updates.topic,
+      subTopic: updates.sub_topic,
+      difficulty: updates.difficulty,
+      marks: updates.marks,
+      questionType: updates.question_type,
+      calculatorAllowed: updates.calculator_allowed,
+      answerKey: updates.answer_key,
+    })
 
-  if (updateError) {
-    console.error("Error updating question:", updateError)
+    if ("error" in result) {
+      return {
+        success: false,
+        error: "Failed to update question. You can only update your own questions.",
+      }
+    }
+
+    revalidatePath("/dashboard")
+
+    return { success: true, data: result.question ? mapQuestion(result.question) : undefined }
+  } catch (error) {
+    console.error("Error updating question:", error)
     return {
       success: false,
-      error: "Failed to update question. You can only update your own questions."
+      error: "Failed to update question. You can only update your own questions.",
     }
-  }
-
-  revalidatePath("/dashboard")
-
-  return {
-    success: true,
-    data: question as Question
   }
 }
 
@@ -320,74 +301,68 @@ export async function updateQuestion(id: string, updates: Partial<CreateQuestion
  * Deletes a question (only the creator can delete)
  */
 export async function deleteQuestion(id: string) {
-  const supabase = await createClient()
-
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in"
-    }
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
+    return { success: false, error: "You must be logged in" }
+  }
+  const createdBy = await getConvexUserIdByClerkId(authUser.clerkId)
+  if (!createdBy) {
+    return { success: false, error: "You must be logged in" }
   }
 
-  const { error: deleteError } = await supabase
-    .from("questions")
-    .delete()
-    .eq("id", id)
-    .eq("created_by", user.id)
-
-  if (deleteError) {
-    console.error("Error deleting question:", deleteError)
+  try {
+    const result = await fetchMutation(api.questions.deleteQuestion, {
+      questionId: id as Id<"questions">,
+      createdBy,
+    })
+    if ("error" in result) {
+      return {
+        success: false,
+        error: "Failed to delete question. You can only delete your own questions.",
+      }
+    }
+  } catch (error) {
+    console.error("Error deleting question:", error)
     return {
       success: false,
-      error: "Failed to delete question. You can only delete your own questions."
+      error: "Failed to delete question. You can only delete your own questions.",
     }
   }
 
   revalidatePath("/dashboard")
 
-  return {
-    success: true
-  }
+  return { success: true }
 }
 
 /**
  * Toggles the verified status of a question
  */
 export async function toggleQuestionVerification(id: string, isVerified: boolean) {
-  const supabase = await createClient()
-
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in"
-    }
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
+    return { success: false, error: "You must be logged in" }
+  }
+  const createdBy = await getConvexUserIdByClerkId(authUser.clerkId)
+  if (!createdBy) {
+    return { success: false, error: "You must be logged in" }
   }
 
-  const { data: question, error: updateError } = await supabase
-    .from("questions")
-    .update({ is_verified: isVerified })
-    .eq("id", id)
-    .eq("created_by", user.id)
-    .select()
-    .single()
-
-  if (updateError) {
-    console.error("Error updating question verification:", updateError)
-    return {
-      success: false,
-      error: "Failed to update question verification"
+  try {
+    const result = await fetchMutation(api.questions.toggleQuestionVerification, {
+      questionId: id as Id<"questions">,
+      createdBy,
+      isVerified,
+    })
+    if ("error" in result) {
+      return { success: false, error: "Failed to update question verification" }
     }
-  }
 
-  revalidatePath("/dashboard")
+    revalidatePath("/dashboard")
 
-  return {
-    success: true,
-    data: question as Question
+    return { success: true, data: result.question ? mapQuestion(result.question) : undefined }
+  } catch (error) {
+    console.error("Error updating question verification:", error)
+    return { success: false, error: "Failed to update question verification" }
   }
 }
 
@@ -414,23 +389,11 @@ export interface QuestionBankResult {
 }
 
 /**
- * Fetches questions from the questions table with optional filters
- * Includes search by topic or question_latex content
+ * Fetches questions from Convex with optional filters.
  */
 export async function getQuestionBankQuestions(
   filters: QuestionBankFilters = {}
 ): Promise<{ success: boolean; data?: QuestionBankResult; error?: string }> {
-  const supabase = await createClient()
-
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in"
-    }
-  }
-
   const {
     search = "",
     topic = "All",
@@ -444,77 +407,27 @@ export async function getQuestionBankQuestions(
   } = filters
 
   try {
-    // Build the query
-    let query = supabase
-      .from("questions")
-      .select("*", { count: "exact" })
+    const result = await fetchQuery(api.questions.browseQuestions, {
+      search: search && search.trim() !== "" ? search.trim() : undefined,
+      topic: topic && topic !== "All" ? topic : undefined,
+      difficulty: difficulty && difficulty !== "All" ? difficulty : undefined,
+      calculatorAllowed: calculatorAllowed !== "All" && typeof calculatorAllowed === "boolean" ? calculatorAllowed : undefined,
+      isVerified: isVerified !== "All" && typeof isVerified === "boolean" ? isVerified : undefined,
+      contentType: source && source !== "All" ? source : undefined,
+      hasDiagram: hasDiagram || undefined,
+      limit,
+      offset,
+    })
 
-    // Apply search filter (searches topic, topic_name, sub_topic_name, and question_latex)
-    if (search && search.trim() !== "") {
-      const searchTerm = search.trim()
-      // Use ilike for case-insensitive search
-      query = query.or(
-        `topic.ilike.%${searchTerm}%,topic_name.ilike.%${searchTerm}%,sub_topic_name.ilike.%${searchTerm}%,question_latex.ilike.%${searchTerm}%`
-      )
-    }
+    // Map Convex camelCase fields → Question interface (snake_case)
+    const questions: Question[] = (result.questions || []).map((q) => ({
+      ...mapQuestion(q),
+      source_spec: q.sourceSpec as ("new-spec" | "legacy-modular" | "legacy-gcse" | null | undefined),
+    } as Question))
 
-    // Apply topic filter
-    if (topic && topic !== "All") {
-      query = query.or(`topic.eq.${topic},topic_name.eq.${topic}`)
-    }
-
-    // Apply difficulty filter
-    if (difficulty && difficulty !== "All") {
-      query = query.eq("difficulty", difficulty)
-    }
-
-    // Apply calculator filter
-    if (calculatorAllowed !== "All" && typeof calculatorAllowed === "boolean") {
-      query = query.eq("calculator_allowed", calculatorAllowed)
-    }
-
-    // Apply verified filter
-    if (isVerified !== "All" && typeof isVerified === "boolean") {
-      query = query.eq("is_verified", isVerified)
-    }
-
-    // Apply source/content_type filter
-    if (source && source !== "All") {
-      query = query.eq("content_type", source)
-    }
-
-    // Apply has diagram filter
-    if (hasDiagram) {
-      query = query.not("image_url", "is", null)
-    }
-
-    // Apply pagination and ordering
-    query = query
-      .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1)
-
-    const { data: questions, error: questionsError, count } = await query
-
-    if (questionsError) {
-      console.error("Error fetching questions:", questionsError)
-      return {
-        success: false,
-        error: "Failed to fetch questions from the database"
-      }
-    }
-
-    // Fetch unique topics for the filter dropdown
-    const { data: topicsData, error: topicsError } = await supabase
-      .from("questions")
-      .select("topic, topic_name")
-
-    if (topicsError) {
-      console.error("Error fetching topics:", topicsError)
-    }
-
-    // Extract unique topics
+    // Build unique topics list from returned data
     const topicsSet = new Set<string>()
-    topicsData?.forEach(q => {
+    questions.forEach(q => {
       if (q.topic) topicsSet.add(q.topic)
       if (q.topic_name) topicsSet.add(q.topic_name)
     })
@@ -523,17 +436,14 @@ export async function getQuestionBankQuestions(
     return {
       success: true,
       data: {
-        questions: (questions || []) as Question[],
-        total: count || 0,
-        topics: uniqueTopics
+        questions,
+        total: result.total,
+        topics: uniqueTopics,
       }
     }
-  } catch (error) {
-    console.error("Unexpected error in getQuestionBankQuestions:", error)
-    return {
-      success: false,
-      error: "An unexpected error occurred while fetching questions"
-    }
+  } catch (convexError) {
+    console.error("Convex read failed:", convexError)
+    return { success: false, error: "An unexpected error occurred while fetching questions" }
   }
 }
 
@@ -543,68 +453,30 @@ export async function getQuestionBankQuestions(
 export async function getQuestionById(
   questionId: string
 ): Promise<{ success: boolean; data?: Question; error?: string }> {
-  const supabase = await createClient()
-
   try {
-    const { data: question, error } = await supabase
-      .from("questions")
-      .select("*")
-      .eq("id", questionId)
-      .single()
+    const question = await fetchQuery(api.questions.getQuestionById, {
+      questionId: questionId as Id<"questions">,
+    })
 
-    if (error) {
-      console.error("Error fetching question:", error)
-      return {
-        success: false,
-        error: "Question not found"
-      }
+    if (!question) {
+      return { success: false, error: "Question not found" }
     }
 
-    return {
-      success: true,
-      data: question as Question
-    }
+    return { success: true, data: mapQuestion(question) }
   } catch (error) {
     console.error("Unexpected error in getQuestionById:", error)
-    return {
-      success: false,
-      error: "An unexpected error occurred"
-    }
+    return { success: false, error: "An unexpected error occurred" }
   }
 }
 
 /**
- * Increment the times_used counter for questions when added to an exam
+ * Increment the times_used counter for questions when added to an exam.
+ * NOTE: the Convex schema has no usage counter field, so this is a no-op that
+ * reports success. See migration report.
  */
 export async function incrementQuestionUsage(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   questionIds: string[]
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient()
-
-  try {
-    // Update each question's times_used counter
-    for (const id of questionIds) {
-      // Get current times_used
-      const { data: question } = await supabase
-        .from("questions")
-        .select("times_used")
-        .eq("id", id)
-        .single()
-      
-      if (question) {
-        await supabase
-          .from("questions")
-          .update({ times_used: (question.times_used || 0) + 1 })
-          .eq("id", id)
-      }
-    }
-
-    return { success: true }
-  } catch (error) {
-    console.error("Error incrementing question usage:", error)
-    return {
-      success: false,
-      error: "Failed to update question usage statistics"
-    }
-  }
+  return { success: true }
 }

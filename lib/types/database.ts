@@ -1,6 +1,6 @@
 /**
  * Database Types
- * These match the Supabase schema
+ * Shared application database type definitions.
  */
 
 export type UserRole = 'student' | 'teacher' | 'admin'
@@ -23,6 +23,9 @@ export interface QuestionAnswerKey {
   explanation?: string
   marks?: number
   type?: 'generated' | 'manual' | 'ocr'
+  mark_scheme?: string                  // Edexcel-style M1/A1/B1 mark scheme
+  command_word?: string                 // find | show | calculate | prove | hence | work out | write down
+  verification_expression?: string | null  // verifiable expression for computational Qs, null for proofs
   curriculum?: {
     level?: string
     topic?: string
@@ -32,6 +35,15 @@ export interface QuestionAnswerKey {
     question_type?: string
     calculator_allowed?: boolean
     context?: string | null
+  }
+  // PRD P1: Source label metadata — "Edexcel GCSE Higher — Paper 1, 2023, Q12"
+  source?: {
+    exam_board?: string          // 'Edexcel' | 'AQA' | 'OCR' | 'MEI' | 'WJEC' | 'CIE' | 'IB'
+    level?: string               // 'GCSE Higher' | 'GCSE Foundation' | 'A Level' | 'IGCSE' | 'IB SL' | 'IB HL'
+    paper?: string               // 'Paper 1' | 'Paper 2' | 'Paper 3'
+    year?: number                // e.g. 2023
+    question_number?: string     // e.g. 'Q12' | '12a' | '3b(ii)'
+    is_calculator?: boolean      // paper-level calculator flag (overrides question-level when set)
   }
 }
 
@@ -44,6 +56,7 @@ export interface Profile {
   avatar_url: string | null
   institution: string | null
   onboarding_completed: boolean
+  parent_email: string | null
   created_at: string
   updated_at: string
 }
@@ -149,6 +162,8 @@ export interface Question {
   calculator_allowed: boolean | null
   // Helper property for diagram questions
   is_diagram_question?: boolean
+  // Legacy spec support (§5.1.1 / PRD Addendum 3.1)
+  source_spec?: 'new-spec' | 'legacy-modular' | 'legacy-gcse' | null
 }
 
 // =====================================================

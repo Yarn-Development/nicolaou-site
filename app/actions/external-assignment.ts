@@ -1,7 +1,9 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { getAuthUser } from "@/lib/auth"
+import { fetchQuery, fetchMutation, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
+import type { Id } from "@/convex/_generated/dataModel"
 
 // =====================================================
 // Types
@@ -16,8 +18,8 @@ export interface MappedQuestion {
 }
 
 export interface CreateExternalAssignmentInput {
-  /** Class to assign to */
-  classId: string
+  /** Class to assign to — omit to save to bank only without creating an assignment */
+  classId?: string
   /** Assignment title */
   title: string
   /** Due date (optional) */
@@ -28,6 +30,10 @@ export interface CreateExternalAssignmentInput {
   mappedQuestions: MappedQuestion[]
   /** Assignment mode: paper or online */
   mode?: "paper" | "online"
+  /** Paper metadata — used to tag questions in the bank */
+  examBoard?: string
+  level?: string
+  year?: string
 }
 
 export interface ExternalAssignment {
@@ -43,32 +49,37 @@ export interface ExternalAssignment {
 }
 
 // =====================================================
+// Helpers
+// =====================================================
+
+/** Resolve the signed-in Clerk user to a Convex user id, or null. */
+async function currentUserId(): Promise<Id<"users"> | null> {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) return null
+  return getConvexUserIdByClerkId(authUser.clerkId)
+}
+
+// =====================================================
 // Upload File to Storage
 // =====================================================
 
 /**
- * Uploads a file to the exam-papers storage bucket
- * Returns the public URL
+ * Uploads a PDF to Convex file storage.
+ * Returns the served URL plus the storageId (as `path`, used later for deletion).
  */
 export async function uploadExamPaper(formData: FormData): Promise<{
   success: boolean
   data?: { url: string; path: string }
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
     return { success: false, error: "You must be logged in" }
   }
 
   try {
     const file = formData.get("file") as File
-    
+
     if (!file) {
       return { success: false, error: "No file provided" }
     }
@@ -84,63 +95,31 @@ export async function uploadExamPaper(formData: FormData): Promise<{
       return { success: false, error: "File size must be less than 10MB" }
     }
 
-    // Generate unique filename
-    const timestamp = Date.now()
-    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_")
-    const filePath = `${user.id}/${timestamp}_${sanitizedName}`
+    // 1. Request an upload URL from Convex.
+    const { uploadUrl } = await fetchMutation(api.files.generateUploadUrl, {})
 
-    // Upload to storage
-    const { error: uploadError } = await supabase.storage
-      .from("exam-papers")
-      .upload(filePath, file, {
-        cacheControl: "3600",
-        upsert: false,
-      })
-
-    if (uploadError) {
-      console.error("Upload error details:", {
-        message: uploadError.message,
-        name: uploadError.name,
-      })
-      
-      // Provide specific error messages based on the error type
-      let userMessage = "Failed to upload file"
-      
-      if (uploadError.message?.includes("Payload too large") || 
-          uploadError.message?.includes("size") ||
-          uploadError.message?.includes("exceeded")) {
-        userMessage = "File size exceeds the storage limit. Please use a smaller file (max 10MB)."
-      } else if (uploadError.message?.includes("policy") || 
-                 uploadError.message?.includes("permission") ||
-                 uploadError.message?.includes("RLS")) {
-        userMessage = "Permission denied. Storage policy violation - please contact support."
-      } else if (uploadError.message?.includes("timeout") || 
-                 uploadError.message?.includes("network")) {
-        userMessage = "Upload timed out. Please check your connection and try again."
-      } else if (uploadError.message?.includes("bucket") || 
-                 uploadError.message?.includes("not found")) {
-        userMessage = "Storage bucket not configured. Please contact support."
-      } else if (uploadError.message?.includes("duplicate") || 
-                 uploadError.message?.includes("already exists")) {
-        userMessage = "A file with this name already exists. Please rename and try again."
-      } else if (uploadError.message) {
-        // Return the actual error message for debugging
-        userMessage = `Upload failed: ${uploadError.message}`
-      }
-      
-      return { success: false, error: userMessage }
+    // 2. POST the file directly to Convex storage.
+    const res = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { "Content-Type": file.type },
+      body: file,
+    })
+    if (!res.ok) {
+      throw new Error(`Upload failed with status ${res.status}`)
     }
+    const { storageId } = (await res.json()) as { storageId: Id<"_storage"> }
 
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from("exam-papers")
-      .getPublicUrl(filePath)
+    // 3. Resolve the served URL for the stored file.
+    const url = await fetchQuery(api.files.getUrl, { storageId })
+    if (!url) {
+      throw new Error("Could not resolve uploaded file URL")
+    }
 
     return {
       success: true,
       data: {
-        url: urlData.publicUrl,
-        path: filePath,
+        url,
+        path: storageId,
       },
     }
   } catch (error) {
@@ -155,12 +134,13 @@ export async function uploadExamPaper(formData: FormData): Promise<{
 // =====================================================
 
 /**
- * Creates an external assignment with ghost questions
- * 
+ * Creates an external assignment.
+ *
  * Steps:
  * 1. Validate input
- * 2. Create assignment record with source_type = 'external_upload'
- * 3. Insert ghost questions into assignment_questions
+ * 2. Save each mapped question to the bank (Convex `questions`)
+ * 3. Create the assignment (Convex `assignments`) linking the questions, with
+ *    external metadata (resource URL, exam board, etc.) on `metadata`.
  */
 export async function createExternalAssignment(
   input: CreateExternalAssignmentInput
@@ -169,114 +149,144 @@ export async function createExternalAssignment(
   data?: ExternalAssignment
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const userId = await currentUserId()
+  if (!userId) {
     return { success: false, error: "You must be logged in" }
   }
 
   try {
-    // 1. Verify teacher owns the class
-    const { data: classData, error: classError } = await supabase
-      .from("classes")
-      .select("id, name, teacher_id")
-      .eq("id", input.classId)
-      .single()
-
-    if (classError || !classData) {
-      return { success: false, error: "Class not found" }
-    }
-
-    if (classData.teacher_id !== user.id) {
-      return { success: false, error: "You don't have permission to create assignments for this class" }
-    }
-
-    // 2. Validate mapped questions
+    // 1. Validate mapped questions
     if (!input.mappedQuestions || input.mappedQuestions.length === 0) {
       return { success: false, error: "At least one question mapping is required" }
     }
-
     for (const q of input.mappedQuestions) {
       if (!q.questionNumber || !q.topic || !q.subTopic || q.marks <= 0) {
         return { success: false, error: "All questions must have question number, topic, sub-topic, and marks" }
       }
     }
 
-    // 3. Create assignment record
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .insert({
-        class_id: input.classId,
-        title: input.title,
-        due_date: input.dueDate || null,
-        status: "draft",
-        mode: input.mode || "paper",
-        source_type: "external_upload",
-        resource_url: input.resourceUrl,
-        content: {
-          // Store metadata about the external paper
-          external: true,
-          questionCount: input.mappedQuestions.length,
-          totalMarks: input.mappedQuestions.reduce((sum, q) => sum + q.marks, 0),
+    // 2. Verify teacher owns the class (only if assigning to a class)
+    let classData: { id: Id<"classes">; name: string } | null = null
+    if (input.classId) {
+      const cls = await fetchQuery(api.classes.getClass, {
+        classId: input.classId as Id<"classes">,
+        teacherId: userId,
+      })
+      if (!cls) {
+        return { success: false, error: "Class not found or you don't have permission" }
+      }
+      classData = { id: cls._id, name: cls.name }
+    }
+
+    // 3. Derive difficulty tier from level string
+    const difficulty = input.level?.toLowerCase().includes("foundation") ? "Foundation" : "Higher"
+    const metaTags = [input.examBoard, input.year, input.level].filter(Boolean) as string[]
+
+    // 4. Save each question as a real row in the bank so it appears in the bank.
+    const questionIds: Id<"questions">[] = []
+    for (const q of input.mappedQuestions) {
+      const id = await fetchMutation(api.questions.createQuestion, {
+        createdBy: userId,
+        contentType: "official_past_paper",
+        topic: q.topic,
+        topicName: q.topic,
+        subTopic: q.subTopic,
+        level: input.level ?? undefined,
+        marks: q.marks,
+        difficulty,
+        tags: metaTags,
+        answerKey: {
+          answer: "",
+          explanation: "",
+          marks: q.marks,
+          type: "manual" as const,
+          source: {
+            exam_board: input.examBoard ?? undefined,
+            level: input.level ?? undefined,
+            year: input.year ? parseInt(input.year, 10) : undefined,
+            question_number: q.questionNumber ? `Q${q.questionNumber}` : undefined,
+          },
+          curriculum: {
+            level: input.level,
+            topic: q.topic,
+            sub_topic: q.subTopic,
+            context: input.resourceUrl,
+          },
         },
       })
-      .select("id, title, class_id, created_at")
-      .single()
-
-    if (assignmentError) {
-      console.error("Assignment creation error:", assignmentError)
-      return { success: false, error: "Failed to create assignment" }
+      questionIds.push(id as Id<"questions">)
     }
 
-    // 4. Insert ghost questions into assignment_questions
-    const ghostQuestions = input.mappedQuestions.map((q, index) => ({
-      assignment_id: assignment.id,
-      question_id: null, // Ghost question - no linked question
-      order_index: index,
-      custom_question_number: q.questionNumber,
-      custom_topic: q.topic,
-      custom_sub_topic: q.subTopic,
-      custom_marks: q.marks,
-    }))
-
-    const { error: questionsError } = await supabase
-      .from("assignment_questions")
-      .insert(ghostQuestions)
-
-    if (questionsError) {
-      console.error("Ghost questions insertion error:", questionsError)
-      
-      // Rollback: delete the assignment
-      await supabase
-        .from("assignments")
-        .delete()
-        .eq("id", assignment.id)
-      
-      return { success: false, error: "Failed to save question mappings" }
-    }
-
-    // 5. Calculate totals
     const totalMarks = input.mappedQuestions.reduce((sum, q) => sum + q.marks, 0)
 
+    // If no classId, bank-only save — return early
+    if (!input.classId || !classData) {
+      revalidatePath("/dashboard/questions/browse")
+      return {
+        success: true,
+        data: {
+          id: "",
+          title: input.title,
+          classId: "",
+          className: "",
+          resourceUrl: input.resourceUrl,
+          sourceType: "external_upload",
+          totalMarks,
+          questionCount: input.mappedQuestions.length,
+          createdAt: new Date().toISOString(),
+        },
+      }
+    }
+
+    // 5. Create the assignment record with linked questions and external metadata.
+    const result = await fetchMutation(api.assignments.createAssignmentFull, {
+      classId: classData.id,
+      teacherId: userId,
+      title: input.title,
+      mode: input.mode || "paper",
+      dueDate: input.dueDate ? new Date(input.dueDate).getTime() : undefined,
+      status: "draft",
+      questionIds,
+      metadata: {
+        external: true,
+        sourceType: "external_upload",
+        resourceUrl: input.resourceUrl,
+        examBoard: input.examBoard,
+        level: input.level,
+        year: input.year,
+        questionCount: input.mappedQuestions.length,
+        totalMarks,
+        // Per-question custom mappings keyed by question id.
+        questionMappings: input.mappedQuestions.map((q, i) => ({
+          questionId: questionIds[i],
+          questionNumber: q.questionNumber,
+          topic: q.topic,
+          subTopic: q.subTopic,
+          marks: q.marks,
+        })),
+      },
+    })
+
+    if ("error" in result) {
+      // Questions are already saved to the bank — don't roll them back.
+      return { success: false, error: "Questions saved to bank but failed to create assignment" }
+    }
+
     revalidatePath("/dashboard/assignments")
+    revalidatePath("/dashboard/questions/browse")
 
     return {
       success: true,
       data: {
-        id: assignment.id,
-        title: assignment.title,
-        classId: assignment.class_id,
+        id: result.assignmentId as string,
+        title: input.title,
+        classId: classData.id as string,
         className: classData.name,
         resourceUrl: input.resourceUrl,
         sourceType: "external_upload",
         totalMarks,
         questionCount: input.mappedQuestions.length,
-        createdAt: assignment.created_at,
+        createdAt: new Date().toISOString(),
       },
     }
   } catch (error) {
@@ -313,7 +323,7 @@ export interface ExternalAssignmentDetails {
 }
 
 /**
- * Gets details of an external assignment including ghost questions
+ * Gets details of an external assignment including its mapped questions.
  */
 export async function getExternalAssignmentDetails(
   assignmentId: string
@@ -322,97 +332,64 @@ export async function getExternalAssignmentDetails(
   data?: ExternalAssignmentDetails
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const userId = await currentUserId()
+  if (!userId) {
     return { success: false, error: "You must be logged in" }
   }
 
   try {
-    // 1. Get assignment with class info
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        title,
-        class_id,
-        due_date,
-        status,
-        mode,
-        source_type,
-        resource_url,
-        classes!inner(
-          id,
-          name,
-          subject,
-          teacher_id
-        )
-      `)
-      .eq("id", assignmentId)
-      .single()
+    const result = await fetchQuery(api.assignments.getAssignmentDetails, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: userId,
+    })
 
-    if (assignmentError || !assignment) {
-      return { success: false, error: "Assignment not found" }
+    if ("error" in result) {
+      return {
+        success: false,
+        error: result.error === "forbidden" ? "Permission denied" : "Assignment not found",
+      }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const classData = assignment.classes as any
-
-    // Verify teacher permission
-    if (classData.teacher_id !== user.id) {
-      return { success: false, error: "Permission denied" }
-    }
-
-    // 2. Get questions using the updated function
-    const { data: questions, error: questionsError } = await supabase.rpc(
-      "get_assignment_questions",
-      { p_assignment_id: assignmentId }
-    )
-
-    if (questionsError) {
-      console.error("Questions fetch error:", questionsError)
-      return { success: false, error: "Failed to fetch questions" }
-    }
-
-    // 3. Transform to output format
-    const formattedQuestions = (questions || []).map((q: {
-      question_id: string
-      order_index: number
-      marks: number
+    // Pull external metadata (resource URL, per-question mappings) off metadata.
+    const meta = (result as { metadata?: Record<string, unknown> }).metadata ?? {}
+    const resourceUrl = (meta.resourceUrl as string | undefined) ?? null
+    const mappings = (meta.questionMappings as Array<{
+      questionId: string
+      questionNumber: string
       topic: string
-      sub_topic: string
-      custom_question_number: string | null
-      is_ghost: boolean
-    }) => ({
-      id: q.question_id,
-      orderIndex: q.order_index,
-      questionNumber: q.custom_question_number || `Q${q.order_index + 1}`,
-      topic: q.topic,
-      subTopic: q.sub_topic,
-      marks: q.marks,
-      isGhost: q.is_ghost,
-    }))
+      subTopic: string
+      marks: number
+    }> | undefined) ?? []
+    const mappingByQuestionId = new Map(mappings.map((m) => [m.questionId, m]))
 
-    const totalMarks = formattedQuestions.reduce((sum: number, q: { marks: number }) => sum + q.marks, 0)
+    const formattedQuestions = result.questions.map((q) => {
+      const m = mappingByQuestionId.get(q.questionId as string)
+      return {
+        id: q.questionId as string,
+        orderIndex: q.orderIndex,
+        questionNumber: m?.questionNumber ?? `Q${q.orderIndex + 1}`,
+        topic: m?.topic ?? q.topic,
+        subTopic: m?.subTopic ?? q.subTopic,
+        marks: m?.marks ?? q.marks,
+        isGhost: false,
+      }
+    })
+
+    const totalMarks = formattedQuestions.reduce((sum, q) => sum + q.marks, 0)
 
     return {
       success: true,
       data: {
-        id: assignment.id,
-        title: assignment.title,
-        classId: assignment.class_id,
-        className: classData.name,
-        subject: classData.subject,
-        dueDate: assignment.due_date,
-        status: assignment.status,
-        mode: assignment.mode,
-        sourceType: assignment.source_type,
-        resourceUrl: assignment.resource_url,
+        id: result.id as string,
+        title: result.title,
+        classId: result.classId as string,
+        className: result.className,
+        subject: result.subject,
+        dueDate: result.dueDate != null ? new Date(result.dueDate).toISOString() : null,
+        status: result.status ?? "draft",
+        mode: (meta.mode as string | undefined) ?? "paper",
+        sourceType: (meta.sourceType as string | undefined) ?? "external_upload",
+        resourceUrl,
         totalMarks,
         questions: formattedQuestions,
       },
@@ -428,7 +405,9 @@ export async function getExternalAssignmentDetails(
 // =====================================================
 
 /**
- * Updates the question mappings for an external assignment
+ * Updates the question mappings for an external assignment.
+ * Creates fresh bank questions for the new mappings and replaces the
+ * assignment's linked questions, refreshing the external metadata.
  */
 export async function updateExternalAssignmentQuestions(
   assignmentId: string,
@@ -437,88 +416,87 @@ export async function updateExternalAssignmentQuestions(
   success: boolean
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const userId = await currentUserId()
+  if (!userId) {
     return { success: false, error: "You must be logged in" }
   }
 
   try {
-    // 1. Verify ownership
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        source_type,
-        classes!inner(teacher_id)
-      `)
-      .eq("id", assignmentId)
-      .single()
-
-    if (assignmentError || !assignment) {
-      return { success: false, error: "Assignment not found" }
+    // 1. Verify ownership and read existing metadata.
+    const details = await fetchQuery(api.assignments.getAssignmentDetails, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: userId,
+    })
+    if ("error" in details) {
+      return {
+        success: false,
+        error: details.error === "forbidden" ? "Permission denied" : "Assignment not found",
+      }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const classData = assignment.classes as any
-    if (classData.teacher_id !== user.id) {
-      return { success: false, error: "Permission denied" }
-    }
-
-    if (assignment.source_type !== "external_upload") {
+    const meta = (details as { metadata?: Record<string, unknown> }).metadata ?? {}
+    if (meta.sourceType !== "external_upload") {
       return { success: false, error: "Can only update external assignments" }
     }
 
-    // 2. Delete existing ghost questions
-    const { error: deleteError } = await supabase
-      .from("assignment_questions")
-      .delete()
-      .eq("assignment_id", assignmentId)
-      .is("question_id", null) // Only delete ghost questions
+    const difficulty = (meta.level as string | undefined)?.toLowerCase().includes("foundation")
+      ? "Foundation"
+      : "Higher"
+    const metaTags = [meta.examBoard, meta.year, meta.level].filter(Boolean) as string[]
 
-    if (deleteError) {
-      console.error("Delete error:", deleteError)
+    // 2. Create fresh bank questions for each new mapping.
+    const questionIds: Id<"questions">[] = []
+    for (const q of mappedQuestions) {
+      const id = await fetchMutation(api.questions.createQuestion, {
+        createdBy: userId,
+        contentType: "official_past_paper",
+        topic: q.topic,
+        topicName: q.topic,
+        subTopic: q.subTopic,
+        level: (meta.level as string | undefined) ?? undefined,
+        marks: q.marks,
+        difficulty,
+        tags: metaTags,
+        answerKey: {
+          answer: "",
+          explanation: "",
+          marks: q.marks,
+          type: "manual" as const,
+          curriculum: { topic: q.topic, sub_topic: q.subTopic },
+        },
+      })
+      questionIds.push(id as Id<"questions">)
+    }
+
+    // 3. Replace the assignment's linked questions.
+    const replaceResult = await fetchMutation(api.assignments.updateAssignmentQuestions, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: userId,
+      questionIds,
+    })
+    if ("error" in replaceResult) {
       return { success: false, error: "Failed to update questions" }
     }
 
-    // 3. Insert new ghost questions
-    const ghostQuestions = mappedQuestions.map((q, index) => ({
-      assignment_id: assignmentId,
-      question_id: null,
-      order_index: index,
-      custom_question_number: q.questionNumber,
-      custom_topic: q.topic,
-      custom_sub_topic: q.subTopic,
-      custom_marks: q.marks,
-    }))
-
-    const { error: insertError } = await supabase
-      .from("assignment_questions")
-      .insert(ghostQuestions)
-
-    if (insertError) {
-      console.error("Insert error:", insertError)
-      return { success: false, error: "Failed to save question mappings" }
-    }
-
-    // 4. Update assignment content metadata
+    // 4. Update assignment external metadata.
     const totalMarks = mappedQuestions.reduce((sum, q) => sum + q.marks, 0)
-    
-    await supabase
-      .from("assignments")
-      .update({
-        content: {
-          external: true,
-          questionCount: mappedQuestions.length,
-          totalMarks,
-        },
-      })
-      .eq("id", assignmentId)
+    await fetchMutation(api.assignments.updateAssignment, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: userId,
+      metadata: {
+        ...meta,
+        external: true,
+        questionCount: mappedQuestions.length,
+        totalMarks,
+        questionMappings: mappedQuestions.map((q, i) => ({
+          questionId: questionIds[i],
+          questionNumber: q.questionNumber,
+          topic: q.topic,
+          subTopic: q.subTopic,
+          marks: q.marks,
+        })),
+      },
+    })
 
     revalidatePath(`/dashboard/assignments/${assignmentId}`)
 
@@ -530,45 +508,87 @@ export async function updateExternalAssignmentQuestions(
 }
 
 // =====================================================
-// Delete Uploaded PDF
+// Get Digitized Papers (for library picker)
 // =====================================================
 
+export interface DigitizedPaper {
+  id: string
+  title: string
+  resource_url: string
+  created_at: string
+  exam_board: string | null
+  level: string | null
+  year: string | null
+}
+
 /**
- * Deletes a PDF from the exam-papers storage bucket
+ * Returns the teacher's assignments that have an uploaded PDF (resourceUrl in
+ * metadata). Used by the shadow paper generator to pick an existing paper.
  */
-export async function deleteExamPaper(filePath: string): Promise<{
+export async function getDigitizedPapers(): Promise<{
   success: boolean
+  data?: DigitizedPaper[]
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
+  const userId = await currentUserId()
+  if (!userId) {
     return { success: false, error: "You must be logged in" }
   }
 
   try {
-    // Verify the file belongs to this user
-    if (!filePath.startsWith(user.id)) {
-      return { success: false, error: "Permission denied" }
-    }
+    const assignments = await fetchQuery(api.assignments.getTeacherAssignments, {
+      teacherId: userId,
+    })
 
-    const { error } = await supabase.storage
-      .from("exam-papers")
-      .remove([filePath])
+    const papers: DigitizedPaper[] = assignments
+      .map((a) => {
+        const meta = (a.metadata as Record<string, unknown> | undefined) ?? {}
+        const resourceUrl = meta.resourceUrl as string | undefined
+        if (!resourceUrl) return null
+        return {
+          id: a._id as string,
+          title: a.title,
+          resource_url: resourceUrl,
+          created_at: new Date(a._creationTime).toISOString(),
+          exam_board: (meta.examBoard as string | undefined) ?? null,
+          level: (meta.level as string | undefined) ?? null,
+          year: (meta.year as string | undefined) ?? null,
+        } satisfies DigitizedPaper
+      })
+      .filter((p): p is DigitizedPaper => p !== null)
+      .slice(0, 50)
 
-    if (error) {
-      console.error("Delete error:", error)
-      return { success: false, error: "Failed to delete file" }
-    }
+    return { success: true, data: papers }
+  } catch (error) {
+    console.error("Error in getDigitizedPapers:", error)
+    return { success: false, error: "An unexpected error occurred" }
+  }
+}
 
+// =====================================================
+// Delete Uploaded PDF
+// =====================================================
+
+/**
+ * Deletes a PDF from Convex file storage.
+ * `storageId` is the value returned as `path` from uploadExamPaper.
+ */
+export async function deleteExamPaper(storageId: string): Promise<{
+  success: boolean
+  error?: string
+}> {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
+    return { success: false, error: "You must be logged in" }
+  }
+
+  try {
+    await fetchMutation(api.files.remove, {
+      storageId: storageId as Id<"_storage">,
+    })
     return { success: true }
   } catch (error) {
     console.error("Error in deleteExamPaper:", error)
-    return { success: false, error: "An unexpected error occurred" }
+    return { success: false, error: "Failed to delete file" }
   }
 }

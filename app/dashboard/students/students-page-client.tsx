@@ -37,8 +37,11 @@ import {
   Mail,
   GraduationCap,
   AlertCircle,
+  Check,
+  X,
 } from "lucide-react"
 import type { StudentsPageData } from "./page"
+import { bulkInviteStudents, type InviteRow } from "@/app/actions/class-invites"
 
 interface StudentsPageClientProps {
   data: StudentsPageData
@@ -47,7 +50,77 @@ interface StudentsPageClientProps {
 
 export function StudentsPageClient({ data, isDemo }: StudentsPageClientProps) {
   const [showAddStudent, setShowAddStudent] = useState(false)
+
+  // CSV import state
+  const [showCsvImport, setShowCsvImport] = useState(false)
+  const [csvClassId, setCsvClassId] = useState("")
+  const [csvRows, setCsvRows] = useState<InviteRow[]>([])
+  const [csvError, setCsvError] = useState<string | null>(null)
+  const [importingCsv, setImportingCsv] = useState(false)
+  const [importResult, setImportResult] = useState<{
+    enrolled: number; invited: number; already_enrolled: number; errors: {email: string; reason: string}[]
+  } | null>(null)
+
   const { stats, recentActivity, classGroups, classes } = data
+
+  const handleCsvFile = (file: File) => {
+    setCsvError(null)
+    setCsvRows([])
+    setImportResult(null)
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = e.target?.result as string
+      const lines = text.split(/\r?\n/).filter((l) => l.trim())
+      if (lines.length < 2) {
+        setCsvError("CSV must have a header row and at least one student row.")
+        return
+      }
+      const header = lines[0].toLowerCase().split(",").map((h) => h.trim())
+      const nameIdx = header.findIndex((h) => h.includes("name"))
+      const emailIdx = header.findIndex((h) => h.includes("email"))
+      if (emailIdx < 0) {
+        setCsvError("CSV must have an 'email' column.")
+        return
+      }
+      const rows: InviteRow[] = []
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(",").map((c) => c.trim().replace(/^"|"$/g, ""))
+        const email = cols[emailIdx] || ""
+        const name = nameIdx >= 0 ? cols[nameIdx] || "" : ""
+        if (email) rows.push({ email, name })
+      }
+      if (rows.length === 0) {
+        setCsvError("No valid student rows found.")
+        return
+      }
+      setCsvRows(rows)
+    }
+    reader.readAsText(file)
+  }
+
+  const handleCsvImport = async () => {
+    if (!csvClassId || csvRows.length === 0) return
+    setImportingCsv(true)
+    const result = await bulkInviteStudents(csvClassId, csvRows)
+    setImportingCsv(false)
+    if (result.success && result.data) {
+      setImportResult(result.data)
+      setCsvRows([])
+    } else {
+      setCsvError(result.error || "Import failed")
+    }
+  }
+
+  const downloadCsvTemplate = () => {
+    const csv = "full_name,email\nJohn Smith,john@example.com\nJane Doe,jane@example.com"
+    const blob = new Blob([csv], { type: "text/csv" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "students-template.csv"
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const StatCard = ({
     title,
@@ -194,10 +267,117 @@ export function StudentsPageClient({ data, isDemo }: StudentsPageClientProps) {
               </div>
             </DialogContent>
           </Dialog>
-          <Button variant="outline" className="glassmorphic border-muted/30">
-            <Upload className="h-4 w-4 mr-2" />
-            Import CSV
-          </Button>
+          <Dialog open={showCsvImport} onOpenChange={(v) => { setShowCsvImport(v); if (!v) { setCsvRows([]); setCsvError(null); setImportResult(null) } }}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="glassmorphic border-muted/30">
+                <Upload className="h-4 w-4 mr-2" />
+                Import CSV
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Bulk Import Students</DialogTitle>
+                <DialogDescription>
+                  Upload a CSV with columns: <code>full_name, email</code>. Students already on the platform will be enrolled directly. Others will receive an email invite.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4 py-2">
+                {/* Class selector */}
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Assign to class *</label>
+                  <Select value={csvClassId} onValueChange={setCsvClassId}>
+                    <SelectTrigger className="border">
+                      <SelectValue placeholder="Select a class" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {classes.map((cls) => (
+                        <SelectItem key={cls.id} value={cls.id}>{cls.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* File upload */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">CSV file *</label>
+                    <button onClick={downloadCsvTemplate} className="text-xs text-blue-600 hover:underline">
+                      Download template
+                    </button>
+                  </div>
+                  <label className="flex items-center justify-center w-full h-20 border-2 border-dashed rounded cursor-pointer hover:bg-muted/30 transition-colors">
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="hidden"
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handleCsvFile(f) }}
+                    />
+                    <div className="text-center">
+                      <Upload className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">Click to upload CSV</span>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Preview */}
+                {csvRows.length > 0 && (
+                  <div className="border rounded p-3 bg-muted/20">
+                    <p className="text-sm font-medium mb-2">{csvRows.length} student{csvRows.length > 1 ? "s" : ""} ready to import:</p>
+                    <div className="max-h-32 overflow-y-auto space-y-1">
+                      {csvRows.slice(0, 10).map((r, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs">
+                          <Check className="h-3 w-3 text-green-600 flex-shrink-0" />
+                          <span className="font-medium">{r.name || "—"}</span>
+                          <span className="text-muted-foreground">{r.email}</span>
+                        </div>
+                      ))}
+                      {csvRows.length > 10 && (
+                        <p className="text-xs text-muted-foreground">...and {csvRows.length - 10} more</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Result */}
+                {importResult && (
+                  <div className="border rounded p-3 bg-green-50 border-green-200 space-y-1">
+                    <p className="text-sm font-bold text-green-800">Import complete!</p>
+                    <p className="text-xs text-green-700">✓ {importResult.enrolled} enrolled immediately</p>
+                    <p className="text-xs text-green-700">✉ {importResult.invited} invite emails sent</p>
+                    {importResult.already_enrolled > 0 && (
+                      <p className="text-xs text-muted-foreground">{importResult.already_enrolled} already enrolled (skipped)</p>
+                    )}
+                    {importResult.errors.length > 0 && (
+                      <div className="mt-2">
+                        {importResult.errors.map((e, i) => (
+                          <p key={i} className="text-xs text-red-600"><X className="inline h-3 w-3 mr-1" />{e.email}: {e.reason}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {csvError && (
+                  <p className="text-sm text-red-600 flex items-center gap-1">
+                    <AlertCircle className="h-4 w-4" />{csvError}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setShowCsvImport(false)}>Cancel</Button>
+                <Button
+                  onClick={handleCsvImport}
+                  disabled={importingCsv || !csvClassId || csvRows.length === 0}
+                  className="bg-primary hover:bg-primary/90"
+                >
+                  {importingCsv ? "Importing..." : `Import ${csvRows.length > 0 ? csvRows.length + " Students" : "Students"}`}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <Button variant="outline" className="glassmorphic border-muted/30">
             <Download className="h-4 w-4 mr-2" />
             Export

@@ -2,22 +2,25 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { 
-  ArrowLeft, 
-  Users, 
-  TrendingDown, 
+import {
+  ArrowLeft,
+  Users,
+  TrendingDown,
   TrendingUp,
   Printer,
   Loader2,
   AlertTriangle,
   CheckCircle,
   Target,
-  Eye
+  Eye,
+  Mail,
+  Send
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { generateFeedback, type AssignmentFeedbackSummary } from "@/app/actions/feedback"
+import { emailFeedbackToAllParents, emailFeedbackToParent } from "@/app/actions/email-feedback"
 
 interface Props {
   assignmentId: string
@@ -27,6 +30,10 @@ export function FeedbackOverviewClient({ assignmentId }: Props) {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<AssignmentFeedbackSummary | null>(null)
+  const [emailingAll, setEmailingAll] = useState(false)
+  const [emailAllResult, setEmailAllResult] = useState<{ sent: number; skipped: number; failed: number } | null>(null)
+  const [emailingSubmissionId, setEmailingSubmissionId] = useState<string | null>(null)
+  const [emailedIds, setEmailedIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     loadFeedback()
@@ -36,9 +43,9 @@ export function FeedbackOverviewClient({ assignmentId }: Props) {
   const loadFeedback = async () => {
     setIsLoading(true)
     setError(null)
-    
+
     const result = await generateFeedback(assignmentId)
-    
+
     if (result.success && result.data) {
       setFeedback(result.data)
     } else {
@@ -46,6 +53,23 @@ export function FeedbackOverviewClient({ assignmentId }: Props) {
     }
     
     setIsLoading(false)
+  }
+
+  const handleEmailAll = async () => {
+    setEmailingAll(true)
+    setEmailAllResult(null)
+    const result = await emailFeedbackToAllParents(assignmentId)
+    setEmailAllResult({ sent: result.sent, skipped: result.skipped, failed: result.failed })
+    setEmailingAll(false)
+  }
+
+  const handleEmailOne = async (submissionId: string) => {
+    setEmailingSubmissionId(submissionId)
+    const result = await emailFeedbackToParent(submissionId)
+    if (result.success) {
+      setEmailedIds(prev => new Set([...prev, submissionId]))
+    }
+    setEmailingSubmissionId(null)
   }
 
   if (isLoading) {
@@ -103,6 +127,40 @@ export function FeedbackOverviewClient({ assignmentId }: Props) {
               </p>
             </div>
           </div>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              onClick={handleEmailAll}
+              disabled={emailingAll}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold uppercase tracking-wider"
+            >
+              {emailingAll ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4 mr-2" />
+              )}
+              Email All Parents
+            </Button>
+            <Link href={`/dashboard/assignments/${assignmentId}/feedback/print-batch`} target="_blank">
+              <Button className="bg-swiss-signal hover:bg-swiss-ink text-white font-bold uppercase tracking-wider">
+                <Printer className="h-4 w-4 mr-2" />
+                Print All Feedback Sheets
+              </Button>
+            </Link>
+          </div>
+          {emailAllResult && (
+            <div className="mt-3 text-sm font-medium">
+              {emailAllResult.sent > 0 && (
+                <span className="text-green-700 mr-3">✓ {emailAllResult.sent} sent</span>
+              )}
+              {emailAllResult.skipped > 0 && (
+                <span className="text-amber-600 mr-3">⚠ {emailAllResult.skipped} skipped (no parent email)</span>
+              )}
+              {emailAllResult.failed > 0 && (
+                <span className="text-red-600">✗ {emailAllResult.failed} failed</span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -261,10 +319,10 @@ export function FeedbackOverviewClient({ assignmentId }: Props) {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <Link href={`/dashboard/feedback/submission/${student.submissionId}`}>
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         size="sm"
                         className="border-2 border-swiss-ink font-bold uppercase text-xs"
                       >
@@ -272,6 +330,22 @@ export function FeedbackOverviewClient({ assignmentId }: Props) {
                         View Feedback
                       </Button>
                     </Link>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleEmailOne(student.submissionId)}
+                      disabled={emailingSubmissionId === student.submissionId}
+                      className={`border-2 font-bold uppercase text-xs ${emailedIds.has(student.submissionId) ? "border-green-500 text-green-700" : "border-blue-500 text-blue-700"}`}
+                    >
+                      {emailingSubmissionId === student.submissionId ? (
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      ) : emailedIds.has(student.submissionId) ? (
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                      ) : (
+                        <Mail className="h-3 w-3 mr-1" />
+                      )}
+                      {emailedIds.has(student.submissionId) ? "Sent" : "Email Parent"}
+                    </Button>
                     {student.weakTopics.length > 0 ? (
                       <Link href={`/revision/${student.studentId}/${assignmentId}`} target="_blank">
                         <Button 

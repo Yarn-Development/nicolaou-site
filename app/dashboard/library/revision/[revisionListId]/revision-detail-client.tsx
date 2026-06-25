@@ -13,6 +13,7 @@ import {
   Hash,
   Calendar,
   Printer,
+  Wand2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -94,6 +95,16 @@ export function RevisionDetailClient({
     <div className="space-y-6">
       {/* Navigation */}
       <div className="flex items-center justify-between">
+        <Link
+          href={`/dashboard/assignments/create?revisionTopics=${encodeURIComponent(
+            [...new Set(questions.map((q) => q.sub_topic || q.topic).filter(Boolean))].join("\n")
+          )}`}
+        >
+          <Button className="bg-swiss-signal hover:bg-swiss-signal/90 text-white font-bold uppercase text-xs tracking-wider border-2 border-swiss-signal">
+            <Wand2 className="h-3 w-3 mr-1" />
+            Create Practice Paper
+          </Button>
+        </Link>
         <Link href="/dashboard/library">
           <Button
             variant="ghost"

@@ -1,6 +1,8 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
+import { getAuthUser } from "@/lib/auth"
+import { fetchQuery, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
+import type { Id } from "@/convex/_generated/dataModel"
 import type { AssignmentType } from "./assignments"
 import type { TeacherRevisionListItem } from "./revision-lists"
 import { getTeacherRevisionLists } from "./revision-lists"
@@ -28,6 +30,17 @@ export interface LibraryItem {
 }
 
 // =====================================================
+// Helpers
+// =====================================================
+
+/** Resolve the signed-in Clerk user to a Convex user id, or null. */
+async function currentUserId(): Promise<Id<"users"> | null> {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) return null
+  return getConvexUserIdByClerkId(authUser.clerkId)
+}
+
+// =====================================================
 // Get Teacher Library
 // =====================================================
 
@@ -41,65 +54,29 @@ export async function getTeacherLibrary(): Promise<{
   data?: LibraryItem[]
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return { success: false, error: "You must be logged in" }
-  }
+  const teacherId = await currentUserId()
+  if (!teacherId) return { success: false, error: "You must be logged in" }
 
   try {
     // 1. Fetch assignments with class info and question counts
-    const { data: assignments, error: assignmentsError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        title,
-        assignment_type,
-        source_type,
-        status,
-        created_at,
-        classes!inner(
-          name,
-          subject,
-          teacher_id
-        ),
-        assignment_questions(count)
-      `)
-      .eq("classes.teacher_id", user.id)
-      .order("created_at", { ascending: false })
-
-    if (assignmentsError) {
-      console.error("Error fetching assignments for library:", assignmentsError)
-      return { success: false, error: "Failed to fetch assignments" }
-    }
+    const assignments = await fetchQuery(api.library.getTeacherAssignments, {
+      teacherId,
+    })
 
     // Transform assignments into library items
-    const assignmentItems: LibraryItem[] = (assignments || []).map((a) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const cls = a.classes as any
-      const questionCount = Array.isArray(a.assignment_questions)
-        ? a.assignment_questions.length
-        : 0
-
-      return {
-        id: a.id,
-        title: a.title,
-        type: (a.assignment_type as AssignmentType) || "exam",
-        created_at: a.created_at,
-        class_name: cls?.name || "Unknown",
-        subject: cls?.subject || "Unknown",
-        question_count: questionCount,
-        total_marks: 0, // Marks require a deeper join; we show question count instead
-        status: a.status,
-        assignment_id: null,
-        source_type: a.source_type || null,
-      }
-    })
+    const assignmentItems: LibraryItem[] = assignments.map((a) => ({
+      id: a.id,
+      title: a.title,
+      type: (a.assignmentType as AssignmentType) || "exam",
+      created_at: new Date(a.createdAt).toISOString(),
+      class_name: a.className || "Unknown",
+      subject: a.subject || "Unknown",
+      question_count: a.questionCount,
+      total_marks: 0, // Marks require a deeper join; we show question count instead
+      status: a.status,
+      assignment_id: null,
+      source_type: a.sourceType || null,
+    }))
 
     // 2. Fetch revision lists
     const revisionResult = await getTeacherRevisionLists()

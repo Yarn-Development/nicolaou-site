@@ -5,10 +5,11 @@
  *   - needsDiagram()             — deterministic topic-based gate
  *   - sanitizeSvg()              — security sanitizer before storage upload
  *   - buildDiagramSystemPrompt() — shared Edexcel-style SVG prompt
- *   - uploadSvgToStorage()       — uploads SVG string to Supabase Storage
+ *   - uploadSvgToStorage()       — uploads SVG string to Convex file storage
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchMutation, fetchQuery, api } from '@/lib/convex/server'
+import type { Id } from '@/convex/_generated/dataModel'
 
 // =====================================================
 // Topic allowlists — determines when to generate a diagram
@@ -81,7 +82,7 @@ export interface SanitizeSvgResult {
 const NOT_ACCURATELY_DRAWN_LABEL = `<text x="390" y="395" text-anchor="end" font-style="italic" font-family="sans-serif" font-size="9" fill="black">Diagram NOT accurately drawn</text>`
 
 /**
- * Sanitizes AI-generated SVG before uploading to Supabase Storage.
+ * Sanitizes AI-generated SVG before uploading to Convex storage.
  *
  * Layers:
  * 1. Structural check — must have <svg ... > ... </svg>
@@ -347,47 +348,45 @@ Return ONLY valid JSON — no markdown, no code blocks, no preamble:
 }
 
 // =====================================================
-// SVG Upload to Supabase Storage
+// SVG Upload to Convex File Storage
 // =====================================================
 
 /**
- * Uploads a sanitized SVG string to the question-images bucket.
- * Returns the public URL or null if the upload fails.
+ * Uploads a sanitized SVG string to Convex file storage.
+ * Returns the served URL or null if the upload fails.
  *
- * Storage path: diagrams/{sanitizedTopic}/{userId}/{timestamp}.svg
+ * The legacy `userId` / client parameters are accepted but ignored so
+ * existing callers keep compiling — Convex storage doesn't use storage paths.
  */
 export async function uploadSvgToStorage(
   svgContent: string,
-  topic: string,
-  userId: string,
-  // Accept any Supabase client — server or anon
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: SupabaseClient<any>
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  topic?: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  userId?: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
+  _legacyClient?: any
 ): Promise<string | null> {
   try {
-    const sanitizedTopic = topic.toLowerCase().replace(/[^a-z0-9]/g, '-')
-    const timestamp = Date.now()
-    const filePath = `diagrams/${sanitizedTopic}/${userId}/${timestamp}.svg`
+    // 1. Request an upload URL from Convex.
+    const { uploadUrl } = await fetchMutation(api.files.generateUploadUrl, {})
 
-    const svgBuffer = Buffer.from(svgContent, 'utf-8')
-
-    const { data, error } = await supabase.storage
-      .from('question-images')
-      .upload(filePath, svgBuffer, {
-        contentType: 'image/svg+xml',
-        upsert: false,
-      })
-
-    if (error || !data) {
-      console.error('[diagram-utils] SVG upload error:', error?.message)
+    // 2. POST the SVG content directly to Convex storage.
+    const blob = new Blob([svgContent], { type: 'image/svg+xml' })
+    const res = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'image/svg+xml' },
+      body: blob,
+    })
+    if (!res.ok) {
+      console.error('[diagram-utils] SVG upload error: status', res.status)
       return null
     }
+    const { storageId } = (await res.json()) as { storageId: Id<'_storage'> }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('question-images')
-      .getPublicUrl(data.path)
-
-    return publicUrl
+    // 3. Resolve the served URL.
+    const url = await fetchQuery(api.files.getUrl, { storageId })
+    return url ?? null
   } catch (err) {
     console.error('[diagram-utils] SVG upload exception:', err)
     return null

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import {
   needsDiagram,
   sanitizeSvg,
@@ -214,10 +213,6 @@ Return ONLY the JSON object with exactly ${count} question(s) in the array.`
   }
 
   // Upload SVGs and build result
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  const userId = user?.id || 'anon'
-
   const questions: GeneratedQuestion[] = []
 
   for (const q of parsed.questions) {
@@ -228,7 +223,7 @@ Return ONLY the JSON object with exactly ${count} question(s) in the array.`
     if (q.svg_markup) {
       const sanitized = sanitizeSvg(q.svg_markup)
       if (sanitized.valid) {
-        imageUrl = await uploadSvgToStorage(sanitized.svg, body.topic, userId, supabase)
+        imageUrl = await uploadSvgToStorage(sanitized.svg, body.topic)
       } else {
         console.warn('[Similar Diagram] SVG sanitization failed:', sanitized.errors)
       }

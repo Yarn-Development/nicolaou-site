@@ -20,117 +20,87 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Search, Filter, Eye, Trash2, CheckCircle2, Circle, Loader2, ImageIcon, PanelLeftClose, PanelLeft } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
-import type { Question, DifficultyTier, ContentType } from '@/lib/types/database'
-import { QuestionDisplay, QuestionDisplayCompact, SourceBadge } from '@/components/question-display'
+import { Search, Filter, Eye, Trash2, CheckCircle2, Circle, Loader2, ImageIcon, BanIcon } from 'lucide-react'
+import { getQuestionBankQuestions, toggleQuestionVerification as toggleQuestionVerificationAction, deleteQuestion as deleteQuestionAction } from '@/app/actions/questions'
+import type { Question, DifficultyTier, ContentType, QuestionAnswerKey } from '@/lib/types/database'
+import { QuestionDisplay, QuestionDisplayCompact, SourceBadge, QuestionSourceLabel } from '@/components/question-display'
 import { LatexPreview } from '@/components/latex-preview'
-import { QuestionBankFilterSidebar, type FilterState } from '@/components/question-bank/filter-sidebar'
-
-const TOPICS = [
-  'All Topics',
-  'Algebra',
-  'Geometry',
-  'Statistics',
-  'Number',
-  'Ratio & Proportion',
-  'Probability',
-  'Trigonometry',
-  'Mensuration',
-  'Graphs',
-  'Transformations'
-]
 
 export default function QuestionBrowserClient() {
   const [questions, setQuestions] = useState<Question[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const [selectedTopic, setSelectedTopic] = useState('All Topics')
   const [selectedTier, setSelectedTier] = useState<'All' | DifficultyTier>('All')
   const [verifiedFilter, setVerifiedFilter] = useState<'all' | 'verified' | 'unverified'>('all')
   const [sourceFilter, setSourceFilter] = useState<'all' | ContentType>('all')
+  const [calculatorFilter, setCalculatorFilter] = useState<'all' | 'calculator' | 'non-calculator'>('all')
+  const [examBoardFilter, setExamBoardFilter] = useState<string>('all')
   const [hasDiagramFilter, setHasDiagramFilter] = useState(false)
+  const [marksMin, setMarksMin] = useState<string>('')
+  const [marksMax, setMarksMax] = useState<string>('')
+  const [yearFilter, setYearFilter] = useState<string>('all')
+  const [specFilter, setSpecFilter] = useState<'all' | 'new-spec' | 'legacy-modular' | 'legacy-gcse'>('all')
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null)
-  
-  // Sidebar state
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [curriculumFilters, setCurriculumFilters] = useState<FilterState | null>(null)
 
-  // Handle filter changes from sidebar
-  const handleFilterChange = useCallback((filters: FilterState) => {
-    setCurriculumFilters(filters)
-  }, [])
-
-  // Fetch questions
+  // Fetch all questions once — all filtering is client-side for instant response
   const fetchQuestions = useCallback(async () => {
     setLoading(true)
-    const supabase = createClient()
 
-    let query = supabase
-      .from('questions')
-      .select('*')
-      .order('created_at', { ascending: false })
+    // Fetch the full bank once — all filtering is client-side for instant response.
+    // browseQuestions returns newest-first and maps source_spec, which the filters use.
+    const result = await getQuestionBankQuestions({ limit: 10000, offset: 0 })
 
-    // Apply filters
-    if (selectedTopic !== 'All Topics') {
-      query = query.eq('topic', selectedTopic)
-    }
-
-    if (selectedTier !== 'All') {
-      query = query.eq('difficulty', selectedTier)
-    }
-
-    if (verifiedFilter === 'verified') {
-      query = query.eq('is_verified', true)
-    } else if (verifiedFilter === 'unverified') {
-      query = query.eq('is_verified', false)
-    }
-
-    // Source filter
-    if (sourceFilter !== 'all') {
-      query = query.eq('content_type', sourceFilter)
-    }
-
-    // Has diagram filter - questions with non-null image_url
-    if (hasDiagramFilter) {
-      query = query.not('image_url', 'is', null)
-    }
-
-    const { data, error } = await query
-
-    if (error) {
-      console.error('Error fetching questions:', error)
+    if (!result.success || !result.data) {
+      console.error('Error fetching questions:', result.error)
     } else {
-      setQuestions(data || [])
+      setQuestions(result.data.questions as unknown as Question[])
     }
 
     setLoading(false)
-  }, [selectedTopic, selectedTier, verifiedFilter, sourceFilter, hasDiagramFilter])
+  }, [])
 
   useEffect(() => {
     fetchQuestions()
   }, [fetchQuestions])
 
-  // Filter by search term
+  // All filtering is done client-side — instant, no network round-trip
   const filteredQuestions = questions.filter(q => {
-    if (!searchTerm) return true
-    return (
-      q.question_latex?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      q.topic.toLowerCase().includes(searchTerm.toLowerCase())
-    )
+    const ak = q.answer_key as QuestionAnswerKey | null
+
+    if (selectedTier !== 'All' && q.difficulty !== selectedTier) return false
+    if (verifiedFilter === 'verified' && !q.is_verified) return false
+    if (verifiedFilter === 'unverified' && q.is_verified) return false
+    if (sourceFilter !== 'all' && q.content_type !== sourceFilter) return false
+    if (hasDiagramFilter && !q.image_url) return false
+    if (calculatorFilter === 'calculator' && q.calculator_allowed !== true) return false
+    if (calculatorFilter === 'non-calculator' && q.calculator_allowed !== false) return false
+    if (examBoardFilter !== 'all' && ak?.source?.exam_board !== examBoardFilter) return false
+    if (yearFilter !== 'all' && String(ak?.source?.year) !== yearFilter) return false
+    if (specFilter !== 'all' && q.source_spec !== specFilter) return false
+    if (marksMin !== '' && (q.marks == null || q.marks < parseInt(marksMin, 10))) return false
+    if (marksMax !== '' && (q.marks == null || q.marks > parseInt(marksMax, 10))) return false
+
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase()
+      const matches =
+        q.question_latex?.toLowerCase().includes(term) ||
+        q.topic_name?.toLowerCase().includes(term) ||
+        q.sub_topic_name?.toLowerCase().includes(term) ||
+        q.curriculum_level?.toLowerCase().includes(term) ||
+        ak?.source?.exam_board?.toLowerCase().includes(term) ||
+        ak?.source?.paper?.toLowerCase().includes(term)
+      if (!matches) return false
+    }
+
+    return true
   })
 
   // Toggle verification status
   const toggleVerification = async (id: string, currentStatus: boolean) => {
-    const supabase = createClient()
-    
-    const { error } = await supabase
-      .from('questions')
-      .update({ is_verified: !currentStatus })
-      .eq('id', id)
+    const result = await toggleQuestionVerificationAction(id, !currentStatus)
 
-    if (!error) {
-      setQuestions(questions.map(q => 
+    if (result.success) {
+      setQuestions(questions.map(q =>
         q.id === id ? { ...q, is_verified: !currentStatus } : q
       ))
     }
@@ -140,87 +110,25 @@ export default function QuestionBrowserClient() {
   const deleteQuestion = async (id: string) => {
     if (!confirm('Are you sure you want to delete this question?')) return
 
-    const supabase = createClient()
-    
-    const { error } = await supabase
-      .from('questions')
-      .delete()
-      .eq('id', id)
+    const result = await deleteQuestionAction(id)
 
-    if (!error) {
+    if (result.success) {
       setQuestions(questions.filter(q => q.id !== id))
       setSelectedQuestion(null)
     }
   }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)]">
-      {/* Filter Sidebar */}
-      <div className={`transition-all duration-300 ${sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-[300px]'}`}>
-        <QuestionBankFilterSidebar onFilterChange={handleFilterChange} />
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="border-b-4 border-swiss-ink pb-4">
+        <h1 className="text-4xl font-black uppercase tracking-wider text-swiss-ink">
+          QUESTION BANK
+        </h1>
+        <p className="text-sm font-bold uppercase tracking-widest text-swiss-lead mt-2">
+          Browse, search, and manage questions
+        </p>
       </div>
-
-      {/* Main Content */}
-      <div className="flex-1 overflow-y-auto bg-swiss-paper">
-        <div className="p-8">
-          <div className="max-w-7xl mx-auto space-y-8">
-            {/* Header */}
-            <div className="border-b-4 border-swiss-ink pb-4 flex items-start justify-between">
-              <div>
-                <h1 className="text-4xl font-black uppercase tracking-wider text-swiss-ink">
-                  QUESTION BANK
-                </h1>
-                <p className="text-sm font-bold uppercase tracking-widest text-swiss-lead mt-2">
-                  Browse, search, and manage questions
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                className="border-2 border-swiss-ink"
-                title={sidebarCollapsed ? 'Show filters' : 'Hide filters'}
-              >
-                {sidebarCollapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-              </Button>
-            </div>
-
-            {/* Active Curriculum Filters Display */}
-            {curriculumFilters && (curriculumFilters.curriculum || curriculumFilters.selectedSubtopics.length > 0) && (
-              <div className="flex flex-wrap gap-2 items-center">
-                <span className="text-xs font-bold uppercase tracking-wider text-swiss-lead">Active Filters:</span>
-                {curriculumFilters.curriculum && (
-                  <Badge variant="outline" className="border-2 border-swiss-signal text-swiss-signal">
-                    {curriculumFilters.curriculum === 'a-level' ? 'A Level' : curriculumFilters.curriculum.toUpperCase()}
-                  </Badge>
-                )}
-                {curriculumFilters.aLevelStream && (
-                  <Badge variant="outline" className="border-2 border-swiss-ink">
-                    {curriculumFilters.aLevelStream === 'pure' ? 'Pure' : 'Applied'}
-                  </Badge>
-                )}
-                {curriculumFilters.aLevelYear && (
-                  <Badge variant="outline" className="border-2 border-swiss-ink">
-                    {curriculumFilters.aLevelYear === 'year1' ? 'Year 1' : 'Year 2'}
-                  </Badge>
-                )}
-                {curriculumFilters.gcseTier && (
-                  <Badge variant="outline" className="border-2 border-swiss-ink">
-                    {curriculumFilters.gcseTier === 'foundation' ? 'Foundation' : 'Higher'}
-                  </Badge>
-                )}
-                {curriculumFilters.selectedSubtopics.slice(0, 3).map(subtopic => (
-                  <Badge key={subtopic} variant="outline" className="border-2 border-swiss-ink bg-swiss-concrete/30">
-                    {subtopic}
-                  </Badge>
-                ))}
-                {curriculumFilters.selectedSubtopics.length > 3 && (
-                  <Badge variant="outline" className="border-2 border-swiss-ink">
-                    +{curriculumFilters.selectedSubtopics.length - 3} more
-                  </Badge>
-                )}
-              </div>
-            )}
 
             {/* Quick Filters */}
             <Card className="border-2 border-swiss-ink">
@@ -231,9 +139,9 @@ export default function QuestionBrowserClient() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div className="grid gap-3" style={{gridTemplateColumns: 'minmax(160px,3fr) repeat(auto-fill, minmax(110px, 1fr))'}}>
                   {/* Search */}
-                  <div className="space-y-2 md:col-span-2">
+                  <div className="space-y-1">
                     <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
                       Search
                     </label>
@@ -242,31 +150,14 @@ export default function QuestionBrowserClient() {
                       <Input
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        placeholder="Search questions..."
+                        placeholder="Search questions, topics, boards..."
                         className="pl-10 border-2 border-swiss-ink"
                       />
                     </div>
                   </div>
 
-                  {/* Topic Filter */}
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
-                      Topic
-                    </label>
-                    <Select value={selectedTopic} onValueChange={setSelectedTopic}>
-                      <SelectTrigger className="border-2 border-swiss-ink">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {TOPICS.map(topic => (
-                          <SelectItem key={topic} value={topic}>{topic}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
                   {/* Tier Filter */}
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
                       Tier
                     </label>
@@ -282,8 +173,26 @@ export default function QuestionBrowserClient() {
                     </Select>
                   </div>
 
+                  {/* Calculator Filter */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink flex items-center gap-1">
+                      <BanIcon className="w-3 h-3" />
+                      Calculator
+                    </label>
+                    <Select value={calculatorFilter} onValueChange={(v) => setCalculatorFilter(v as 'all' | 'calculator' | 'non-calculator')}>
+                      <SelectTrigger className="border-2 border-swiss-ink">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="calculator">Calculator</SelectItem>
+                        <SelectItem value="non-calculator">Non-calculator</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   {/* Source Filter */}
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
                       Source
                     </label>
@@ -302,7 +211,7 @@ export default function QuestionBrowserClient() {
                   </div>
 
                   {/* Verified Filter */}
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink">
                       Status
                     </label>
@@ -317,11 +226,95 @@ export default function QuestionBrowserClient() {
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
 
-                {/* Has Diagram Toggle */}
-                <div className="mt-4 pt-4 border-t border-swiss-concrete">
-                  <label className="flex items-center gap-3 cursor-pointer group">
+                  {/* Exam Board Filter */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink whitespace-nowrap">
+                      Exam Board
+                    </label>
+                    <Select value={examBoardFilter} onValueChange={setExamBoardFilter}>
+                      <SelectTrigger className="border-2 border-swiss-ink">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Boards</SelectItem>
+                        <SelectItem value="Edexcel">Edexcel</SelectItem>
+                        <SelectItem value="AQA">AQA</SelectItem>
+                        <SelectItem value="OCR">OCR</SelectItem>
+                        <SelectItem value="MEI">MEI</SelectItem>
+                        <SelectItem value="WJEC">WJEC</SelectItem>
+                        <SelectItem value="CIE">CIE</SelectItem>
+                        <SelectItem value="IB">IB</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Spec Filter */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink whitespace-nowrap">
+                      Specification
+                    </label>
+                    <Select value={specFilter} onValueChange={(v) => setSpecFilter(v as typeof specFilter)}>
+                      <SelectTrigger className="border-2 border-swiss-ink">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any Spec</SelectItem>
+                        <SelectItem value="new-spec">New Spec (2017+)</SelectItem>
+                        <SelectItem value="legacy-modular">Legacy Modular (pre-2017)</SelectItem>
+                        <SelectItem value="legacy-gcse">Legacy GCSE (pre-2017)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Year Filter */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink whitespace-nowrap">
+                      Paper Year
+                    </label>
+                    <Select value={yearFilter} onValueChange={setYearFilter}>
+                      <SelectTrigger className="border-2 border-swiss-ink">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any Year</SelectItem>
+                        {[2025,2024,2023,2022,2021,2020,2019,2018,2017,2016].map(y => (
+                          <SelectItem key={y} value={String(y)}>{y}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Marks Range */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold uppercase tracking-widest text-swiss-ink whitespace-nowrap">
+                      Marks Range
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        placeholder="Min"
+                        value={marksMin}
+                        onChange={(e) => setMarksMin(e.target.value)}
+                        className="border-2 border-swiss-ink w-16 h-9 text-center"
+                      />
+                      <span className="text-xs text-swiss-lead font-bold">–</span>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        placeholder="Max"
+                        value={marksMax}
+                        onChange={(e) => setMarksMax(e.target.value)}
+                        className="border-2 border-swiss-ink w-16 h-9 text-center"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Has Diagram Toggle */}
+                  <label className="flex items-center gap-3 cursor-pointer group pb-0.5">
                     <div className="relative">
                       <input
                         type="checkbox"
@@ -339,6 +332,27 @@ export default function QuestionBrowserClient() {
                       </span>
                     </div>
                   </label>
+
+                  {/* Clear all filters */}
+                  {(selectedTier !== 'All' || calculatorFilter !== 'all' || sourceFilter !== 'all' || verifiedFilter !== 'all' || examBoardFilter !== 'all' || specFilter !== 'all' || yearFilter !== 'all' || marksMin !== '' || marksMax !== '' || hasDiagramFilter) && (
+                    <button
+                      onClick={() => {
+                        setSelectedTier('All')
+                        setCalculatorFilter('all')
+                        setSourceFilter('all')
+                        setVerifiedFilter('all')
+                        setExamBoardFilter('all')
+                        setSpecFilter('all')
+                        setYearFilter('all')
+                        setMarksMin('')
+                        setMarksMax('')
+                        setHasDiagramFilter(false)
+                      }}
+                      className="text-xs font-bold uppercase tracking-wider text-swiss-lead hover:text-swiss-ink underline self-end pb-1.5"
+                    >
+                      Clear all
+                    </button>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -359,7 +373,7 @@ export default function QuestionBrowserClient() {
 
             {/* Questions Table */}
             <Card className="border-2 border-swiss-ink">
-              <CardContent className="p-0">
+              <CardContent className="p-0 overflow-x-auto">
             {loading ? (
               <div className="flex items-center justify-center p-12">
                 <Loader2 className="w-8 h-8 animate-spin text-swiss-signal" />
@@ -371,15 +385,15 @@ export default function QuestionBrowserClient() {
                 </p>
               </div>
             ) : (
-              <Table>
+              <Table className="min-w-[900px]">
                 <TableHeader>
                   <TableRow className="border-b-2 border-swiss-ink">
                     <TableHead className="font-black uppercase text-swiss-ink">Question</TableHead>
-                    <TableHead className="font-black uppercase text-swiss-ink">Topic</TableHead>
+                    <TableHead className="font-black uppercase text-swiss-ink">Topic / Source</TableHead>
                     <TableHead className="font-black uppercase text-swiss-ink">Tier</TableHead>
+                    <TableHead className="font-black uppercase text-swiss-ink">Calc</TableHead>
                     <TableHead className="font-black uppercase text-swiss-ink">Type</TableHead>
                     <TableHead className="font-black uppercase text-swiss-ink">Status</TableHead>
-                    <TableHead className="font-black uppercase text-swiss-ink">Usage</TableHead>
                     <TableHead className="font-black uppercase text-swiss-ink text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -390,19 +404,35 @@ export default function QuestionBrowserClient() {
                         <QuestionDisplayCompact question={question} />
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="border-2 border-swiss-ink">
-                          {question.topic}
-                        </Badge>
+                        <div className="space-y-1">
+                          <Badge variant="outline" className="border-2 border-swiss-ink">
+                            {question.sub_topic_name || question.topic_name || question.topic}
+                          </Badge>
+                          <QuestionSourceLabel
+                            answerKey={question.answer_key as QuestionAnswerKey | null}
+                            className="block"
+                          />
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Badge 
+                        <Badge
                           variant="outline"
-                          className={question.difficulty === 'Higher' 
-                            ? 'border-2 border-swiss-signal text-swiss-signal' 
+                          className={question.difficulty === 'Higher'
+                            ? 'border-2 border-swiss-signal text-swiss-signal'
                             : 'border-2 border-swiss-ink'}
                         >
                           {question.difficulty}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {question.calculator_allowed === false ? (
+                          <span title="Non-calculator" className="flex items-center gap-1 text-xs text-red-600">
+                            <BanIcon className="w-3.5 h-3.5" />
+                            No
+                          </span>
+                        ) : (
+                          <span className="text-xs text-swiss-lead">Yes</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <SourceBadge contentType={question.content_type} />
@@ -424,9 +454,6 @@ export default function QuestionBrowserClient() {
                             </>
                           )}
                         </button>
-                      </TableCell>
-                      <TableCell className="text-xs">
-                        {question.times_used}x
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-2">
@@ -456,8 +483,8 @@ export default function QuestionBrowserClient() {
           </CardContent>
         </Card>
 
-        {/* Question Preview Modal */}
-        {selectedQuestion && (
+      {/* Question Preview Modal */}
+      {selectedQuestion && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
             <Card className="border-4 border-swiss-ink max-w-3xl w-full max-h-[90vh] overflow-y-auto">
               <CardHeader className="border-b-2 border-swiss-ink">
@@ -505,7 +532,8 @@ export default function QuestionBrowserClient() {
                   <QuestionDisplay
                     question={selectedQuestion}
                     variant="preview"
-                    showSourceBadge={false}
+                    showSourceBadge={true}
+                    showSourceLabel={true}
                     showTopicInfo={true}
                     enableZoom={true}
                   />
@@ -627,9 +655,6 @@ export default function QuestionBrowserClient() {
             </Card>
           </div>
         )}
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

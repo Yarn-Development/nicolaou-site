@@ -36,7 +36,9 @@ import {
   Lightbulb,
 } from "lucide-react"
 import Image from "next/image"
-import { createClient } from "@/lib/supabase/client"
+import { useConvex } from "convex/react"
+import { api } from "@/convex/_generated/api"
+import type { Id } from "@/convex/_generated/dataModel"
 import type { DifficultyTier } from "@/lib/types/database"
 import { LatexPreview } from "@/components/latex-preview"
 import {
@@ -69,6 +71,7 @@ export function QuestionCreatorWizard() {
   const [aiLevel, setAiLevel] = useState<CurriculumLevel>('GCSE Higher')
   const [aiTopic, setAiTopic] = useState('')
   const [aiSubTopic, setAiSubTopic] = useState('')
+  const [aiExamBoard, setAiExamBoard] = useState<string>('Edexcel')
   const [questionType, setQuestionType] = useState<QuestionType>('Fluency')
   const [marks, setMarks] = useState<number>(3)
   const [calculatorAllowed, setCalculatorAllowed] = useState(true)
@@ -90,6 +93,7 @@ export function QuestionCreatorWizard() {
   const [ocrLevel, setOcrLevel] = useState<CurriculumLevel>('GCSE Higher')
   const [ocrTopic, setOcrTopic] = useState('')
   const [ocrSubTopic, setOcrSubTopic] = useState('')
+  const [ocrExamBoard, setOcrExamBoard] = useState<string>('Edexcel')
   
   // Saving state
   const [saving, setSaving] = useState(false)
@@ -102,6 +106,8 @@ export function QuestionCreatorWizard() {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const convex = useConvex()
+
   // Get cascading dropdown options
   const availableTopics = getTopicsForLevel(aiLevel)
   const availableSubTopics = aiTopic ? getSubTopicsForTopic(aiLevel, aiTopic) : []
@@ -110,7 +116,7 @@ export function QuestionCreatorWizard() {
   const ocrAvailableSubTopics = ocrTopic ? getSubTopicsForTopic(ocrLevel, ocrTopic) : []
 
   // Computed: does the currently selected topic/sub-topic require a diagram?
-  // Used to show a pre-generation badge and route to Claude Haiku.
+  // Used to show a pre-generation badge indicating a diagram will be generated.
   const topicRequiresDiagram = useMemo(() => {
     if (!aiTopic || !aiSubTopic) return false
     const topic = availableTopics.find(t => t.id === aiTopic)
@@ -158,6 +164,7 @@ export function QuestionCreatorWizard() {
           marks,
           calculator_allowed: calculatorAllowed,
           context: userContext,
+          exam_board: aiExamBoard,
         })
       })
 
@@ -185,7 +192,7 @@ export function QuestionCreatorWizard() {
   }
 
   /**
-   * OCR: Handle file selection and upload to Supabase Storage
+   * OCR: Handle file selection and upload to Convex file storage
    */
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -217,43 +224,34 @@ export function QuestionCreatorWizard() {
     }
     reader.readAsDataURL(file)
 
-    // Upload to Supabase Storage
-    await uploadImageToSupabase(file)
+    // Upload to Convex file storage
+    await uploadImageToConvex(file)
   }
 
   /**
-   * Upload image to Supabase Storage and get public URL
+   * Upload image to Convex file storage and get served URL
    */
-  const uploadImageToSupabase = async (file: File) => {
+  const uploadImageToConvex = async (file: File) => {
     setOcrUploading(true)
 
     try {
-      const supabase = createClient()
-      
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      // 1. Request an upload URL from Convex.
+      const { uploadUrl } = await convex.mutation(api.files.generateUploadUrl, {})
 
-      // Generate unique filename
-      const fileExt = file.name.split('.').pop()
-      const fileName = `${user.id}/${Date.now()}.${fileExt}`
+      // 2. POST the file directly to Convex storage.
+      const res = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      })
+      if (!res.ok) throw new Error(`Upload failed with status ${res.status}`)
+      const { storageId } = (await res.json()) as { storageId: Id<'_storage'> }
 
-      // Upload to 'question-images' bucket
-      const { data, error } = await supabase.storage
-        .from('question-images')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false
-        })
+      // 3. Resolve the served URL.
+      const url = await convex.query(api.files.getUrl, { storageId })
+      if (!url) throw new Error('Could not resolve uploaded file URL')
 
-      if (error) throw error
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('question-images')
-        .getPublicUrl(data.path)
-
-      setOcrImageUrl(publicUrl)
+      setOcrImageUrl(url)
     } catch (error) {
       console.error('Upload error:', error)
       toast.error('UPLOAD FAILED', {
@@ -343,6 +341,11 @@ export function QuestionCreatorWizard() {
           answer_key: {
             answer: aiGenerated.answer,
             explanation: aiGenerated.explanation,
+            source: {
+              exam_board: aiExamBoard,
+              level: aiLevel,
+              is_calculator: calculatorAllowed,
+            },
           }
         })
 
@@ -382,8 +385,13 @@ export function QuestionCreatorWizard() {
           question_type: 'Fluency', // Default type for OCR
           calculator_allowed: true, // Default for OCR
           answer_key: {
-            answer: '', // OCR doesn't extract answers
+            answer: '',
             explanation: 'Answer not yet added - please verify and update',
+            source: {
+              exam_board: ocrExamBoard,
+              level: ocrLevel,
+              is_calculator: true,
+            },
           }
         })
 
@@ -488,7 +496,7 @@ export function QuestionCreatorWizard() {
                 </h3>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 {/* Level */}
                 <div className="space-y-2">
                   <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink dark:text-swiss-paper flex items-center gap-2">
@@ -506,6 +514,24 @@ export function QuestionCreatorWizard() {
                     <SelectContent>
                       {getAllLevels().map(level => (
                         <SelectItem key={level} value={level}>{level}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Exam Board */}
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink dark:text-swiss-paper flex items-center gap-2">
+                    <GraduationCap className="w-3 h-3" />
+                    EXAM BOARD
+                  </Label>
+                  <Select value={aiExamBoard} onValueChange={setAiExamBoard}>
+                    <SelectTrigger className="border-2 border-swiss-ink dark:border-swiss-paper">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {['Edexcel', 'AQA', 'OCR', 'MEI', 'WJEC', 'CIE', 'IB'].map(board => (
+                        <SelectItem key={board} value={board}>{board}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -643,7 +669,7 @@ export function QuestionCreatorWizard() {
             {topicRequiresDiagram && !aiGenerated && aiSubTopic && (
               <div className="flex items-center gap-2 text-xs text-swiss-lead border border-dashed border-swiss-ink/40 dark:border-swiss-paper/40 px-3 py-2 bg-swiss-concrete dark:bg-swiss-paper/5">
                 <ImageIcon className="w-3 h-3 shrink-0" />
-                <span>Diagram will be generated automatically for this topic (Claude Haiku)</span>
+                <span>Diagram will be generated automatically for this topic</span>
               </div>
             )}
 
@@ -936,7 +962,7 @@ export function QuestionCreatorWizard() {
                       </h3>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 gap-4">
                       {/* OCR Level */}
                       <div className="space-y-2">
                         <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink dark:text-swiss-paper">
@@ -953,6 +979,23 @@ export function QuestionCreatorWizard() {
                           <SelectContent>
                             {getAllLevels().map(level => (
                               <SelectItem key={level} value={level}>{level}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* OCR Exam Board */}
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold uppercase tracking-widest text-swiss-ink dark:text-swiss-paper">
+                          EXAM BOARD
+                        </Label>
+                        <Select value={ocrExamBoard} onValueChange={setOcrExamBoard}>
+                          <SelectTrigger className="border-2 border-swiss-ink dark:border-swiss-paper bg-swiss-paper dark:bg-swiss-ink/10">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {['Edexcel', 'AQA', 'OCR', 'MEI', 'WJEC', 'CIE', 'IB'].map(board => (
+                              <SelectItem key={board} value={board}>{board}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>

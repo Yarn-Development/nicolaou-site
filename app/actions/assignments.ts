@@ -1,7 +1,9 @@
 "use server"
 
-import { createClient } from "@/lib/supabase/server"
 import { revalidatePath } from "next/cache"
+import { getAuthUser } from "@/lib/auth"
+import { fetchQuery, fetchMutation, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
+import type { Id } from "@/convex/_generated/dataModel"
 
 // =====================================================
 // Types
@@ -77,7 +79,16 @@ export interface QuestionWithDetails {
   answer_key: {
     answer: string
     explanation: string
+    source?: {
+      exam_board?: string
+      level?: string
+      paper?: string
+      year?: number
+      question_number?: string
+    }
   }
+  image_url: string | null
+  content_type: string
 }
 
 export interface AssignmentDetails {
@@ -91,6 +102,51 @@ export interface AssignmentDetails {
   total_marks: number
   question_count: number
   questions: QuestionWithDetails[]
+}
+
+// =====================================================
+// Helpers
+// =====================================================
+
+const toIso = (ms: number | null | undefined): string | null =>
+  ms == null ? null : new Date(ms).toISOString()
+
+async function teacherCtx(): Promise<
+  | { teacherId: Id<"users"> }
+  | { error: string }
+> {
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) return { error: "You must be logged in" }
+  const teacherId = await getConvexUserIdByClerkId(authUser.clerkId)
+  if (!teacherId) return { error: "You must be logged in" }
+  return { teacherId }
+}
+
+type ConvexAssignment = {
+  _id: string
+  _creationTime: number
+  classId: string
+  title: string
+  dueDate?: number
+  status?: string
+  mode?: string
+  metadata?: unknown
+}
+
+function mapAssignment(a: ConvexAssignment): Assignment {
+  const metadata = (a.metadata as Record<string, unknown> | undefined) ?? {}
+  return {
+    id: a._id,
+    class_id: a.classId,
+    title: a.title,
+    due_date: toIso(a.dueDate),
+    status: (a.status === "published" ? "published" : "draft") as AssignmentStatus,
+    mode: (a.mode === "paper" ? "paper" : "online") as AssignmentMode,
+    assignment_type: "exam" as AssignmentType,
+    content: metadata as Assignment["content"],
+    created_at: toIso(a._creationTime) ?? new Date().toISOString(),
+    updated_at: toIso(a._creationTime) ?? new Date().toISOString(),
+  }
 }
 
 // =====================================================
@@ -114,69 +170,52 @@ export async function createAssignment(
     mode?: AssignmentMode
   } = {}
 ) {
-  const supabase = await createClient()
-
-  // Get current user
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in to create an assignment",
-    }
+  const ctx = await teacherCtx()
+  if ("error" in ctx) {
+    return { success: false, error: "You must be logged in to create an assignment" }
   }
 
-  // Verify user is a teacher and owns this class
-  const { data: classData, error: classError } = await supabase
-    .from("classes")
-    .select("teacher_id")
-    .eq("id", classId)
-    .single()
+  try {
+    const questionIds = (questionData.question_ids ?? []) as string[]
+    const result = await fetchMutation(api.assignments.createAssignmentFull, {
+      classId: classId as Id<"classes">,
+      teacherId: ctx.teacherId,
+      title: title.trim(),
+      mode: (options.mode ?? "online") as "online" | "paper",
+      dueDate: options.dueDate ? new Date(options.dueDate).getTime() : undefined,
+      status: options.status ?? "draft",
+      questionIds: questionIds as Id<"questions">[],
+      metadata: questionData,
+    })
 
-  if (classError || !classData) {
-    return {
-      success: false,
-      error: "Class not found",
+    if ("error" in result) {
+      return {
+        success: false,
+        error:
+          result.error === "forbidden"
+            ? "You don't have permission to create assignments for this class"
+            : "Class not found",
+      }
     }
-  }
 
-  if (classData.teacher_id !== user.id) {
-    return {
-      success: false,
-      error: "You don't have permission to create assignments for this class",
-    }
-  }
+    revalidatePath("/dashboard")
 
-  // Create the assignment
-  const { data: newAssignment, error: insertError } = await supabase
-    .from("assignments")
-    .insert({
+    const data: Assignment = {
+      id: result.assignmentId,
       class_id: classId,
       title: title.trim(),
+      due_date: options.dueDate ?? null,
+      status: options.status ?? "draft",
+      mode: options.mode ?? "online",
+      assignment_type: "exam",
       content: questionData,
-      due_date: options.dueDate || null,
-      status: options.status || "draft",
-      mode: options.mode || "online",
-    })
-    .select()
-    .single()
-
-  if (insertError) {
-    console.error("Error creating assignment:", insertError)
-    return {
-      success: false,
-      error: "Failed to create assignment. Please try again.",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }
-  }
-
-  revalidatePath("/dashboard")
-
-  return {
-    success: true,
-    data: newAssignment as Assignment,
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error creating assignment:", error)
+    return { success: false, error: "Failed to create assignment. Please try again." }
   }
 }
 
@@ -184,61 +223,29 @@ export async function createAssignment(
  * Gets all assignments for the logged-in teacher
  */
 export async function getTeacherAssignments() {
-  const supabase = await createClient()
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
+  try {
+    const assignments = await fetchQuery(api.assignments.getTeacherAssignments, {
+      teacherId: ctx.teacherId,
+    })
 
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in",
-    }
-  }
+    const counts = await fetchQuery(api.assignments.getSubmissionCounts, {
+      assignmentIds: assignments.map((a) => a._id as Id<"assignments">),
+    })
 
-  // Get assignments with class info and submission counts
-  const { data: assignments, error: assignmentsError } = await supabase
-    .from("assignments")
-    .select(
-      `
-      *,
-      classes!inner(
-        id,
-        name,
-        subject,
-        teacher_id
-      ),
-      submissions(count)
-    `
-    )
-    .eq("classes.teacher_id", user.id)
-    .order("created_at", { ascending: false })
+    const data: AssignmentWithClass[] = assignments.map((a) => ({
+      ...mapAssignment(a as ConvexAssignment),
+      class_name: a.className ?? "",
+      subject: "Maths",
+      submission_count: counts[a._id] ?? 0,
+    }))
 
-  if (assignmentsError) {
-    console.error("Error fetching assignments:", assignmentsError)
-    return {
-      success: false,
-      error: "Failed to fetch assignments",
-    }
-  }
-
-  // Transform the data
-  const transformedAssignments = assignments.map((a) => ({
-    ...a,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    class_name: (a.classes as any).name,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    subject: (a.classes as any).subject,
-    submission_count: Array.isArray(a.submissions) ? a.submissions.length : 0,
-    classes: undefined,
-    submissions: undefined,
-  }))
-
-  return {
-    success: true,
-    data: transformedAssignments as AssignmentWithClass[],
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error fetching assignments:", error)
+    return { success: false, error: "Failed to fetch assignments" }
   }
 }
 
@@ -246,48 +253,27 @@ export async function getTeacherAssignments() {
  * Gets assignments for a specific class
  */
 export async function getClassAssignments(classId: string) {
-  const supabase = await createClient()
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
+  try {
+    const assignments = await fetchQuery(api.assignments.getClassAssignments, {
+      classId: classId as Id<"classes">,
+    })
 
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in",
-    }
-  }
+    const counts = await fetchQuery(api.assignments.getSubmissionCounts, {
+      assignmentIds: assignments.map((a) => a._id as Id<"assignments">),
+    })
 
-  const { data: assignments, error: assignmentsError } = await supabase
-    .from("assignments")
-    .select(
-      `
-      *,
-      submissions(count)
-    `
-    )
-    .eq("class_id", classId)
-    .order("created_at", { ascending: false })
+    const data = assignments.map((a) => ({
+      ...mapAssignment(a as ConvexAssignment),
+      submission_count: counts[a._id] ?? 0,
+    }))
 
-  if (assignmentsError) {
-    console.error("Error fetching class assignments:", assignmentsError)
-    return {
-      success: false,
-      error: "Failed to fetch assignments",
-    }
-  }
-
-  const transformedAssignments = assignments.map((a) => ({
-    ...a,
-    submission_count: Array.isArray(a.submissions) ? a.submissions.length : 0,
-    submissions: undefined,
-  }))
-
-  return {
-    success: true,
-    data: transformedAssignments as Assignment[],
+    return { success: true, data: data as Assignment[] }
+  } catch (error) {
+    console.error("Error fetching class assignments:", error)
+    return { success: false, error: "Failed to fetch assignments" }
   }
 }
 
@@ -303,40 +289,37 @@ export async function updateAssignment(
     content: Record<string, unknown>
   }>
 ) {
-  const supabase = await createClient()
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
+  try {
+    const result = await fetchMutation(api.assignments.updateAssignment, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: ctx.teacherId,
+      title: updates.title,
+      dueDate:
+        updates.due_date === undefined
+          ? undefined
+          : updates.due_date === null
+            ? null
+            : new Date(updates.due_date).getTime(),
+      status: updates.status,
+      metadata: updates.content,
+    })
 
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in",
+    if ("error" in result) {
+      return { success: false, error: "Failed to update assignment" }
     }
-  }
 
-  const { data: updated, error: updateError } = await supabase
-    .from("assignments")
-    .update(updates)
-    .eq("id", assignmentId)
-    .select()
-    .single()
+    revalidatePath("/dashboard")
 
-  if (updateError) {
-    console.error("Error updating assignment:", updateError)
     return {
-      success: false,
-      error: "Failed to update assignment",
+      success: true,
+      data: result.assignment ? mapAssignment(result.assignment as ConvexAssignment) : undefined,
     }
-  }
-
-  revalidatePath("/dashboard")
-
-  return {
-    success: true,
-    data: updated as Assignment,
+  } catch (error) {
+    console.error("Error updating assignment:", error)
+    return { success: false, error: "Failed to update assignment" }
   }
 }
 
@@ -351,31 +334,20 @@ export async function publishAssignment(assignmentId: string) {
  * Deletes an assignment
  */
 export async function deleteAssignment(assignmentId: string) {
-  const supabase = await createClient()
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in",
+  try {
+    const result = await fetchMutation(api.assignments.deleteAssignment, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: ctx.teacherId,
+    })
+    if (result && "error" in result) {
+      return { success: false, error: "Failed to delete assignment" }
     }
-  }
-
-  const { error: deleteError } = await supabase
-    .from("assignments")
-    .delete()
-    .eq("id", assignmentId)
-
-  if (deleteError) {
-    console.error("Error deleting assignment:", deleteError)
-    return {
-      success: false,
-      error: "Failed to delete assignment",
-    }
+  } catch (error) {
+    console.error("Error deleting assignment:", error)
+    return { success: false, error: "Failed to delete assignment" }
   }
 
   revalidatePath("/dashboard")
@@ -389,40 +361,28 @@ export async function deleteAssignment(assignmentId: string) {
 
 /**
  * Gets pending assignments for the logged-in student
- * Uses the database function for efficient querying
  */
 export async function getStudentAssignments() {
-  const supabase = await createClient()
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) return { success: false, error: "You must be logged in" }
+  const studentId = await getConvexUserIdByClerkId(authUser.clerkId)
+  if (!studentId) return { success: false, error: "You must be logged in" }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in",
-    }
-  }
-
-  // Use the helper function we created in the migration
-  const { data: assignments, error: assignmentsError } = await supabase.rpc(
-    "get_student_pending_assignments",
-    { p_student_id: user.id }
-  )
-
-  if (assignmentsError) {
-    console.error("Error fetching student assignments:", assignmentsError)
-    return {
-      success: false,
-      error: "Failed to fetch assignments",
-    }
-  }
-
-  return {
-    success: true,
-    data: assignments as StudentPendingAssignment[],
+  try {
+    const assignments = await fetchQuery(api.students.getAssignments, { studentId })
+    const data: StudentPendingAssignment[] = assignments.map((a) => ({
+      assignment_id: a.id,
+      title: a.title,
+      due_date: toIso(a.dueDate),
+      class_id: a.classId,
+      class_name: a.className,
+      subject: "Maths",
+      has_submitted: a.status !== "todo",
+    }))
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error fetching student assignments:", error)
+    return { success: false, error: "Failed to fetch assignments" }
   }
 }
 
@@ -433,79 +393,42 @@ export async function submitAssignment(
   assignmentId: string,
   answers: Record<string, unknown>
 ) {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in to submit",
-    }
+  const authUser = await getAuthUser()
+  if (!authUser?.clerkId) {
+    return { success: false, error: "You must be logged in to submit" }
+  }
+  const studentId = await getConvexUserIdByClerkId(authUser.clerkId)
+  if (!studentId) {
+    return { success: false, error: "You must be logged in to submit" }
   }
 
-  // Check if student already submitted
-  const { data: existingSubmission } = await supabase
-    .from("submissions")
-    .select("id")
-    .eq("assignment_id", assignmentId)
-    .eq("student_id", user.id)
-    .single()
-
-  if (existingSubmission) {
-    // Update existing submission
-    const { data: updated, error: updateError } = await supabase
-      .from("submissions")
-      .update({
-        answers,
-        submitted_at: new Date().toISOString(),
-      })
-      .eq("id", existingSubmission.id)
-      .select()
-      .single()
-
-    if (updateError) {
-      console.error("Error updating submission:", updateError)
-      return {
-        success: false,
-        error: "Failed to update submission",
-      }
-    }
-
-    return {
-      success: true,
-      data: updated as Submission,
-    }
-  }
-
-  // Create new submission
-  const { data: submission, error: insertError } = await supabase
-    .from("submissions")
-    .insert({
-      assignment_id: assignmentId,
-      student_id: user.id,
-      answers,
-      status: "submitted",
+  try {
+    const result = await fetchMutation(api.assignments.submitAssignment, {
+      assignmentId: assignmentId as Id<"assignments">,
+      studentId,
     })
-    .select()
-    .single()
 
-  if (insertError) {
-    console.error("Error creating submission:", insertError)
-    return {
-      success: false,
-      error: "Failed to submit assignment",
+    const s = result.submission
+    if (!s) {
+      return { success: false, error: "Failed to submit assignment" }
     }
-  }
 
-  revalidatePath("/dashboard")
+    revalidatePath("/dashboard")
 
-  return {
-    success: true,
-    data: submission as Submission,
+    const data: Submission = {
+      id: s._id,
+      assignment_id: s.assignmentId,
+      student_id: s.studentId,
+      score: s.totalMarksAwarded ?? null,
+      status: (s.status === "marked" ? "graded" : "submitted") as SubmissionStatus,
+      answers,
+      submitted_at: toIso(s.submittedAt) ?? new Date().toISOString(),
+      graded_at: toIso(s.markedAt),
+    }
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error submitting assignment:", error)
+    return { success: false, error: "Failed to submit assignment" }
   }
 }
 
@@ -517,46 +440,36 @@ export async function submitAssignment(
  * Gets all submissions for an assignment
  */
 export async function getAssignmentSubmissions(assignmentId: string) {
-  const supabase = await createClient()
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
+  try {
+    const result = await fetchQuery(api.assignments.getAssignmentSubmissions, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: ctx.teacherId,
+    })
 
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in",
+    if ("error" in result) {
+      return { success: false, error: "Failed to fetch submissions" }
     }
-  }
 
-  const { data: submissions, error: submissionsError } = await supabase
-    .from("submissions")
-    .select(
-      `
-      *,
-      student:profiles!submissions_student_id_fkey(
-        id,
-        email,
-        full_name
-      )
-    `
-    )
-    .eq("assignment_id", assignmentId)
-    .order("submitted_at", { ascending: true })
+    const data = result.submissions.map((s) => ({
+      id: s.id,
+      assignment_id: s.assignmentId,
+      student_id: s.studentId,
+      score: s.score,
+      status: (s.status === "marked" ? "graded" : "submitted") as SubmissionStatus,
+      submitted_at: toIso(s.submittedAt),
+      graded_at: toIso(s.gradedAt),
+      student: s.student
+        ? { id: s.student.id, email: s.student.email, full_name: s.student.fullName }
+        : null,
+    }))
 
-  if (submissionsError) {
-    console.error("Error fetching submissions:", submissionsError)
-    return {
-      success: false,
-      error: "Failed to fetch submissions",
-    }
-  }
-
-  return {
-    success: true,
-    data: submissions,
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error fetching submissions:", error)
+    return { success: false, error: "Failed to fetch submissions" }
   }
 }
 
@@ -564,44 +477,40 @@ export async function getAssignmentSubmissions(assignmentId: string) {
  * Grades a submission
  */
 export async function gradeSubmission(submissionId: string, score: number) {
-  const supabase = await createClient()
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
 
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in",
-    }
-  }
-
-  const { data: graded, error: gradeError } = await supabase
-    .from("submissions")
-    .update({
+  try {
+    const result = await fetchMutation(api.assignments.gradeSubmission, {
+      submissionId: submissionId as Id<"submissions">,
+      teacherId: ctx.teacherId,
       score,
-      status: "graded" as SubmissionStatus,
-      graded_at: new Date().toISOString(),
     })
-    .eq("id", submissionId)
-    .select()
-    .single()
 
-  if (gradeError) {
-    console.error("Error grading submission:", gradeError)
-    return {
-      success: false,
-      error: "Failed to grade submission",
+    if ("error" in result) {
+      return { success: false, error: "Failed to grade submission" }
     }
-  }
 
-  revalidatePath("/dashboard")
+    revalidatePath("/dashboard")
 
-  return {
-    success: true,
-    data: graded as Submission,
+    const s = result.submission
+    const data: Submission | undefined = s
+      ? {
+          id: s._id,
+          assignment_id: s.assignmentId,
+          student_id: s.studentId,
+          score: s.totalMarksAwarded ?? null,
+          status: "graded" as SubmissionStatus,
+          answers: {},
+          submitted_at: toIso(s.submittedAt) ?? new Date().toISOString(),
+          graded_at: toIso(s.markedAt),
+        }
+      : undefined
+
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error grading submission:", error)
+    return { success: false, error: "Failed to grade submission" }
   }
 }
 
@@ -625,104 +534,66 @@ export async function createAssignmentWithQuestions(
     includeRemediation?: boolean
   } = {}
 ) {
-  const supabase = await createClient()
-
-  // Get current user
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in to create an assignment",
-    }
+  const ctx = await teacherCtx()
+  if ("error" in ctx) {
+    return { success: false, error: "You must be logged in to create an assignment" }
   }
 
-  // Verify user is a teacher and owns this class
-  const { data: classData, error: classError } = await supabase
-    .from("classes")
-    .select("teacher_id")
-    .eq("id", classId)
-    .single()
-
-  if (classError || !classData) {
-    return {
-      success: false,
-      error: "Class not found",
-    }
-  }
-
-  if (classData.teacher_id !== user.id) {
-    return {
-      success: false,
-      error: "You don't have permission to create assignments for this class",
-    }
-  }
-
-  // Create the assignment (also store question_ids in content for backward compatibility)
   const feedbackSettings = {
     generate_feedback: options.generateFeedback ?? true,
     include_remediation: options.includeRemediation ?? true,
   }
+  const metadata = {
+    question_ids: questionIds,
+    description: options.description || "",
+    ...feedbackSettings,
+  }
 
-  const { data: newAssignment, error: insertError } = await supabase
-    .from("assignments")
-    .insert({
+  try {
+    const result = await fetchMutation(api.assignments.createAssignmentFull, {
+      classId: classId as Id<"classes">,
+      teacherId: ctx.teacherId,
+      title: title.trim(),
+      mode: (options.mode ?? "online") as "online" | "paper",
+      dueDate: options.dueDate ? new Date(options.dueDate).getTime() : undefined,
+      status: options.status ?? "draft",
+      questionIds: questionIds as Id<"questions">[],
+      metadata,
+    })
+
+    if ("error" in result) {
+      return {
+        success: false,
+        error:
+          result.error === "forbidden"
+            ? "You don't have permission to create assignments for this class"
+            : "Class not found",
+      }
+    }
+
+    revalidatePath("/dashboard")
+
+    const data: Assignment = {
+      id: result.assignmentId,
       class_id: classId,
       title: title.trim(),
-      content: {
-        question_ids: questionIds,
-        description: options.description || "",
-        ...feedbackSettings,
-      },
-      metadata: feedbackSettings,
-      due_date: options.dueDate || null,
-      status: options.status || "draft",
-      mode: options.mode || "online",
-    })
-    .select()
-    .single()
-
-  if (insertError) {
-    console.error("Error creating assignment:", insertError)
-    return {
-      success: false,
-      error: "Failed to create assignment. Please try again.",
+      due_date: options.dueDate ?? null,
+      status: options.status ?? "draft",
+      mode: options.mode ?? "online",
+      assignment_type: "exam",
+      content: metadata,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     }
-  }
-
-  // Insert rows into assignment_questions junction table
-  if (questionIds.length > 0) {
-    const assignmentQuestions = questionIds.map((questionId, index) => ({
-      assignment_id: newAssignment.id,
-      question_id: questionId,
-      order_index: index,
-    }))
-
-    const { error: junctionError } = await supabase
-      .from("assignment_questions")
-      .insert(assignmentQuestions)
-
-    if (junctionError) {
-      console.error("Error creating assignment_questions entries:", junctionError)
-      // Don't fail the whole operation - the assignment was created
-      // The JSONB fallback will work
-    }
-  }
-
-  revalidatePath("/dashboard")
-
-  return {
-    success: true,
-    data: newAssignment as Assignment,
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error creating assignment:", error)
+    return { success: false, error: "Failed to create assignment. Please try again." }
   }
 }
 
 /**
  * Gets detailed assignment information including ordered questions
- * Uses the junction table, falls back to JSONB content.question_ids
  */
 export async function getAssignmentDetails(
   assignmentId: string
@@ -731,187 +602,46 @@ export async function getAssignmentDetails(
   data?: AssignmentDetails
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in",
-    }
-  }
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
 
   try {
-    // Fetch assignment with class info
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        title,
-        class_id,
-        due_date,
-        status,
-        content,
-        classes!inner(
-          id,
-          name,
-          subject,
-          teacher_id
-        )
-      `)
-      .eq("id", assignmentId)
-      .single()
+    const result = await fetchQuery(api.assignments.getAssignmentDetails, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: ctx.teacherId,
+    })
 
-    if (assignmentError || !assignment) {
-      console.error("Error fetching assignment:", assignmentError)
-      return {
-        success: false,
-        error: "Assignment not found",
-      }
+    if ("error" in result) {
+      return { success: false, error: "Assignment not found" }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const classData = assignment.classes as any
-
-    // Try to get questions from junction table first
-    const { data: junctionQuestions, error: junctionError } = await supabase.rpc(
-      "get_assignment_questions",
-      { p_assignment_id: assignmentId }
-    )
-
-    // Debug logging
-    if (junctionError) {
-      console.log("[getAssignmentDetails] RPC error:", junctionError.message)
-    }
-    console.log("[getAssignmentDetails] Junction questions found:", junctionQuestions?.length ?? 0)
-
-    let questions: QuestionWithDetails[] = []
-
-    if (!junctionError && junctionQuestions && junctionQuestions.length > 0) {
-      // Use junction table data from RPC
-      questions = junctionQuestions.map((q: {
-        question_id: string
-        order_index: number
-        marks: number
-        question_latex: string
-        topic: string
-        sub_topic: string
-        difficulty: string
-        question_type: string
-        calculator_allowed: boolean
-        answer_key: { answer: string; explanation: string }
-        custom_question_number: string | null
-        is_ghost: boolean
-      }) => ({
-        question_id: q.question_id,
-        order_index: q.order_index,
-        marks: q.marks,
-        question_latex: q.question_latex,
-        topic: q.topic,
-        sub_topic: q.sub_topic,
-        difficulty: q.difficulty,
-        question_type: q.question_type,
-        calculator_allowed: q.calculator_allowed,
-        answer_key: q.answer_key,
-      }))
-    } else {
-      // Fallback 1: Try direct query to junction table
-      console.log("[getAssignmentDetails] Trying direct junction table query...")
-      const { data: directJunction, error: directError } = await supabase
-        .from("assignment_questions")
-        .select(`
-          question_id,
-          order_index,
-          questions!inner(
-            id,
-            marks,
-            question_latex,
-            topic,
-            sub_topic,
-            difficulty,
-            question_type,
-            calculator_allowed,
-            answer_key
-          )
-        `)
-        .eq("assignment_id", assignmentId)
-        .order("order_index", { ascending: true })
-
-      if (!directError && directJunction && directJunction.length > 0) {
-        console.log("[getAssignmentDetails] Direct junction query found:", directJunction.length)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        questions = directJunction.map((aq: any) => {
-          const q = aq.questions
-          return {
-            question_id: aq.question_id,
-            order_index: aq.order_index,
-            marks: q.marks,
-            question_latex: q.question_latex,
-            topic: q.topic,
-            sub_topic: q.sub_topic,
-            difficulty: q.difficulty,
-            question_type: q.question_type,
-            calculator_allowed: q.calculator_allowed,
-            answer_key: q.answer_key,
-          }
-        })
-      } else {
-        // Fallback 2: Use JSONB content.question_ids
-        if (directError) {
-          console.log("[getAssignmentDetails] Direct junction error:", directError.message)
-        }
-        const questionIds = (assignment.content as { question_ids?: string[] })?.question_ids || []
-        console.log("[getAssignmentDetails] Fallback to content.question_ids:", questionIds.length)
-
-        if (questionIds.length > 0) {
-          const { data: questionsData, error: questionsError } = await supabase
-            .from("questions")
-            .select("id, marks, question_latex, topic, sub_topic, difficulty, question_type, calculator_allowed, answer_key")
-            .in("id", questionIds)
-
-          console.log("[getAssignmentDetails] Questions fetch result:", questionsData?.length ?? 0, "error:", questionsError?.message)
-
-          if (!questionsError && questionsData) {
-            // Maintain order from question_ids array
-            questions = questionIds
-              .map((id, index) => {
-                const q = questionsData.find((qd) => qd.id === id)
-                if (!q) return null
-                return {
-                  question_id: q.id,
-                  order_index: index,
-                  marks: q.marks,
-                  question_latex: q.question_latex,
-                  topic: q.topic,
-                  sub_topic: q.sub_topic,
-                  difficulty: q.difficulty,
-                  question_type: q.question_type,
-                  calculator_allowed: q.calculator_allowed,
-                  answer_key: q.answer_key as { answer: string; explanation: string },
-                }
-              })
-              .filter((q): q is QuestionWithDetails => q !== null)
-          }
-        }
-      }
-    }
+    const questions: QuestionWithDetails[] = result.questions.map((q) => ({
+      question_id: q.questionId,
+      order_index: q.orderIndex,
+      marks: q.marks,
+      question_latex: q.questionLatex,
+      topic: q.topic,
+      sub_topic: q.subTopic,
+      difficulty: q.difficulty,
+      question_type: q.questionType,
+      calculator_allowed: q.calculatorAllowed,
+      answer_key: q.answerKey as QuestionWithDetails["answer_key"],
+      image_url: q.imageUrl ?? null,
+      content_type: q.contentType ?? "generated_text",
+    }))
 
     const totalMarks = questions.reduce((sum, q) => sum + q.marks, 0)
 
     return {
       success: true,
       data: {
-        id: assignment.id,
-        title: assignment.title,
-        class_id: assignment.class_id,
-        class_name: classData.name,
-        subject: classData.subject,
-        due_date: assignment.due_date,
-        status: assignment.status as AssignmentStatus,
+        id: result.id,
+        title: result.title,
+        class_id: result.classId,
+        class_name: result.className,
+        subject: result.subject,
+        due_date: toIso(result.dueDate),
+        status: (result.status === "published" ? "published" : "draft") as AssignmentStatus,
         total_marks: totalMarks,
         question_count: questions.length,
         questions,
@@ -919,10 +649,7 @@ export async function getAssignmentDetails(
     }
   } catch (error) {
     console.error("Error in getAssignmentDetails:", error)
-    return {
-      success: false,
-      error: "An unexpected error occurred",
-    }
+    return { success: false, error: "An unexpected error occurred" }
   }
 }
 
@@ -936,97 +663,24 @@ export async function updateAssignmentQuestions(
   success: boolean
   error?: string
 }> {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      success: false,
-      error: "You must be logged in",
-    }
-  }
+  const ctx = await teacherCtx()
+  if ("error" in ctx) return { success: false, error: ctx.error }
 
   try {
-    // Verify assignment exists and user has permission
-    const { data: assignment, error: assignmentError } = await supabase
-      .from("assignments")
-      .select(`
-        id,
-        content,
-        classes!inner(teacher_id)
-      `)
-      .eq("id", assignmentId)
-      .single()
+    const result = await fetchMutation(api.assignments.updateAssignmentQuestions, {
+      assignmentId: assignmentId as Id<"assignments">,
+      teacherId: ctx.teacherId,
+      questionIds: questionIds as Id<"questions">[],
+    })
 
-    if (assignmentError || !assignment) {
+    if ("error" in result) {
       return {
         success: false,
-        error: "Assignment not found",
+        error:
+          result.error === "forbidden"
+            ? "You don't have permission to update this assignment"
+            : "Assignment not found",
       }
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if ((assignment.classes as any).teacher_id !== user.id) {
-      return {
-        success: false,
-        error: "You don't have permission to update this assignment",
-      }
-    }
-
-    // Delete existing junction table entries
-    const { error: deleteError } = await supabase
-      .from("assignment_questions")
-      .delete()
-      .eq("assignment_id", assignmentId)
-
-    if (deleteError) {
-      console.error("Error deleting old assignment_questions:", deleteError)
-      return {
-        success: false,
-        error: "Failed to update questions",
-      }
-    }
-
-    // Insert new junction table entries
-    if (questionIds.length > 0) {
-      const assignmentQuestions = questionIds.map((questionId, index) => ({
-        assignment_id: assignmentId,
-        question_id: questionId,
-        order_index: index,
-      }))
-
-      const { error: insertError } = await supabase
-        .from("assignment_questions")
-        .insert(assignmentQuestions)
-
-      if (insertError) {
-        console.error("Error inserting new assignment_questions:", insertError)
-        return {
-          success: false,
-          error: "Failed to update questions",
-        }
-      }
-    }
-
-    // Also update JSONB for backward compatibility
-    const existingContent = (assignment.content as Record<string, unknown>) || {}
-    const { error: updateError } = await supabase
-      .from("assignments")
-      .update({
-        content: {
-          ...existingContent,
-          question_ids: questionIds,
-        },
-      })
-      .eq("id", assignmentId)
-
-    if (updateError) {
-      console.error("Error updating assignment content:", updateError)
-      // Non-fatal - junction table was updated
     }
 
     revalidatePath("/dashboard")
@@ -1034,9 +688,6 @@ export async function updateAssignmentQuestions(
     return { success: true }
   } catch (error) {
     console.error("Error in updateAssignmentQuestions:", error)
-    return {
-      success: false,
-      error: "An unexpected error occurred",
-    }
+    return { success: false, error: "An unexpected error occurred" }
   }
 }
