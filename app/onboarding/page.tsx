@@ -1,16 +1,15 @@
 import { OnboardingFlow } from "@/components/onboarding-flow"
-import { AuthLayout } from "@/components/auth-layout"
-import { getCurrentProfile } from "@/lib/auth/helpers"
+import { getOnboardingState } from "@/app/actions/onboarding"
 
 export default async function OnboardingPage() {
-  const profile = await getCurrentProfile()
+  const state = await getOnboardingState()
 
   return (
-    <AuthLayout>
-      <OnboardingFlow
-        initialRole={profile?.role ?? null}
-        roleSource={profile?.role_source ?? 'pending'}
-      />
-    </AuthLayout>
+    <OnboardingFlow
+      initialRole={state.initialRole}
+      roleSource={state.roleSource}
+      prefillEmail={state.email}
+      prefillName={state.fullName}
+    />
   )
 }
