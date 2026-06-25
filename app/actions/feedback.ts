@@ -476,6 +476,8 @@ export interface StudentFeedbackData {
   overallStatus: RAGStatus
   topicBreakdown: SubTopicBreakdown[]
   revisionPack: RevisionQuestionData[]
+  /** Harder stretch questions for sub-topics the student is strong in. */
+  extensionPack: RevisionQuestionData[]
   aiNarrative?: string
   generatedAt: string
 }
@@ -632,6 +634,41 @@ export async function generateStudentFeedback(submissionId: string): Promise<{
     }
 
     // =========================================================
+    // STEP C2: Extension Generator — stretch work for strong (green) areas
+    // =========================================================
+    const extensionPack: RevisionQuestionData[] = []
+    const strongSubTopics = topicBreakdown.filter((t) => t.status === "green")
+    const usedExtIds = new Set<string>([
+      ...assignmentQuestionIds.map((id) => id as string),
+      ...revisionPack.map((r) => r.id),
+    ])
+    for (const strong of strongSubTopics) {
+      if (extensionPack.length >= 3) break
+      const exts = await fetchQuery(api.feedback.getExtensionForSubTopic, {
+        topic: strong.topic,
+        subTopic: strong.subTopic,
+        excludeIds: [...usedExtIds].map((s) => s as Id<"questions">),
+        limit: 1,
+      })
+      for (const q of exts) {
+        if (usedExtIds.has(q.id)) continue
+        usedExtIds.add(q.id)
+        extensionPack.push({
+          id: q.id,
+          questionLatex: q.questionLatex || "",
+          imageUrl: q.imageUrl,
+          contentType: (q.contentType as RevisionQuestionData["contentType"]) || "generated_text",
+          marks: q.marks || 1,
+          topic: q.topic,
+          subTopic: q.subTopic,
+          difficulty: q.difficulty,
+          answerKey: q.answerKey as { answer?: string; explanation?: string } | null,
+          targetedSubTopic: strong.subTopic,
+        })
+      }
+    }
+
+    // =========================================================
     // STEP D: Return Payload
     // =========================================================
 
@@ -697,6 +734,7 @@ Rules: encouraging tone, mention specific topics, no markdown, suitable for shar
         overallStatus: calculateRAGStatusHelper(percentage),
         topicBreakdown,
         revisionPack,
+        extensionPack,
         aiNarrative,
         generatedAt: new Date().toISOString(),
       },
