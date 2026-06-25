@@ -26,7 +26,9 @@
     "booklets:capped": "tsx scripts/generate-booklets.ts --skip-ocr-fetch --concurrency=8 --max-per-topic=5",
     "booklets:1": "tsx scripts/generate-booklets.ts --board=1 --skip-ocr-fetch --skip-madas-fetch --concurrency=8",
     "booklets:2": "tsx scripts/generate-booklets.ts --board=2 --skip-ocr-fetch --concurrency=8",
-    "booklets:3": "tsx scripts/generate-booklets.ts --board=3 --skip-ocr-fetch --concurrency=8"
+    "booklets:3": "tsx scripts/generate-booklets.ts --board=3 --skip-ocr-fetch --concurrency=8",
+    "purge:unverified": "tsx scripts/purge-unverified.ts",
+    "purge:unverified:confirm": "tsx scripts/purge-unverified.ts --confirm"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.4.3",

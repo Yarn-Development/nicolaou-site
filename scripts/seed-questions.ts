@@ -409,44 +409,18 @@ async function generateQuestion(params: {
 }): Promise<GeneratedQuestion | null> {
   const { level, topic, subTopic, questionType, marks, calculatorAllowed } = params
 
-  const systemPrompt = `You are an expert UK mathematics exam question writer. Create a ${marks}-mark ${level} question.`
-  
-  const userPrompt = `
-**Curriculum Context:**
-- Level: ${level}
-- Topic: ${topic}
-- Sub-Topic: ${subTopic}
-
-**Question Requirements:**
-- Type: ${questionType}
-- Marks: ${marks}
-- Calculator: ${calculatorAllowed ? 'Calculator Allowed' : 'Non-Calculator'}
-
-**Instructions:**
-${questionType === 'Fluency' ? '- Focus on procedural skills.' : ''}
-${questionType === 'Problem Solving' ? '- Include multi-step problem.' : ''}
-${questionType === 'Reasoning/Proof' ? '- Require mathematical justification.' : ''}
-${level.includes('A-Level') || level === 'GCSE Higher' ? '- Use advanced LaTeX notation.' : ''}
-
-**Output Format (JSON):**
-{
-  "question_latex": "Question text with LaTeX ($...$)",
-  "answer": "Final answer",
-  "explanation": "Step-by-step solution",
-  "marks": ${marks}
-}
-`.trim()
-
   try {
     const response = await fetch(`${AI_API_ENDPOINT}/api/ai/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        type: 'text_gen', // Ensure your API route handles this
-        system_prompt: systemPrompt,
-        user_prompt: userPrompt,
-        // Pass context for logging if needed
-        level, topic, sub_topic: subTopic
+        type: 'text_gen',
+        level,
+        topic_name: topic,
+        sub_topic: subTopic,
+        question_type: questionType,
+        marks,
+        calculator_allowed: calculatorAllowed,
       })
     })
 
@@ -585,7 +559,7 @@ async function seedQuestions(options: {
 }) {
   console.log('\n🌱 Starting Smart Seeding (Hybrid Schema)...\n')
   
-  let state = loadState()
+  const state = loadState()
   const remainingBudget = options.limit - state.generatedCount
 
   if (remainingBudget <= 0) {

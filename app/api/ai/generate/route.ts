@@ -1,21 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { sanitize } from '@/lib/question-sanitizer'
-import { needsDiagram } from '@/lib/diagram-utils'
-import { renderDiagram, getTemplateForSubtopic, DIAGRAM_TEMPLATE_SPEC } from '@/lib/diagram-templates'
-import { validateQuestion } from '@/lib/question-validator'
+import {
+  needsDiagram,
+  sanitizeSvg,
+  buildDiagramSystemPrompt,
+  uploadSvgToStorage,
+} from '@/lib/diagram-utils'
+import { repairLatex } from '@/lib/latex-utils'
+
+/**
+ * Unified AI Generation API Route
+ *
+ * Supports three modes:
+ * 1. Text Generation (GPT-OSS-120B, free) — topics that don't need diagrams
+ * 2. Diagram Generation (Claude Haiku) — topics that benefit from visual diagrams,
+ *    generates question + SVG in a single call so values always stay in sync
+ * 3. Image OCR (Qwen 2.5 VL) — extract LaTeX from uploaded images
+ */
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
-// PRD §7.1: claude-sonnet-4-6 is the specified model for question generation
-const GENERATION_MODEL   = 'anthropic/claude-sonnet-4-6'
-const MAX_ATTEMPTS       = 3
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 
 if (!OPENROUTER_API_KEY) {
   console.error('⚠️  OPENROUTER_API_KEY is not set in environment variables')
 }
 
-// ─────────────────────────────────────────────
+// =====================================================
 // Types
-// ─────────────────────────────────────────────
+// =====================================================
 
 interface TextGenRequest {
   type: 'text_gen'
@@ -24,14 +35,16 @@ interface TextGenRequest {
   tier?: 'Foundation' | 'Higher'
   // Curriculum-aware fields
   level?: string
-  topic_name?: string  // Broader topic area (e.g. "Algebra") for better prompt context
+  /** Parent topic name (e.g. "Geometry & Measures") used for diagram detection */
+  topic_name?: string
   sub_topic?: string
   question_type?: 'Fluency' | 'Problem Solving' | 'Reasoning/Proof'
   marks?: number
   calculator_allowed?: boolean
   context?: string
-  // PRD §6: Multi-board support
-  exam_board?: 'Edexcel' | 'AQA' | 'OCR' | 'MEI' | 'WJEC' | 'CIE' | 'IB'
+  // Diagram control — if omitted, auto-detected via needsDiagram()
+  force_diagram?: boolean
+  force_no_diagram?: boolean
 }
 
 interface ImageOCRRequest {
@@ -41,345 +54,39 @@ interface ImageOCRRequest {
 
 type AIRequest = TextGenRequest | ImageOCRRequest
 
-/** Shape of the JSON the generation model must return */
-interface GeneratedQuestion {
+interface TextGenResponse {
   question_latex: string
-  mark_scheme_latex: string
   answer: string
-  command_word: string
-  verification_expression: string | null
+  explanation: string
   marks?: number
-  // Present only when diagram is required
-  diagram?: {
-    type: string
-    params: Record<string, unknown>
-  }
 }
 
-// ─────────────────────────────────────────────
-// Pre-parse LaTeX backslash repair
-// ─────────────────────────────────────────────
-
-const LATEX_COMMANDS = [
-  'frac', 'sqrt', 'times', 'div', 'theta', 'alpha', 'beta', 'gamma',
-  'delta', 'epsilon', 'zeta', 'eta', 'iota', 'kappa', 'lambda', 'mu',
-  'nu', 'xi', 'pi', 'rho', 'sigma', 'tau', 'upsilon', 'phi', 'chi',
-  'psi', 'omega', 'Gamma', 'Delta', 'Theta', 'Lambda', 'Xi', 'Pi',
-  'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega',
-  'textbf', 'text', 'mathrm', 'mathit', 'mathbf', 'mathbb',
-  'left', 'right', 'cdot', 'ldots', 'cdots', 'pm', 'mp',
-  'leq', 'geq', 'neq', 'approx', 'equiv', 'sim',
-  'infty', 'partial', 'nabla', 'forall', 'exists',
-  'sum', 'prod', 'int', 'oint',
-  'hat', 'vec', 'bar', 'tilde', 'dot', 'ddot',
-  'overline', 'underline', 'overbrace', 'underbrace',
-  'begin', 'end', 'quad', 'qquad', 'hspace', 'vspace',
-  'sin', 'cos', 'tan', 'ln', 'log', 'lim', 'max', 'min',
-]
-
-function repairLatexBackslashes(raw: string): string {
-  const pattern = new RegExp(
-    `(?<!\\\\)\\\\(${LATEX_COMMANDS.join('|')})(?=[^a-zA-Z]|$)`,
-    'g'
-  )
-  return raw.replace(pattern, '\\\\$1')
+interface DiagramGenResponse {
+  question_latex: string
+  svg_markup: string
+  answer: string
+  explanation: string
+  marks: number
+  diagram_description?: string
 }
 
-// ─────────────────────────────────────────────
-// LaTeX structural validation
-// ─────────────────────────────────────────────
-
-function detectLatexIssues(text: string): string[] {
-  const issues: string[] = []
-
-  const withoutDisplay = text.replace(/\$\$[\s\S]*?\$\$/g, '')
-  const singleCount = (withoutDisplay.match(/(?<!\\)\$/g) || []).length
-  if (singleCount % 2 !== 0) {
-    issues.push(`Unbalanced $ signs (${singleCount} found)`)
-  }
-
-  const displayCount = (text.match(/\$\$/g) || []).length
-  if (displayCount % 2 !== 0) {
-    issues.push(`Unbalanced $$ delimiters (${displayCount} found)`)
-  }
-
-  const mathRegions = [
-    ...(text.match(/\$\$[\s\S]*?\$\$/g) || []),
-    ...(text.match(/\$[^$]+?\$/g) || []),
-  ]
-  for (const region of mathRegions) {
-    let depth = 0
-    for (const ch of region) {
-      if (ch === '{') depth++
-      if (ch === '}') depth--
-      if (depth < 0) break
-    }
-    if (depth !== 0) {
-      issues.push('Unbalanced braces in math region')
-      break
-    }
-  }
-
-  if (/\\\[|\\\]/.test(text)) issues.push('Unsanitized \\[ \\] block math delimiters')
-  if (/\\\(|\\\)/.test(text)) issues.push('Unsanitized \\( \\) inline math delimiters')
-
-  return issues
+interface ImageOCRResponse {
+  question_latex: string
+  suggested_topic: string
+  suggested_difficulty: 'Foundation' | 'Higher'
 }
 
-// ─────────────────────────────────────────────
-// OpenRouter API call
-// ─────────────────────────────────────────────
-
-async function callOpenRouter(opts: {
-  model: string
-  messages: Array<{ role: string; content: string }>
-  temperature: number
-  max_tokens: number
-}): Promise<string> {
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
-      'X-Title': 'Nicolaou Maths - Question Generator',
-    },
-    body: JSON.stringify(opts),
-  })
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}))
-    throw new Error(`OpenRouter API error ${response.status}: ${JSON.stringify(errorData)}`)
-  }
-
-  const data = await response.json()
-  const content = data.choices?.[0]?.message?.content
-  if (!content) throw new Error('No content in OpenRouter response')
-  return content as string
-}
-
-// ─────────────────────────────────────────────
-// Prompt builders
-// ─────────────────────────────────────────────
-
-const BOARD_STYLE_NOTES: Record<string, string> = {
-  Edexcel: 'Pearson Edexcel house style: command words (Show that, Hence, Find, Prove, Calculate, Work out, Write down), M/A/B mark notation, British English.',
-  AQA: 'AQA house style: command words (Show, Calculate, Find, Determine, Explain, Prove, Sketch). Mark notation similar to Edexcel. Avoid "Hence" as a primary command word.',
-  OCR: 'OCR house style: may use "Hence or otherwise", "State", "Justify". Notation is clean and unambiguous. Mark scheme often specifies method explicitly.',
-  MEI: 'MEI house style: proof-heavy, clear mathematical argument expected. Often includes "show that" and "hence deduce".',
-  WJEC: 'WJEC house style: plain English instructions, may include Welsh context. Command words similar to Edexcel.',
-  CIE: 'Cambridge (CIE) IGCSE/A Level house style: "Find", "Show", "Prove", "Hence". International context — avoid UK-specific slang.',
-  IB: 'IB Maths house style: very precise mathematical language, "Show that", "Hence find", "Prove". Both exact and decimal answers often required.',
-}
-
-function buildSystemPrompt(hasDiagram: boolean, examBoard?: string): string {
-  const boardNote = examBoard ? (BOARD_STYLE_NOTES[examBoard] ?? '') : BOARD_STYLE_NOTES['Edexcel']
-  const boardName = examBoard ?? 'Edexcel'
-
-  const base = `You are an expert UK mathematics exam question writer. You write questions indistinguishable from authentic ${boardName} past papers.
-
-PERSONA: ${boardName} question author with 20+ years of experience. ${boardNote}
-
-STRICT OUTPUT RULES — ALL MUST BE FOLLOWED:
-- Return ONLY a raw JSON object — no markdown, no code fences, no preamble, no explanation
-- question_latex: use $...$ for inline math, $$...$$ for display equations only
-- NEVER use \\[ \\] or \\( \\) — ONLY use $ and $$
-- NEVER use **bold** Markdown — use \\textbf{} if bold is needed
-- NEVER escape backslashes in LaTeX commands — write \\frac not \\\\frac
-- All \\frac must have two brace arguments: \\frac{numerator}{denominator}
-- All \\sqrt must have a brace argument: \\sqrt{expression}
-- The question text must read exactly as it would appear printed on a ${boardName} exam paper
-- No "Question:", no preamble, no trailing "[3 marks]" suffix in question_latex
-- mark_scheme_latex: each mark on its own line, e.g. "M1: state the formula\\nA1: correct substitution\\nA1: 12 (answer)"
-- command_word: single lowercase word/phrase: find | show | calculate | prove | hence | work out | write down | sketch | state | determine | explain | justify
-- verification_expression: for numeric answers write a verifiable expression (e.g. "sqrt(3^2 + 4^2) = 5"); for proofs/explanations use null
-
-QUALITY STANDARDS:
-- Mathematical content must be 100% correct
-- Mark scheme must lead precisely to the stated answer with no gaps or errors
-- The question must be self-contained — a student can solve it without additional context
-- Difficulty and phrasing must match the target level authentically`
-
-  if (!hasDiagram) return base
-
-  return `${base}
-
-${DIAGRAM_TEMPLATE_SPEC}
-
-When the question requires a diagram, include the "diagram" field with the appropriate template and params.
-If no standard template fits, omit the "diagram" field and the question will fall back to free-form SVG generation.`
-}
-
-function buildUserPrompt(opts: {
-  request: TextGenRequest
-  hasDiagram: boolean
-  templateType: string | null
-  previousFailureReason: string | null
-  attempt: number
-}): string {
-  const { request, hasDiagram, templateType, previousFailureReason, attempt } = opts
-  const {
-    level,
-    topic_name,
-    sub_topic,
-    question_type = 'Fluency',
-    marks = 3,
-    calculator_allowed = true,
-    context,
-    exam_board = 'Edexcel',
-  } = request
-
-  const retryNote = previousFailureReason && attempt > 1
-    ? `\n⚠️ PREVIOUS ATTEMPT FAILED — fix this issue: ${previousFailureReason}\n`
-    : ''
-
-  const diagramNote = hasDiagram
-    ? `\nDIAGRAM REQUIRED: This sub-topic needs a diagram. Use the "${templateType ?? 'most appropriate'}" template.`
-    : ''
-
-  const typeGuidance = {
-    'Fluency': '- Test direct application of a standard procedure\n- 1–2 clear steps, no extended reasoning',
-    'Problem Solving': '- Require multi-step reasoning in an unfamiliar or applied context\n- Student must select appropriate methods',
-    'Reasoning/Proof': '- Use "show that", "prove", or "explain why"\n- Test understanding of mathematical structure, not just calculation',
-  }[question_type] ?? ''
-
-  const markGuidance = marks === 1
-    ? '- Single step or recall fact'
-    : marks === 2
-    ? '- Method mark + accuracy mark, or two independent facts'
-    : marks <= 4
-    ? '- Multi-step: method, substitution, and accuracy marks'
-    : '- Extended response: multiple methods, communication marks or proof'
-
-  const calcGuidance = calculator_allowed
-    ? '- Decimal/complex calculations acceptable'
-    : '- Non-calculator: use integers or simple fractions — no awkward surds or complex decimals'
-
-  const outputSchema = hasDiagram
-    ? `{
-  "question_latex": "...",
-  "mark_scheme_latex": "M1: ...\\nA1: ...\\nA1: ...",
-  "answer": "...",
-  "command_word": "...",
-  "verification_expression": "..." or null,
-  "marks": ${marks},
-  "diagram": {
-    "type": "${templateType ?? '<template_name>'}",
-    "params": { ... }
-  }
-}`
-    : `{
-  "question_latex": "...",
-  "mark_scheme_latex": "M1: ...\\nA1: ...\\nA1: ...",
-  "answer": "...",
-  "command_word": "...",
-  "verification_expression": "..." or null,
-  "marks": ${marks}
-}`
-
-  return `${retryNote}Create a ${level} mathematics exam question for ${exam_board}:
-
-SPECIFICATION:
-- Exam Board: ${exam_board}
-- Level: ${level}${topic_name ? `\n- Topic area: ${topic_name}` : ''}
-- Sub-topic: ${sub_topic}
-- Question type: ${question_type}
-- Marks: ${marks}
-- Calculator: ${calculator_allowed ? 'Allowed' : 'NOT allowed (non-calculator)'}${context ? `\n- Additional context: ${context}` : ''}${diagramNote}
-
-QUESTION TYPE GUIDANCE:
-${typeGuidance}
-
-MARK ALLOCATION GUIDANCE:
-${markGuidance}
-
-CALCULATOR GUIDANCE:
-${calcGuidance}
-
-LANGUAGE & STYLE:
-- Write exactly as it would appear on a printed ${exam_board} exam paper
-- Start with the scenario/context (if any), then the mathematical instruction
-- British English (metres, favour, recognise, practise)
-- State required precision (e.g. "Give your answer correct to 2 decimal places") where appropriate
-- Do NOT include "(${marks} marks)" or any mark annotation in the question text
-
-OUTPUT — return ONLY this JSON object, no other text:
-${outputSchema}`
-}
-
-function buildLegacyPrompt(request: TextGenRequest): { system: string; user: string } {
-  const { topic, tier } = request
-  return {
-    system: `You are a GCSE mathematics exam question writer producing questions in Pearson Edexcel style.
-Return ONLY a raw JSON object — no markdown, no code fences, no preamble.
-Use $...$ for inline math and $$...$$ for display math. Never use \\[ \\] or \\( \\).
-Never use **bold** Markdown — use \\textbf{} if bold is needed.
-All \\frac must have two brace arguments. All \\sqrt must have a brace argument.`,
-    user: `Create a unique GCSE Maths question on the topic of ${topic} for ${tier} tier.
-
-Requirements:
-- Appropriate difficulty for ${tier} tier GCSE
-- Written exactly as it would appear on a printed Pearson Edexcel exam paper
-- Begin with the scenario/context, then the instruction
-- Do NOT include question numbers, mark allocations, or metadata in question_latex
-
-Return ONLY this JSON object:
-{
-  "question_latex": "...",
-  "mark_scheme_latex": "M1: ...\\nA1: ...",
-  "answer": "...",
-  "command_word": "find",
-  "verification_expression": null,
-  "marks": 3
-}`,
-  }
-}
-
-// ─────────────────────────────────────────────
-// Parse and sanitize model output
-// ─────────────────────────────────────────────
-
-function parseGeneratedQuestion(raw: string): GeneratedQuestion {
-  const cleaned = repairLatexBackslashes(
-    raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-  )
-
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(cleaned)
-  } catch {
-    throw new Error(`JSON parse failed. Raw content started: ${raw.slice(0, 120)}`)
-  }
-
-  if (!parsed.question_latex || typeof parsed.question_latex !== 'string') {
-    throw new Error('Missing or invalid "question_latex" field')
-  }
-  if (!parsed.answer || typeof parsed.answer !== 'string') {
-    throw new Error('Missing or invalid "answer" field')
-  }
-  if (!parsed.mark_scheme_latex || typeof parsed.mark_scheme_latex !== 'string') {
-    throw new Error('Missing "mark_scheme_latex" — the model must include a mark scheme')
-  }
-
-  return {
-    question_latex:          sanitize(parsed.question_latex as string),
-    mark_scheme_latex:       sanitize(parsed.mark_scheme_latex as string),
-    answer:                  sanitize(parsed.answer as string),
-    command_word:            (parsed.command_word as string | undefined) ?? 'find',
-    verification_expression: (parsed.verification_expression as string | null | undefined) ?? null,
-    marks:                   typeof parsed.marks === 'number' ? parsed.marks : undefined,
-    diagram:                 parsed.diagram as GeneratedQuestion['diagram'],
-  }
-}
-
-// ─────────────────────────────────────────────
-// Main route
-// ─────────────────────────────────────────────
+// =====================================================
+// Main handler
+// =====================================================
 
 export async function POST(request: NextRequest) {
   try {
     if (!OPENROUTER_API_KEY) {
-      return NextResponse.json({ error: 'OpenRouter API key not configured' }, { status: 500 })
+      return NextResponse.json(
+        { error: 'OpenRouter API key not configured' },
+        { status: 500 }
+      )
     }
 
     const body = await request.json() as AIRequest
@@ -389,205 +96,535 @@ export async function POST(request: NextRequest) {
     } else if (body.type === 'image_ocr') {
       return await handleImageOCR(body)
     } else {
-      return NextResponse.json({ error: 'Invalid request type. Must be "text_gen" or "image_ocr"' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Invalid request type. Must be "text_gen" or "image_ocr"' },
+        { status: 400 }
+      )
     }
   } catch (error) {
     console.error('AI API Error:', error)
     return NextResponse.json(
-      { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
+      {
+        error: 'Internal server error',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 }
     )
   }
 }
 
-// ─────────────────────────────────────────────
-// Text generation handler
-// ─────────────────────────────────────────────
+// =====================================================
+// Mode A: Text (or diagram) generation
+// =====================================================
 
 async function handleTextGeneration(request: TextGenRequest): Promise<NextResponse> {
   const isCurriculumAware = Boolean(request.level && request.sub_topic)
 
-  // Legacy path — fast, no retries or validation (backward compat)
   if (!isCurriculumAware) {
-    if (!request.topic || !request.tier) {
-      return NextResponse.json(
-        { error: 'Either (level, sub_topic) or (topic, tier) is required' },
-        { status: 400 }
-      )
-    }
-    return handleLegacyGeneration(request)
+    return await handleLegacyTextGeneration(request)
   }
 
-  // Determine diagram requirements
-  const subTopic  = request.sub_topic!
-  const level     = request.level!
-  const examBoard = request.exam_board
-  const hasDiagram    = needsDiagram(level, subTopic)
-  const templateType  = hasDiagram ? getTemplateForSubtopic(subTopic) : null
-  const systemPrompt  = buildSystemPrompt(hasDiagram, examBoard)
+  const {
+    level,
+    sub_topic,
+    question_type = 'Fluency',
+    marks = 3,
+    calculator_allowed = true,
+    context,
+  } = request
 
-  let lastFailureReason: string | null = null
+  // Resolve topic name from the sub_topic string for diagram detection.
+  // The caller passes sub_topic as the name string (e.g., "Circle Theorems"), not an ID.
+  // We also need the parent topic name. The level and sub_topic together identify the topic.
+  // We derive the parent topic name by checking if the sub_topic or level implies geometry etc.
+  // For now, we pass the sub_topic itself to needsDiagram — the function also checks
+  // the sub-topic name directly in SELECTIVE_DIAGRAM_SUBTOPICS.
+  // For ALWAYS_DIAGRAM_TOPICS we need the topic name — callers using the new curriculum-aware
+  // path should pass `topic_name` as an additional field if available; otherwise we default
+  // to sub_topic based detection only for selective topics, and check level-based geometry heuristic.
+  const topicName = request.topic_name || ''
+  const subTopicName = sub_topic || ''
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      const userPrompt = buildUserPrompt({
-        request,
-        hasDiagram,
-        templateType,
-        previousFailureReason: lastFailureReason,
-        attempt,
-      })
-
-      // ── Step 1: Generate ──────────────────────────────────────
-      const rawContent = await callOpenRouter({
-        model: GENERATION_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userPrompt },
-        ],
-        temperature: 0.8,
-        max_tokens: 2000,
-      })
-
-      // ── Step 2: Parse + sanitize ──────────────────────────────
-      let parsed: GeneratedQuestion
-      try {
-        parsed = parseGeneratedQuestion(rawContent)
-      } catch (err) {
-        lastFailureReason = err instanceof Error ? err.message : 'JSON parse or schema error'
-        console.warn(`[generate] Attempt ${attempt}/${MAX_ATTEMPTS} — parse failed: ${lastFailureReason}`)
-        continue
-      }
-
-      // ── Step 3: LaTeX integrity ───────────────────────────────
-      const latexIssues = detectLatexIssues(parsed.question_latex)
-      if (latexIssues.length > 0) {
-        lastFailureReason = `LaTeX error: ${latexIssues.join('; ')}`
-        console.warn(`[generate] Attempt ${attempt}/${MAX_ATTEMPTS} — LaTeX invalid: ${lastFailureReason}`)
-        continue
-      }
-
-      // ── Step 4: Diagram template rendering ───────────────────
-      let svgMarkup: string | undefined
-      if (hasDiagram && parsed.diagram?.type) {
-        try {
-          svgMarkup = renderDiagram(parsed.diagram.type, parsed.diagram.params ?? {})
-        } catch (err) {
-          lastFailureReason = `Diagram error: ${err instanceof Error ? err.message : 'invalid template params'}. Available types: right_triangle, general_triangle, quadratic_curve, straight_line, circle, sector, histogram, box_plot, cumulative_frequency, venn_2, tree_diagram, number_line, vector_parallelogram, scatter_plot, bar_chart`
-          console.warn(`[generate] Attempt ${attempt}/${MAX_ATTEMPTS} — diagram failed: ${lastFailureReason}`)
-          continue
-        }
-      }
-
-      // ── Step 5: LLM answer validation ────────────────────────
-      const validation = await validateQuestion({
-        questionLatex:          parsed.question_latex,
-        markScheme:             parsed.mark_scheme_latex,
-        answer:                 parsed.answer,
-        commandWord:            parsed.command_word,
-        verificationExpression: parsed.verification_expression,
-        apiKey:                 OPENROUTER_API_KEY!,
-      })
-
-      if (!validation.valid) {
-        lastFailureReason = `Answer validation failed: ${validation.issue}`
-        console.warn(`[generate] Attempt ${attempt}/${MAX_ATTEMPTS} — validation failed: ${validation.issue}`)
-        continue
-      }
-
-      // ── All checks passed ─────────────────────────────────────
-      return NextResponse.json({
-        success: true,
-        data: {
-          question_latex:          parsed.question_latex,
-          mark_scheme_latex:       parsed.mark_scheme_latex,
-          answer:                  parsed.answer,
-          command_word:            parsed.command_word,
-          verification_expression: parsed.verification_expression,
-          marks:                   parsed.marks ?? request.marks,
-          ...(svgMarkup ? { svg_markup: svgMarkup } : {}),
-        },
-        model:            GENERATION_MODEL,
-        curriculum_aware: true,
-        attempts:         attempt,
-      })
-
-    } catch (err) {
-      // Network or unexpected error — retry with the error message
-      lastFailureReason = err instanceof Error ? err.message : 'Unknown error'
-      console.warn(`[generate] Attempt ${attempt}/${MAX_ATTEMPTS} — unexpected error: ${lastFailureReason}`)
-    }
+  // Determine whether to generate a diagram
+  let requiresDiagram: boolean
+  if (request.force_diagram === true) {
+    requiresDiagram = true
+  } else if (request.force_no_diagram === true) {
+    requiresDiagram = false
+  } else {
+    requiresDiagram = needsDiagram(topicName, subTopicName)
   }
 
-  // All attempts exhausted
-  return NextResponse.json(
-    {
-      error:      'Failed to generate a valid question after 3 attempts',
-      last_issue: lastFailureReason,
-    },
-    { status: 422 }
-  )
+  if (requiresDiagram) {
+    return await handleDiagramGeneration({
+      level: level!,
+      sub_topic: subTopicName,
+      topic_name: topicName,
+      question_type,
+      marks,
+      calculator_allowed,
+      context,
+    })
+  }
+
+  // ---- Text-only path (free model) ----
+  const systemPrompt = `You are an expert Pearson Edexcel mathematics exam question writer with mastery of:
+- UK National Curriculum (KS3, GCSE Foundation, GCSE Higher)
+- A-Level Mathematics specifications (Pure, Statistics, Mechanics)
+- Edexcel mark scheme conventions (M1, A1, B1, ft, cao, oe)
+
+LANGUAGE RULES — follow these exactly:
+1. Use ONLY these Edexcel command words: Work out, Find, Calculate, Solve, Factorise, Expand, Simplify, Show that, Prove that, Explain why, Write down, Express, Give, Determine, Sketch, Hence, Hence or otherwise.
+2. British English throughout (e.g. "factorise" not "factor", "centre" not "center").
+3. "Given that ..." for conditional information. "Hence, ..." for follow-on parts.
+4. NEVER start with "A student...", "You are given...", or conversational framing.
+5. Every number and variable in the question must be unambiguous. State units explicitly.
+6. For non-calculator: use integers, simple fractions, or surds (e.g. $\\sqrt{3}$). No ugly decimals.
+7. For calculator: decimals are acceptable. Round answers to 3 significant figures unless stated otherwise.
+
+STRUCTURE RULES:
+- Single-part questions (≤ 3 marks): one direct command.
+- Multi-part questions (≥ 4 marks): split into (a), (b), (c) and sub-parts (i), (ii) where appropriate.
+  - End each part with its mark count in parentheses: "(2)" or "(3 marks)".
+  - Use "Hence" or "Hence, or otherwise," to link dependent parts.
+- "Show that" / "Prove that" questions: give the target result in the question; explanation must show every algebraic step.
+- "Reasoning/Proof" questions: require "Show that", "Prove that", "Explain why", or "Justify".
+
+MARK SCHEME (explanation field):
+- Label every mark: M1 (method mark), A1 (accuracy mark), B1 (independent mark).
+- Include "ft" where follow-through applies.
+- State "cao" (correct answer only) where no ft is allowed.
+- Format: "M1 for setting up the equation; A1 for correct answer."
+
+LaTeX:
+- Inline math: $...$ (e.g., $x^2 + 3x - 10 = 0$)
+- Display math: $$...$$ on its own line
+- Commands: \\frac{}{}, \\sqrt{}, \\times, \\div, \\sin, \\cos, \\tan, \\pi, \\leq, \\geq, \\neq
+- Separate question parts with \\n in the JSON string — not markdown line breaks
+
+STRICT PROHIBITIONS — never do any of these:
+- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, dotted lines, or any answer-box language in question_latex
+- NEVER use markdown tables (| col | col | --- |). For tabular data use a LaTeX array: $$\\begin{array}{|c|c|}\\hline ... \\hline\\end{array}$$
+- NEVER use markdown formatting (**bold**, *italic*, ## headings, - bullets) inside question_latex or explanation
+- NEVER end question_latex with a colon or blank line expecting the student to fill in
+- question_latex must contain ONLY the question text — no answer section whatsoever
+
+explanation field:
+- Write as plain prose steps separated by \\n in the JSON string
+- Label marks inline: "M1 for ...; A1 for ..."
+- No markdown tables or bullet lists
+
+Always respond with valid JSON only — no markdown code fences, no preamble, no trailing text.`
+
+  const multiPartHint = marks >= 4
+    ? `Structure as a multi-part question with parts (a) and (b)${marks >= 6 ? ' and (c)' : ''}. End each part with its mark count in parentheses.`
+    : `Single-part question.`
+
+  const userPrompt = `Create a unique ${level} mathematics exam question with the following specifications:
+
+CURRICULUM:
+- Level: ${level}
+- Sub-Topic: ${sub_topic}${context ? `\n- Additional context: ${context}` : ''}
+
+REQUIREMENTS:
+- Question Type: ${question_type}
+- Total Marks: ${marks}
+- Calculator: ${calculator_allowed ? 'Calculator allowed' : 'Non-calculator — use integers, simple fractions, or surds only'}
+- Structure: ${multiPartHint}
+
+TYPE-SPECIFIC GUIDANCE:
+${question_type === 'Fluency'
+  ? '- Test direct application of a standard procedure.\n- 1–2 clear steps.\n- Avoid narrative framing; use "Find" or "Work out" or "Simplify".'
+  : ''}${question_type === 'Problem Solving'
+  ? '- Require students to select and connect methods across ≥ 2 steps.\n- May include a real-world context (e.g. area of a shape, cost problem) — keep context brief.\n- The path to the answer should not be immediately obvious.'
+  : ''}${question_type === 'Reasoning/Proof'
+  ? '- Use "Show that", "Prove that", or "Explain why".\n- State the target result in the question text.\n- The explanation must give every algebraic step as a mark scheme.\n- Non-calculator preferred — use exact values (surds, fractions, π).'
+  : ''}
+
+MARK BREAKDOWN GUIDANCE:
+${marks === 1 ? '1 mark: B1 for a single correct answer or statement.' : ''}${marks === 2 ? '2 marks: M1 for correct method + A1 for correct answer.' : ''}${marks === 3 ? '3 marks: M1 method + M1 or A1 substitution/simplification + A1 answer.' : ''}${marks === 4 ? '4 marks: split across two parts, or M1 + M1 + A1 + A1 for multi-step.' : ''}${marks === 5 ? '5 marks: two or three sub-parts, each with method and accuracy marks.' : ''}${marks >= 6 ? `${marks} marks: three or more sub-parts with clear mark allocation per part.` : ''}
+
+OUTPUT FORMAT (JSON only):
+{
+  "question_latex": "Complete question text using LaTeX. Multi-part questions use (a), (b), (i), (ii) labels with mark counts in parentheses at the end of each part.",
+  "answer": "Final answer, concise (e.g. \\"x = 3 or x = −5\\")",
+  "explanation": "Full mark scheme using M1/A1/B1 labels. Show every step.",
+  "marks": ${marks}
 }
 
-// ─────────────────────────────────────────────
-// Legacy path (topic + tier, backward compat)
-// ─────────────────────────────────────────────
-
-async function handleLegacyGeneration(request: TextGenRequest): Promise<NextResponse> {
-  const { system, user } = buildLegacyPrompt(request)
+Return ONLY the JSON object.`
 
   try {
-    const rawContent = await callOpenRouter({
-      model: GENERATION_MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user',   content: user },
-      ],
-      temperature: 0.8,
-      max_tokens: 1500,
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
+        'X-Title': 'Nicolaou Maths - Question Generator',
+      },
+      body: JSON.stringify({
+        model: 'deepseek/deepseek-v3.2',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.8,
+        max_tokens: 1500,
+      }),
     })
 
-    let parsed: GeneratedQuestion
-    try {
-      parsed = parseGeneratedQuestion(rawContent)
-    } catch {
-      return NextResponse.json({ error: 'Invalid response format from AI', raw_content: rawContent }, { status: 500 })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      console.error('OpenRouter API Error:', errorData)
+      return NextResponse.json(
+        { error: 'Failed to generate question', details: errorData },
+        { status: response.status }
+      )
     }
 
-    const latexIssues = detectLatexIssues(parsed.question_latex)
-    if (latexIssues.length > 0) {
-      return NextResponse.json({ error: 'Generated question contains malformed LaTeX', issues: latexIssues }, { status: 422 })
+    const data = await response.json()
+    const content = data.choices[0]?.message?.content
+
+    if (!content) {
+      return NextResponse.json({ error: 'No response from AI model' }, { status: 500 })
     }
+
+    let parsedContent: TextGenResponse
+    try {
+      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      parsedContent = JSON.parse(cleanedContent)
+    } catch {
+      console.error('Failed to parse AI response:', content)
+      return NextResponse.json(
+        { error: 'Invalid response format from AI', raw_content: content },
+        { status: 500 }
+      )
+    }
+
+    if (!parsedContent.question_latex || !parsedContent.answer) {
+      return NextResponse.json(
+        { error: 'Incomplete response from AI', content: parsedContent },
+        { status: 500 }
+      )
+    }
+
+    // Repair common LaTeX hallucinations before returning to client
+    parsedContent.question_latex = repairLatex(parsedContent.question_latex)
+    parsedContent.answer = repairLatex(parsedContent.answer)
+    if (parsedContent.explanation) parsedContent.explanation = repairLatex(parsedContent.explanation)
 
     return NextResponse.json({
       success: true,
-      data: {
-        question_latex:    parsed.question_latex,
-        mark_scheme_latex: parsed.mark_scheme_latex,
-        answer:            parsed.answer,
-        command_word:      parsed.command_word,
-        marks:             parsed.marks,
-      },
-      model:            GENERATION_MODEL,
-      curriculum_aware: false,
+      data: parsedContent,
+      image_url: null,
+      content_type: 'generated_text',
+      has_diagram: false,
+      model: 'deepseek-v3.2',
+      curriculum_aware: true,
     })
   } catch (error) {
+    console.error('Text generation error:', error)
     return NextResponse.json(
-      { error: 'Failed to generate question', details: error instanceof Error ? error.message : 'Unknown error' },
+      {
+        error: 'Failed to generate question',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 }
     )
   }
 }
 
-// ─────────────────────────────────────────────
-// Image OCR handler (unchanged)
-// ─────────────────────────────────────────────
+// =====================================================
+// Mode A2: Diagram generation (Claude Haiku)
+// =====================================================
 
-interface ImageOCRResponse {
-  question_latex: string
-  suggested_topic: string
-  suggested_difficulty: 'Foundation' | 'Higher'
+interface DiagramGenParams {
+  level: string
+  sub_topic: string
+  topic_name: string
+  question_type: 'Fluency' | 'Problem Solving' | 'Reasoning/Proof'
+  marks: number
+  calculator_allowed: boolean
+  context?: string
 }
+
+async function handleDiagramGeneration(params: DiagramGenParams): Promise<NextResponse> {
+  const { level, sub_topic, topic_name, question_type, marks, calculator_allowed, context } = params
+
+  const userPrompt = `Create a ${level} mathematics question WITH an SVG diagram for this specification:
+
+**CURRICULUM:**
+- Level: ${level}
+- Topic: ${topic_name || sub_topic}
+- Sub-Topic: ${sub_topic}
+
+**QUESTION REQUIREMENTS:**
+- Question Type: ${question_type}
+- Marks: ${marks}
+- Calculator: ${calculator_allowed ? 'Calculator allowed' : 'Non-calculator — use integer or simple fraction values'}${context ? `\n- Additional context: ${context}` : ''}
+
+**DIAGRAM REQUIREMENTS:**
+- The diagram must show exactly the geometric configuration the question refers to.
+- Label all GIVEN values (lengths, angles) directly in the SVG.
+- Mark any UNKNOWN value being asked for as a variable (e.g., $x$, θ) in BOTH the SVG and the question text.
+- Use integer coordinates in the 50–350 range on both axes.
+- All shapes must be clearly visible — not too small or too large.
+${question_type === 'Fluency' ? '- Standard diagram showing the core geometric property.' : ''}${question_type === 'Problem Solving' ? '- Diagram should present a realistic, slightly complex configuration.' : ''}${question_type === 'Reasoning/Proof' ? '- Diagram should support a proof — include all relevant construction lines.' : ''}
+
+STRICT PROHIBITIONS:
+- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, or answer-box language in question_latex
+- NEVER use markdown tables (| col | col |). For tabular data use a LaTeX array environment
+- NEVER use markdown formatting (**bold**, *italic*, ## headings) inside question_latex or explanation
+- question_latex must contain ONLY the question text — no answer section whatsoever
+
+OUTPUT FORMAT (JSON only, no markdown, no code fences):
+{
+  "question_latex": "Complete question text with $LaTeX$ math only — no markdown",
+  "svg_markup": "<svg viewBox=\\"0 0 400 400\\" ...>...</svg>",
+  "answer": "Final answer, e.g. x = 7.4 cm",
+  "explanation": "Step-by-step mark scheme using M1/A1/B1 labels — plain prose, no markdown",
+  "marks": ${marks},
+  "diagram_description": "One sentence describing the diagram"
+}
+
+Return ONLY the JSON object.`
+
+  let rawContent: string
+  try {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
+        'X-Title': 'Nicolaou Maths - Diagram Question Generator',
+      },
+      body: JSON.stringify({
+        model: 'anthropic/claude-haiku-4-5',
+        messages: [
+          { role: 'system', content: buildDiagramSystemPrompt() },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 4000,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      console.error('[Diagram Gen] OpenRouter error:', errorData)
+      // Fall back to text-only on model failure
+      return NextResponse.json(
+        { error: 'Diagram generation model unavailable', details: errorData },
+        { status: response.status }
+      )
+    }
+
+    const data = await response.json()
+    rawContent = data.choices[0]?.message?.content || ''
+  } catch (fetchError) {
+    console.error('[Diagram Gen] Network error:', fetchError)
+    return NextResponse.json(
+      { error: 'Failed to reach diagram generation model' },
+      { status: 500 }
+    )
+  }
+
+  if (!rawContent) {
+    return NextResponse.json({ error: 'No response from diagram model' }, { status: 500 })
+  }
+
+  // Parse response
+  let parsed: DiagramGenResponse
+  try {
+    const cleaned = rawContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+    parsed = JSON.parse(cleaned)
+  } catch {
+    console.error('[Diagram Gen] Failed to parse response:', rawContent.substring(0, 300))
+    return NextResponse.json(
+      { error: 'Invalid JSON from diagram model', raw_content: rawContent.substring(0, 300) },
+      { status: 500 }
+    )
+  }
+
+  if (!parsed.question_latex || !parsed.svg_markup || !parsed.answer) {
+    return NextResponse.json(
+      { error: 'Incomplete diagram generation response', content: parsed },
+      { status: 500 }
+    )
+  }
+
+  // Sanitize SVG
+  const sanitized = sanitizeSvg(parsed.svg_markup)
+  if (!sanitized.valid) {
+    console.warn('[Diagram Gen] SVG failed sanitization:', sanitized.errors)
+    // Degrade gracefully — return question without diagram
+    return NextResponse.json({
+      success: true,
+      data: {
+        question_latex: parsed.question_latex,
+        answer: parsed.answer,
+        explanation: parsed.explanation,
+        marks: parsed.marks,
+      },
+      image_url: null,
+      content_type: 'generated_text',
+      has_diagram: false,
+      model: 'claude-haiku-4-5',
+      curriculum_aware: true,
+      degraded: true,
+      degraded_reason: sanitized.errors.join('; '),
+    })
+  }
+
+  // Upload the (already-sanitized) SVG to Convex file storage.
+  let imageUrl: string | null = null
+  try {
+    imageUrl = await uploadSvgToStorage(sanitized.svg, topic_name || sub_topic)
+  } catch (uploadError) {
+    console.warn('[Diagram Gen] SVG upload failed — degrading to text-only:', uploadError)
+  }
+
+  return NextResponse.json({
+    success: true,
+    data: {
+      question_latex: repairLatex(parsed.question_latex),
+      answer: repairLatex(parsed.answer),
+      explanation: repairLatex(parsed.explanation),
+      marks: parsed.marks,
+      diagram_description: parsed.diagram_description,
+    },
+    image_url: imageUrl,
+    content_type: imageUrl ? 'synthetic_image' : 'generated_text',
+    has_diagram: Boolean(imageUrl),
+    model: 'claude-haiku-4-5',
+    curriculum_aware: true,
+  })
+}
+
+// =====================================================
+// Legacy text generation (topic/tier, no curriculum)
+// =====================================================
+
+async function handleLegacyTextGeneration(request: TextGenRequest): Promise<NextResponse> {
+  const { topic, tier } = request
+
+  if (!topic || !tier) {
+    return NextResponse.json(
+      { error: 'Either (level, sub_topic) or (topic, tier) is required' },
+      { status: 400 }
+    )
+  }
+
+  const systemPrompt = `You are an expert Pearson Edexcel GCSE mathematics question writer. Always respond with valid JSON only — no markdown code fences, no preamble, no trailing text.
+
+STRICT PROHIBITIONS — never do any of these:
+- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, or answer-box language in question_latex
+- NEVER use markdown tables (| col | col | --- |). For tabular data use a LaTeX array: $$\\begin{array}{|c|c|}\\hline ... \\hline\\end{array}$$
+- NEVER use markdown formatting (**bold**, *italic*, ## headings, - bullets) inside question_latex or explanation
+- question_latex must contain ONLY the question text — no answer section whatsoever`
+
+  const userPrompt = `Create a unique GCSE Maths question on ${topic} for ${tier} tier.
+
+Requirements:
+- Appropriate for ${tier} tier GCSE students
+- Use Edexcel command words: Work out, Find, Calculate, Solve, Simplify, Show that, etc.
+- Inline math: $...$ — display math: $$...$$
+- Use \\frac{}{}, \\sqrt{}, \\times, \\div, \\pi as needed
+- For tabular data use LaTeX array environments, never markdown tables
+- question_latex is ONLY the question — no answer lines, no "Show your answer"
+- explanation: plain prose mark scheme with M1/A1/B1 labels, no markdown
+
+Output ONLY valid JSON:
+{
+  "question_latex": "Question text with $LaTeX$ math — no markdown, no answer section",
+  "answer": "Concise final answer",
+  "explanation": "Step-by-step mark scheme: M1 for ...; A1 for ..."
+}
+
+Return ONLY the JSON object.`
+
+  try {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
+        'X-Title': 'Nicolaou Maths - Question Generator',
+      },
+      body: JSON.stringify({
+        model: 'deepseek/deepseek-v3.2',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.8,
+        max_tokens: 1500,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return NextResponse.json(
+        { error: 'Failed to generate question', details: errorData },
+        { status: response.status }
+      )
+    }
+
+    const data = await response.json()
+    const content = data.choices[0]?.message?.content
+
+    if (!content) {
+      return NextResponse.json({ error: 'No response from AI model' }, { status: 500 })
+    }
+
+    let parsedContent: TextGenResponse
+    try {
+      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      parsedContent = JSON.parse(cleanedContent)
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid response format from AI', raw_content: content },
+        { status: 500 }
+      )
+    }
+
+    if (!parsedContent.question_latex || !parsedContent.answer) {
+      return NextResponse.json(
+        { error: 'Incomplete response from AI', content: parsedContent },
+        { status: 500 }
+      )
+    }
+
+    parsedContent.question_latex = repairLatex(parsedContent.question_latex)
+    parsedContent.answer = repairLatex(parsedContent.answer)
+    if (parsedContent.explanation) parsedContent.explanation = repairLatex(parsedContent.explanation)
+
+    return NextResponse.json({
+      success: true,
+      data: parsedContent,
+      image_url: null,
+      content_type: 'generated_text',
+      has_diagram: false,
+      model: 'deepseek/deepseek-v3.2',
+      curriculum_aware: false,
+    })
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: 'Failed to generate question',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    )
+  }
+}
+
+// =====================================================
+// Mode B: Image OCR (Qwen 2.5 VL)
+// =====================================================
 
 async function handleImageOCR(request: ImageOCRRequest): Promise<NextResponse> {
   const { image_url } = request
@@ -596,17 +633,24 @@ async function handleImageOCR(request: ImageOCRRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'image_url is required for OCR' }, { status: 400 })
   }
 
-  const systemPrompt = `You are a specialized OCR engine for mathematics. Extract ALL text and mathematical notation from the image, convert to LaTeX, and suggest the topic and difficulty.
+  const systemPrompt = `You are a specialized OCR engine for mathematics. Your task is to:
+1. Extract ALL text and mathematical notation from the image
+2. Convert equations and mathematical symbols to standard LaTeX format
+3. Use $...$ for inline math and $$...$$ for display math
+4. Preserve the structure and formatting of the original question
+5. Suggest the most appropriate topic and difficulty level
 
-Use $...$ for inline math and $$...$$ for display math. Return ONLY valid JSON:
+Return ONLY valid JSON in this exact format:
 {
-  "question_latex": "...",
-  "suggested_topic": "...",
-  "suggested_difficulty": "Foundation" or "Higher"
-}`
+  "question_latex": "The extracted question with LaTeX notation",
+  "suggested_topic": "The most relevant topic (e.g., Algebra, Geometry, Statistics, Number, Ratio, Probability)",
+  "suggested_difficulty": "Foundation or Higher"
+}
+
+Do not include any other text, explanations, or formatting. Only return the JSON object.`
 
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
@@ -615,14 +659,14 @@ Use $...$ for inline math and $$...$$ for display math. Return ONLY valid JSON:
         'X-Title': 'Nicolaou Maths - Question OCR',
       },
       body: JSON.stringify({
-        model: 'anthropic/claude-sonnet-4-6',
+        model: 'qwen/qwen-2-vl-7b-instruct:free',
         messages: [
           { role: 'system', content: systemPrompt },
           {
             role: 'user',
             content: [
               { type: 'image_url', image_url: { url: image_url } },
-              { type: 'text', text: 'Extract the mathematical question from this image and convert it to LaTeX. Return only JSON.' },
+              { type: 'text', text: 'Extract the mathematical question from this image and convert it to LaTeX format. Return only JSON.' },
             ],
           },
         ],
@@ -633,37 +677,51 @@ Use $...$ for inline math and $$...$$ for display math. Return ONLY valid JSON:
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      return NextResponse.json({ error: 'Failed to process image', details: errorData }, { status: response.status })
+      return NextResponse.json(
+        { error: 'Failed to process image', details: errorData },
+        { status: response.status }
+      )
     }
 
     const data = await response.json()
-    const content = data.choices?.[0]?.message?.content
-    if (!content) return NextResponse.json({ error: 'No response from OCR model' }, { status: 500 })
+    const content = data.choices[0]?.message?.content
 
-    const cleanedContent = repairLatexBackslashes(
-      content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    )
+    if (!content) {
+      return NextResponse.json({ error: 'No response from OCR model' }, { status: 500 })
+    }
 
     let parsedContent: ImageOCRResponse
     try {
+      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
       parsedContent = JSON.parse(cleanedContent)
     } catch {
-      return NextResponse.json({ error: 'Invalid response format from OCR', raw_content: content }, { status: 500 })
+      return NextResponse.json(
+        { error: 'Invalid response format from OCR', raw_content: content },
+        { status: 500 }
+      )
     }
 
     if (!parsedContent.question_latex) {
-      return NextResponse.json({ error: 'Incomplete response from OCR', content: parsedContent }, { status: 500 })
+      return NextResponse.json(
+        { error: 'Incomplete response from OCR', content: parsedContent },
+        { status: 500 }
+      )
     }
 
-    parsedContent.suggested_topic      = parsedContent.suggested_topic ?? 'General'
-    parsedContent.suggested_difficulty = parsedContent.suggested_difficulty ?? 'Foundation'
-    parsedContent.question_latex       = sanitize(parsedContent.question_latex)
+    if (!parsedContent.suggested_topic) parsedContent.suggested_topic = 'General'
+    if (!parsedContent.suggested_difficulty) parsedContent.suggested_difficulty = 'Foundation'
 
-    return NextResponse.json({ success: true, data: parsedContent, model: 'qwen-2-vl-7b' })
-
+    return NextResponse.json({
+      success: true,
+      data: parsedContent,
+      model: 'qwen-2-vl-7b',
+    })
   } catch (error) {
     return NextResponse.json(
-      { error: 'Failed to process image', details: error instanceof Error ? error.message : 'Unknown error' },
+      {
+        error: 'Failed to process image',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
       { status: 500 }
     )
   }
