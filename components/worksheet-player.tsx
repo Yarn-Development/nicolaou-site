@@ -28,7 +28,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import Image from "next/image"
 
 // =====================================================
 // Types
@@ -300,13 +299,13 @@ export function WorksheetPlayer({
                   {(currentQuestion.content_type === "image_ocr" || currentQuestion.content_type === "official_past_paper") && currentQuestion.image_url ? (
                     <div className="flex justify-center">
                       <div className="relative w-full max-w-2xl">
-                        <Image
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
                           src={currentQuestion.image_url}
                           alt={`Question ${currentQuestionIndex + 1}`}
-                          width={800}
-                          height={600}
                           className="w-full h-auto border border-swiss-ink/20"
                           style={{ maxWidth: "100%", height: "auto" }}
+                          onError={(e) => { e.currentTarget.style.display = "none" }}
                         />
                       </div>
                     </div>
@@ -330,13 +329,13 @@ export function WorksheetPlayer({
                       {currentQuestion.image_url && (
                         <div className="flex justify-center mt-4">
                           <div className="relative w-full max-w-md mx-auto">
-                            <Image
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
                               src={currentQuestion.image_url}
                               alt={`Diagram for Question ${currentQuestionIndex + 1}`}
-                              width={500}
-                              height={400}
                               className="w-full h-auto border border-swiss-ink/20"
                               style={{ maxWidth: "100%", height: "auto" }}
+                              onError={(e) => { e.currentTarget.style.display = "none" }}
                             />
                           </div>
                         </div>
