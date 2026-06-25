@@ -816,10 +816,10 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
     console.log(`[Shadow Paper] Successfully saved ${questionIds.length}/${shadowQuestions.length} questions`)
 
     // ---- Step 5: Create an assignment with all the shadow questions ----
-    const baseFilename = originalFilename
+    const baseFilename = (originalFilename || 'Past Paper')
       .replace(/\.[^/.]+$/, '') // Remove extension
       .replace(/[^a-zA-Z0-9\s]/g, ' ') // Clean special chars
-      .trim()
+      .trim() || 'Past Paper'
 
     const assignmentTitle = `Shadow of ${baseFilename} (${targetYear})`
 
