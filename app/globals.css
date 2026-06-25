@@ -99,6 +99,50 @@
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   Print / PDF: force the LIGHT theme so documents (exam papers, feedback
+   sheets, revision lists, practice tests) always render black-on-white,
+   regardless of the teacher's on-screen theme. Without this, dark-theme
+   foreground colours print as light/grey text on the forced-white page.
+   ───────────────────────────────────────────────────────────────────────── */
+@media print {
+  :root, .light, .dark {
+    --background: 20 10% 97%;
+    --foreground: 20 8% 11%;
+    --card: 20 9% 94%;
+    --card-foreground: 20 8% 11%;
+    --popover: 20 10% 97%;
+    --popover-foreground: 20 8% 11%;
+    --primary: 4 100% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 20 8% 11%;
+    --secondary-foreground: 20 10% 97%;
+    --accent: 20 5% 42%;
+    --accent-foreground: 20 10% 97%;
+    --muted: 20 9% 94%;
+    --muted-foreground: 20 5% 42%;
+    --destructive: 4 100% 57%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 20 8% 11%;
+    --input: 20 9% 94%;
+    --ring: 4 100% 60%;
+    --color-bg: oklch(97.5% 0.005 25);
+    --color-surface: oklch(94% 0.006 25);
+    --color-ink: oklch(11% 0.008 25);
+    --color-lead: oklch(42% 0.008 25);
+    --color-border: oklch(11% 0.008 25);
+    --swiss-paper: 247 245 244;
+    --swiss-concrete: 241 239 237;
+    --swiss-ink: 27 25 24;
+    --swiss-lead: 108 104 103;
+    --swiss-signal: 255 59 48;
+  }
+  body {
+    background-color: #fff !important;
+    color: hsl(var(--foreground)) !important;
+  }
+}
+
 /* ─── Swiss Focus Design System ─────────────────────────────────────────── */
 /* Flat. No shadows. No gradients. No rounded corners.                        */
 
