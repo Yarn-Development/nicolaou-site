@@ -9,6 +9,12 @@ const isPublicRoute = createRouteMatcher([
   '/auth(.*)',
   '/parent-portal(.*)',
   '/api/webhooks(.*)',
+  // Cron job — authenticated by CRON_SECRET, not a Clerk session.
+  '/api/cron(.*)',
+  // Question generation — called server-to-server by the cron (no Clerk session).
+  '/api/ai/generate(.*)',
+  // Parent feedback PDF — opened from the tokenised parent portal (no Clerk session).
+  '/api/pdf/parent(.*)',
 ])
 
 export default clerkMiddleware(async (auth, req) => {

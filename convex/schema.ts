@@ -221,8 +221,12 @@ export default defineSchema({
     level: v.optional(v.string()),
     topics: v.optional(v.array(v.string())),
     pdfUrl: v.optional(v.string()),
+    // Optional link back to the assignment/class this list was generated from.
+    assignmentId: v.optional(v.id("assignments")),
+    classId: v.optional(v.id("classes")),
   })
-    .index("by_created_by", ["createdBy"]),
+    .index("by_created_by", ["createdBy"])
+    .index("by_assignment", ["assignmentId"]),
 
   revisionListQuestions: defineTable({
     revisionListId: v.id("revisionLists"),

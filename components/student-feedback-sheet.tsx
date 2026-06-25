@@ -239,10 +239,22 @@ interface RevisionSectionProps {
   questions: RevisionQuestionData[]
   showAnswers: boolean
   onToggleAnswers: () => void
+  heading?: string
+  subtitle?: string
+  /** When true, render nothing if there are no questions (used for the extension section). */
+  hideWhenEmpty?: boolean
 }
 
-function RevisionSection({ questions, showAnswers, onToggleAnswers }: RevisionSectionProps) {
+function RevisionSection({
+  questions,
+  showAnswers,
+  onToggleAnswers,
+  heading = "Recommended Practice",
+  subtitle,
+  hideWhenEmpty = false,
+}: RevisionSectionProps) {
   if (questions.length === 0) {
+    if (hideWhenEmpty) return null
     return (
       <div className="border-2 border-green-500 bg-green-50 p-6 text-center">
         <div className="text-4xl mb-3">🎉</div>
@@ -256,6 +268,10 @@ function RevisionSection({ questions, showAnswers, onToggleAnswers }: RevisionSe
     )
   }
 
+  const subtitleText =
+    subtitle ??
+    `${questions.length} ${questions.length === 1 ? "question" : "questions"} to strengthen weak areas`
+
   return (
     <div className="break-before-page print:break-before-page">
       {/* Section Header */}
@@ -263,10 +279,10 @@ function RevisionSection({ questions, showAnswers, onToggleAnswers }: RevisionSe
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-xl font-black uppercase tracking-widest text-white">
-              Recommended Practice
+              {heading}
             </h2>
             <p className="text-sm font-bold text-white/80 mt-1">
-              {questions.length} {questions.length === 1 ? "question" : "questions"} to strengthen weak areas
+              {subtitleText}
             </p>
           </div>
           <button
@@ -531,12 +547,26 @@ export function StudentFeedbackSheet({ feedback, schoolLogo }: StudentFeedbackSh
 
         {/* Revision Section */}
         <div className="bg-white border-2 border-swiss-ink print:border-0">
-          <RevisionSection 
+          <RevisionSection
             questions={feedback.revisionPack}
             showAnswers={showAnswers}
             onToggleAnswers={() => setShowAnswers(!showAnswers)}
           />
         </div>
+
+        {/* Extension Section (high performers) */}
+        {feedback.extensionPack && feedback.extensionPack.length > 0 && (
+          <div className="bg-white border-2 border-swiss-ink print:border-0 mt-6">
+            <RevisionSection
+              questions={feedback.extensionPack}
+              showAnswers={showAnswers}
+              onToggleAnswers={() => setShowAnswers(!showAnswers)}
+              heading="Extension & Stretch"
+              subtitle={`${feedback.extensionPack.length} harder ${feedback.extensionPack.length === 1 ? "question" : "questions"} in your strong topics`}
+              hideWhenEmpty
+            />
+          </div>
+        )}
 
         {/* Footer */}
         <div className="mt-6 text-center print:mt-4">

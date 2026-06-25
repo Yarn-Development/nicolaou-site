@@ -229,6 +229,9 @@ export const browseQuestions = query({
       if (args.contentType && q.contentType !== args.contentType) return false
       if (args.isVerified !== undefined && q.isVerified !== args.isVerified) return false
       if (args.hasDiagram && !q.imageUrl) return false
+      // Hide questions whose image lives on the retired Supabase storage (the
+      // file is gone, so they render blank) — don't offer them in the builder.
+      if (q.imageUrl && q.imageUrl.includes("supabase.co")) return false
       if (searchLower) {
         const hay = [q.questionLatex, q.topic, q.subTopic, q.examBoard, q.level].join(" ").toLowerCase()
         if (!hay.includes(searchLower)) return false

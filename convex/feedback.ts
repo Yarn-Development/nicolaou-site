@@ -226,6 +226,65 @@ export const getRevisionForSubTopic = query({
   },
 })
 
+/**
+ * Extension/stretch questions for a sub-topic the student is STRONG in — picks
+ * the hardest available questions (Higher/Extension difficulty, then by marks),
+ * excluding questions already used. Puts stretch work on high performers' sheets.
+ */
+export const getExtensionForSubTopic = query({
+  args: {
+    topic: v.string(),
+    subTopic: v.string(),
+    excludeIds: v.array(v.id("questions")),
+    limit: v.number(),
+  },
+  handler: async (ctx, { topic, subTopic, excludeIds, limit }) => {
+    const exclude = new Set(excludeIds.map((id) => id as string))
+    const map = (q: Doc<"questions">) => ({
+      id: q._id as string,
+      questionLatex: q.questionLatex ?? "",
+      imageUrl: q.imageUrl ?? null,
+      contentType: q.contentType ?? "generated_text",
+      marks: q.marks ?? 1,
+      topic: q.topic ?? q.topicName ?? "General",
+      subTopic: q.subTopic ?? "",
+      difficulty: q.difficulty ?? "Foundation",
+      answerKey: (q.answerKey ?? null) as unknown,
+    })
+
+    const rank = (d: string) => {
+      const v = (d ?? "").toLowerCase()
+      if (v.includes("extension") || v.includes("stretch")) return 3
+      if (v.includes("higher") || v.includes("hard")) return 2
+      if (v.includes("crossover") || v.includes("intermediate")) return 1
+      return 0
+    }
+
+    const byTopic = await ctx.db
+      .query("questions")
+      .withIndex("by_topic", (q) => q.eq("topic", topic))
+      .collect()
+
+    const usable = byTopic.filter(
+      (q) =>
+        !exclude.has(q._id as string) &&
+        !(q.imageUrl ?? "").includes("supabase.co"),
+    )
+
+    const sortHardest = (arr: Doc<"questions">[]) =>
+      [...arr].sort(
+        (a, b) =>
+          rank(b.difficulty ?? "") - rank(a.difficulty ?? "") ||
+          (b.marks ?? 0) - (a.marks ?? 0),
+      )
+
+    const subMatches = sortHardest(usable.filter((q) => (q.subTopic ?? "") === subTopic))
+    if (subMatches.length > 0) return subMatches.slice(0, limit).map(map)
+
+    return sortHardest(usable).slice(0, limit).map(map)
+  },
+})
+
 // =====================================================
 // generateStudentFeedback — single submission (teacher or student)
 // =====================================================

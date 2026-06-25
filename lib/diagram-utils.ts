@@ -36,6 +36,17 @@ const SELECTIVE_DIAGRAM_SUBTOPICS = new Set([
   'Graphical Solutions',
   'Transformations of Graphs',
   'Linear Graphs',
+  // Foundation plotting (blank coordinate grid)
+  'Coordinates',
+  'Plotting Coordinates',
+  'Coordinates and Plotting',
+  'Plotting Graphs',
+  'Drawing Linear Graphs',
+  'Drawing Straight Line Graphs',
+  'Plotting Linear Graphs',
+  'Plotting Quadratic Graphs',
+  'Drawing Quadratic Graphs',
+  'Reading Coordinates',
   // Vectors
   'Vectors (Basic)',
   'Vectors (Advanced)',

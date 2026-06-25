@@ -150,6 +150,7 @@ export async function getParentFeedbackDetail(
         overallStatus: result.overallStatus,
         topicBreakdown: result.topicBreakdown,
         revisionPack: [],
+        extensionPack: [],
         generatedAt: new Date().toISOString(),
       },
     }

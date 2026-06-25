@@ -1,8 +1,11 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import Image from 'next/image'
 import { X, ZoomIn, ZoomOut, RotateCw } from 'lucide-react'
+
+/* Question diagrams are SVG data-URIs / arbitrary storage URLs, which next/image
+   cannot reliably serve — use plain <img> so every diagram renders. */
+/* eslint-disable @next/next/no-img-element */
 
 interface ImageLightboxProps {
   src: string
@@ -95,7 +98,7 @@ export function ImageLightbox({
         `}
         onClick={openLightbox}
       >
-        <Image
+        <img
           src={src}
           alt={alt}
           width={width}
@@ -211,11 +214,9 @@ export function ImageLightbox({
             "
             onClick={e => e.stopPropagation()}
           >
-            <Image
+            <img
               src={src}
               alt={alt}
-              width={800}
-              height={600}
               className="
                 object-contain
                 bg-white rounded-lg shadow-2xl
@@ -226,7 +227,6 @@ export function ImageLightbox({
                 maxWidth: '100%',
                 maxHeight: '85vh',
               }}
-              priority
             />
           </div>
 
@@ -264,7 +264,7 @@ export function DiagramImage({
       bg-white p-2
       ${className}
     `}>
-      <Image
+      <img
         src={src}
         alt={alt}
         width={400}

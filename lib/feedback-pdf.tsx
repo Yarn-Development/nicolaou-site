@@ -225,6 +225,38 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
   },
+  // Revision / extension question list
+  qItem: {
+    borderBottom: "1 solid #e5e7eb",
+    paddingVertical: 8,
+  },
+  qHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 3,
+  },
+  qNum: {
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+    color: "#111827",
+  },
+  qMeta: {
+    fontSize: 7,
+    fontFamily: "Helvetica-Bold",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    color: "#6b7280",
+  },
+  qText: {
+    fontSize: 9.5,
+    lineHeight: 1.5,
+    color: "#1f2937",
+  },
+  qPlaceholder: {
+    fontSize: 8,
+    fontStyle: "italic",
+    color: "#9ca3af",
+  },
 })
 
 // =====================================================
@@ -253,6 +285,83 @@ function overallRAGStatus(pct: number): "green" | "amber" | "red" {
   if (pct >= 80) return "green"
   if (pct >= 50) return "amber"
   return "red"
+}
+
+/**
+ * @react-pdf cannot typeset LaTeX, so convert common LaTeX to readable plain
+ * text/unicode for the printed revision questions (better than raw `$...$`).
+ */
+function latexToPlain(input: string): string {
+  if (!input) return ""
+  let s = input
+  s = s.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, "($1)/($2)")
+  s = s.replace(/\\sqrt\{([^{}]*)\}/g, "√($1)")
+  s = s.replace(/\\text\{([^{}]*)\}/g, "$1")
+  s = s.replace(/\^\{([^{}]*)\}/g, "^$1")
+  s = s.replace(/_\{([^{}]*)\}/g, "_$1")
+  s = s
+    .replace(/\\times/g, "×")
+    .replace(/\\div/g, "÷")
+    .replace(/\\cdot/g, "·")
+    .replace(/\\pm/g, "±")
+    .replace(/\\le(q)?\b/g, "≤")
+    .replace(/\\ge(q)?\b/g, "≥")
+    .replace(/\\neq/g, "≠")
+    .replace(/\\pi/g, "π")
+    .replace(/\\theta/g, "θ")
+    .replace(/\\degree/g, "°")
+    .replace(/\\circ/g, "°")
+    .replace(/\\left|\\right/g, "")
+    .replace(/\\,|\\;|\\!/g, " ")
+    .replace(/\\\\/g, "  ")
+  s = s.replace(/\$\$?/g, "").replace(/\\[a-zA-Z]+/g, "").replace(/[{}]/g, "")
+  return s.replace(/\s+/g, " ").trim()
+}
+
+type RevisionQ = StudentFeedbackData["revisionPack"][number]
+
+function QuestionItem({ q, index }: { q: RevisionQ; index: number }) {
+  const text = latexToPlain(q.questionLatex)
+  return (
+    <View style={styles.qItem} wrap={false}>
+      <View style={styles.qHeaderRow}>
+        <Text style={styles.qNum}>{index + 1}.</Text>
+        <Text style={styles.qMeta}>
+          {q.targetedSubTopic || q.subTopic || q.topic} · {q.marks} mark{q.marks > 1 ? "s" : ""}
+        </Text>
+      </View>
+      {text ? (
+        <Text style={styles.qText}>{text}</Text>
+      ) : (
+        <Text style={styles.qPlaceholder}>Diagram-based question — view the online version.</Text>
+      )}
+    </View>
+  )
+}
+
+function QuestionSection({
+  label,
+  blurb,
+  questions,
+  accent,
+}: {
+  label: string
+  blurb: string
+  questions: RevisionQ[]
+  accent: string
+}) {
+  if (!questions || questions.length === 0) return null
+  return (
+    <View break={false}>
+      <Text style={[styles.sectionLabel, { color: accent }]}>{label}</Text>
+      <Text style={[styles.qPlaceholder, { fontStyle: "normal", marginBottom: 4 }]}>{blurb}</Text>
+      <View style={[styles.table, { borderTop: `2 solid ${accent}` }]}>
+        {questions.map((q, i) => (
+          <QuestionItem key={q.id} q={q} index={i} />
+        ))}
+      </View>
+    </View>
+  )
 }
 
 // =====================================================
@@ -390,18 +499,26 @@ export function FeedbackPDF({ feedback }: { feedback: StudentFeedbackData }) {
             ))}
           </View>
 
-          {/* Revision Pack indicator */}
-          {feedback.revisionPack && feedback.revisionPack.length > 0 && (
-            <View style={{ marginTop: 16, padding: "8 12", backgroundColor: "#eff6ff", borderLeft: "3 solid #3b82f6" }}>
-              <Text style={{ fontSize: 8, fontFamily: "Helvetica-Bold", color: "#1d4ed8", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 3 }}>
-                Revision Pack Available
-              </Text>
-              <Text style={{ fontSize: 9, color: "#1e40af", lineHeight: 1.5 }}>
-                {feedback.revisionPack.length} targeted practice question{feedback.revisionPack.length > 1 ? "s" : ""} have been selected for{" "}
-                {[...new Set(feedback.revisionPack.map(q => q.targetedSubTopic))].slice(0, 3).join(", ")}.
-                Log in to view and attempt them online.
-              </Text>
-            </View>
+          {/* Targeted revision questions (weak areas) */}
+          <QuestionSection
+            label="Your Revision Questions"
+            blurb="Targeted practice for the areas to work on above."
+            questions={feedback.revisionPack}
+            accent="#dc2626"
+          />
+
+          {/* Extension questions (strong areas) */}
+          <QuestionSection
+            label="Extension / Stretch"
+            blurb="Harder questions in the topics you're strong at — push yourself."
+            questions={feedback.extensionPack}
+            accent="#16a34a"
+          />
+
+          {(!feedback.revisionPack?.length && !feedback.extensionPack?.length) && (
+            <Text style={[styles.qPlaceholder, { marginTop: 16 }]}>
+              No additional practice questions were generated for this assessment.
+            </Text>
           )}
         </View>
 
