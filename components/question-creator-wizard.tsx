@@ -730,7 +730,7 @@ export function QuestionCreatorWizard() {
                       PREVIEW
                     </Label>
                     <div className="border-2 border-swiss-ink dark:border-swiss-paper bg-swiss-paper dark:bg-swiss-ink/10 p-4 min-h-[4rem]">
-                      <LatexPreview latex={aiEditedLatex} />
+                      <LatexPreview latex={aiEditedLatex} showErrorIndicator />
                     </div>
                   </div>
                 )}
@@ -946,7 +946,7 @@ export function QuestionCreatorWizard() {
                             PREVIEW
                           </Label>
                           <div className="border-2 border-swiss-ink dark:border-swiss-paper bg-swiss-paper dark:bg-swiss-ink/10 p-4 min-h-[4rem]">
-                            <LatexPreview latex={ocrEditedLatex} />
+                            <LatexPreview latex={ocrEditedLatex} showErrorIndicator />
                           </div>
                         </div>
                       )}

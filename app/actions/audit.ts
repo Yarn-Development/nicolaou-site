@@ -5,6 +5,7 @@ import { fetchQuery, fetchMutation, api, getConvexUserIdByClerkId } from "@/lib/
 import type { Id } from "@/convex/_generated/dataModel"
 import { revalidatePath } from "next/cache"
 import { repairLatex } from "@/lib/latex-utils"
+import { safeParseJSON } from "@/lib/ai-question-quality"
 
 // =====================================================
 // Types
@@ -288,10 +289,8 @@ Respond with JSON only:
     const raw = data.choices?.[0]?.message?.content?.trim()
     if (!raw) return { success: false, error: "AI returned empty response" }
 
-    let parsed: { question_latex?: string; answer?: string; explanation?: string }
-    try {
-      parsed = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim())
-    } catch {
+    const parsed = safeParseJSON<{ question_latex?: string; answer?: string; explanation?: string }>(raw)
+    if (!parsed) {
       return { success: false, error: "AI returned invalid JSON" }
     }
 
@@ -388,10 +387,8 @@ JSON format:
     const raw = data.choices?.[0]?.message?.content?.trim()
     if (!raw) return { success: false, error: "AI returned empty response" }
 
-    let parsed: { question_latex?: string; answer?: string; explanation?: string }
-    try {
-      parsed = JSON.parse(raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim())
-    } catch {
+    const parsed = safeParseJSON<{ question_latex?: string; answer?: string; explanation?: string }>(raw)
+    if (!parsed) {
       return { success: false, error: "AI returned invalid JSON" }
     }
 

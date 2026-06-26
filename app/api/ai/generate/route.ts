@@ -6,6 +6,12 @@ import {
   uploadSvgToStorage,
 } from '@/lib/diagram-utils'
 import { repairLatex } from '@/lib/latex-utils'
+import {
+  lintSvgConsistency,
+  normalizeGeneratedQuestion,
+  qualityGateQuestion,
+  safeParseJSON,
+} from '@/lib/ai-question-quality'
 
 /**
  * Unified AI Generation API Route
@@ -42,6 +48,7 @@ interface TextGenRequest {
   marks?: number
   calculator_allowed?: boolean
   context?: string
+  exam_board?: string
   // Diagram control — if omitted, auto-detected via needsDiagram()
   force_diagram?: boolean
   force_no_diagram?: boolean
@@ -53,13 +60,6 @@ interface ImageOCRRequest {
 }
 
 type AIRequest = TextGenRequest | ImageOCRRequest
-
-interface TextGenResponse {
-  question_latex: string
-  answer: string
-  explanation: string
-  marks?: number
-}
 
 interface DiagramGenResponse {
   question_latex: string
@@ -131,6 +131,7 @@ async function handleTextGeneration(request: TextGenRequest): Promise<NextRespon
     marks = 3,
     calculator_allowed = true,
     context,
+    exam_board = 'Edexcel',
   } = request
 
   // Resolve topic name from the sub_topic string for diagram detection.
@@ -164,14 +165,15 @@ async function handleTextGeneration(request: TextGenRequest): Promise<NextRespon
       marks,
       calculator_allowed,
       context,
+      exam_board,
     })
   }
 
   // ---- Text-only path (free model) ----
-  const systemPrompt = `You are an expert Pearson Edexcel mathematics exam question writer with mastery of:
+  const systemPrompt = `You are an expert ${exam_board} mathematics exam question writer with mastery of:
 - UK National Curriculum (KS3, GCSE Foundation, GCSE Higher)
 - A-Level Mathematics specifications (Pure, Statistics, Mechanics)
-- Edexcel mark scheme conventions (M1, A1, B1, ft, cao, oe)
+- UK exam mark scheme conventions (M1, A1, B1, ft, cao, oe)
 
 LANGUAGE RULES — follow these exactly:
 1. Use ONLY these Edexcel command words: Work out, Find, Calculate, Solve, Factorise, Expand, Simplify, Show that, Prove that, Explain why, Write down, Express, Give, Determine, Sketch, Hence, Hence or otherwise.
@@ -203,7 +205,8 @@ LaTeX:
 - Separate question parts with \\n in the JSON string — not markdown line breaks
 
 STRICT PROHIBITIONS — never do any of these:
-- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, dotted lines, or any answer-box language in question_latex
+- NEVER include "Show your answer", "Answer:", blank answer lines, dotted lines, or any answer-box language in question_latex
+- "You must show your working" is allowed only when it is a natural exam-paper instruction for a multi-step or proof question.
 - NEVER use markdown tables (| col | col | --- |). For tabular data use a LaTeX array: $$\\begin{array}{|c|c|}\\hline ... \\hline\\end{array}$$
 - NEVER use markdown formatting (**bold**, *italic*, ## headings, - bullets) inside question_latex or explanation
 - NEVER end question_latex with a colon or blank line expecting the student to fill in
@@ -254,7 +257,13 @@ OUTPUT FORMAT (JSON only):
 
 Return ONLY the JSON object.`
 
-  try {
+  let lastIssues: string[] = []
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const retryPrompt = lastIssues.length > 0
+      ? `${userPrompt}\n\nPREVIOUS ATTEMPT FAILED QUALITY CHECKS:\n${lastIssues.map(issue => `- ${issue}`).join('\n')}\nRegenerate the whole question and fix every issue.`
+      : userPrompt
+
+    try {
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -267,9 +276,9 @@ Return ONLY the JSON object.`
         model: 'deepseek/deepseek-v3.2',
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
+          { role: 'user', content: retryPrompt },
         ],
-        temperature: 0.8,
+        temperature: attempt === 1 ? 0.55 : 0.35,
         max_tokens: 1500,
       }),
     })
@@ -290,33 +299,37 @@ Return ONLY the JSON object.`
       return NextResponse.json({ error: 'No response from AI model' }, { status: 500 })
     }
 
-    let parsedContent: TextGenResponse
-    try {
-      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-      parsedContent = JSON.parse(cleanedContent)
-    } catch {
+    const parsedRaw = safeParseJSON(content)
+    if (!parsedRaw) {
       console.error('Failed to parse AI response:', content)
-      return NextResponse.json(
-        { error: 'Invalid response format from AI', raw_content: content },
-        { status: 500 }
-      )
+      lastIssues = ['Invalid JSON or LaTeX escaping in model response']
+      continue
     }
 
-    if (!parsedContent.question_latex || !parsedContent.answer) {
-      return NextResponse.json(
-        { error: 'Incomplete response from AI', content: parsedContent },
-        { status: 500 }
-      )
-    }
+    const parsedContent = normalizeGeneratedQuestion(parsedRaw)
+    parsedContent.marks = parsedContent.marks ?? marks
 
-    // Repair common LaTeX hallucinations before returning to client
-    parsedContent.question_latex = repairLatex(parsedContent.question_latex)
-    parsedContent.answer = repairLatex(parsedContent.answer)
-    if (parsedContent.explanation) parsedContent.explanation = repairLatex(parsedContent.explanation)
+    const gated = await qualityGateQuestion(parsedContent, {
+      expectedMarks: marks,
+      hasDiagram: false,
+      runMathValidation: true,
+      apiKey: OPENROUTER_API_KEY,
+    })
+
+    if (!gated.ok) {
+      lastIssues = gated.issues
+      console.warn(`[Question Gen] Attempt ${attempt} failed quality gate:`, lastIssues)
+      continue
+    }
 
     return NextResponse.json({
       success: true,
-      data: parsedContent,
+      data: {
+        question_latex: gated.question.questionLatex,
+        answer: gated.question.answer,
+        explanation: gated.question.explanation,
+        marks: gated.question.marks ?? marks,
+      },
       image_url: null,
       content_type: 'generated_text',
       has_diagram: false,
@@ -325,14 +338,17 @@ Return ONLY the JSON object.`
     })
   } catch (error) {
     console.error('Text generation error:', error)
-    return NextResponse.json(
-      {
-        error: 'Failed to generate question',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    )
+    lastIssues = [error instanceof Error ? error.message : 'Unknown generation error']
   }
+  }
+
+  return NextResponse.json(
+    {
+      error: 'Generated question failed quality checks',
+      issues: lastIssues,
+    },
+    { status: 422 }
+  )
 }
 
 // =====================================================
@@ -347,12 +363,13 @@ interface DiagramGenParams {
   marks: number
   calculator_allowed: boolean
   context?: string
+  exam_board?: string
 }
 
 async function handleDiagramGeneration(params: DiagramGenParams): Promise<NextResponse> {
-  const { level, sub_topic, topic_name, question_type, marks, calculator_allowed, context } = params
+  const { level, sub_topic, topic_name, question_type, marks, calculator_allowed, context, exam_board = 'Edexcel' } = params
 
-  const userPrompt = `Create a ${level} mathematics question WITH an SVG diagram for this specification:
+  const userPrompt = `Create a ${exam_board} ${level} mathematics question WITH an SVG diagram for this specification:
 
 **CURRICULUM:**
 - Level: ${level}
@@ -373,7 +390,8 @@ async function handleDiagramGeneration(params: DiagramGenParams): Promise<NextRe
 ${question_type === 'Fluency' ? '- Standard diagram showing the core geometric property.' : ''}${question_type === 'Problem Solving' ? '- Diagram should present a realistic, slightly complex configuration.' : ''}${question_type === 'Reasoning/Proof' ? '- Diagram should support a proof — include all relevant construction lines.' : ''}
 
 STRICT PROHIBITIONS:
-- NEVER include "Show your answer", "Show your working", "Answer:", blank answer lines, or answer-box language in question_latex
+- NEVER include "Show your answer", "Answer:", blank answer lines, or answer-box language in question_latex
+- "You must show your working" is allowed only when it is a natural exam-paper instruction for a multi-step or proof question.
 - NEVER use markdown tables (| col | col |). For tabular data use a LaTeX array environment
 - NEVER use markdown formatting (**bold**, *italic*, ## headings) inside question_latex or explanation
 - question_latex must contain ONLY the question text — no answer section whatsoever
@@ -390,9 +408,15 @@ OUTPUT FORMAT (JSON only, no markdown, no code fences):
 
 Return ONLY the JSON object.`
 
-  let rawContent: string
-  try {
-    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+  let lastIssues: string[] = []
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const retryPrompt = lastIssues.length > 0
+      ? `${userPrompt}\n\nPREVIOUS ATTEMPT FAILED QUALITY CHECKS:\n${lastIssues.map(issue => `- ${issue}`).join('\n')}\nRegenerate the whole question and SVG so they match exactly.`
+      : userPrompt
+
+    let rawContent: string
+    try {
+      const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
@@ -404,9 +428,9 @@ Return ONLY the JSON object.`
         model: 'anthropic/claude-haiku-4-5',
         messages: [
           { role: 'system', content: buildDiagramSystemPrompt() },
-          { role: 'user', content: userPrompt },
+          { role: 'user', content: retryPrompt },
         ],
-        temperature: 0.7,
+        temperature: attempt === 1 ? 0.55 : 0.35,
         max_tokens: 4000,
       }),
     })
@@ -432,50 +456,46 @@ Return ONLY the JSON object.`
   }
 
   if (!rawContent) {
-    return NextResponse.json({ error: 'No response from diagram model' }, { status: 500 })
+    lastIssues = ['No response from diagram model']
+    continue
   }
 
-  // Parse response
-  let parsed: DiagramGenResponse
-  try {
-    const cleaned = rawContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    parsed = JSON.parse(cleaned)
-  } catch {
+  const parsedRaw = safeParseJSON(rawContent)
+  if (!parsedRaw) {
     console.error('[Diagram Gen] Failed to parse response:', rawContent.substring(0, 300))
-    return NextResponse.json(
-      { error: 'Invalid JSON from diagram model', raw_content: rawContent.substring(0, 300) },
-      { status: 500 }
-    )
+    lastIssues = ['Invalid JSON or LaTeX escaping in diagram model response']
+    continue
   }
 
-  if (!parsed.question_latex || !parsed.svg_markup || !parsed.answer) {
-    return NextResponse.json(
-      { error: 'Incomplete diagram generation response', content: parsed },
-      { status: 500 }
-    )
+  const parsed = parsedRaw as DiagramGenResponse
+  const normalized = normalizeGeneratedQuestion(parsedRaw)
+  normalized.marks = normalized.marks ?? marks
+
+  if (!parsed.svg_markup) {
+    lastIssues = ['Missing SVG diagram markup']
+    continue
   }
 
   // Sanitize SVG
   const sanitized = sanitizeSvg(parsed.svg_markup)
   if (!sanitized.valid) {
     console.warn('[Diagram Gen] SVG failed sanitization:', sanitized.errors)
-    // Degrade gracefully — return question without diagram
-    return NextResponse.json({
-      success: true,
-      data: {
-        question_latex: parsed.question_latex,
-        answer: parsed.answer,
-        explanation: parsed.explanation,
-        marks: parsed.marks,
-      },
-      image_url: null,
-      content_type: 'generated_text',
-      has_diagram: false,
-      model: 'claude-haiku-4-5',
-      curriculum_aware: true,
-      degraded: true,
-      degraded_reason: sanitized.errors.join('; '),
-    })
+    lastIssues = sanitized.errors
+    continue
+  }
+
+  const gated = await qualityGateQuestion(normalized, {
+    expectedMarks: marks,
+    hasDiagram: true,
+    runMathValidation: true,
+    apiKey: OPENROUTER_API_KEY,
+  })
+  const svgIssues = lintSvgConsistency(gated.question.questionLatex, sanitized.svg)
+
+  if (!gated.ok || svgIssues.length > 0) {
+    lastIssues = [...gated.issues, ...svgIssues]
+    console.warn(`[Diagram Gen] Attempt ${attempt} failed quality gate:`, lastIssues)
+    continue
   }
 
   // Upload the (already-sanitized) SVG to Convex file storage.
@@ -483,17 +503,21 @@ Return ONLY the JSON object.`
   try {
     imageUrl = await uploadSvgToStorage(sanitized.svg, topic_name || sub_topic)
   } catch (uploadError) {
-    console.warn('[Diagram Gen] SVG upload failed — degrading to text-only:', uploadError)
+    console.warn('[Diagram Gen] SVG upload failed:', uploadError)
+    return NextResponse.json(
+      { error: 'Generated SVG could not be stored', details: uploadError instanceof Error ? uploadError.message : 'Unknown upload error' },
+      { status: 500 }
+    )
   }
 
   return NextResponse.json({
     success: true,
     data: {
-      question_latex: repairLatex(parsed.question_latex),
-      answer: repairLatex(parsed.answer),
-      explanation: repairLatex(parsed.explanation),
-      marks: parsed.marks,
-      diagram_description: parsed.diagram_description,
+      question_latex: gated.question.questionLatex,
+      answer: gated.question.answer,
+      explanation: gated.question.explanation,
+      marks: gated.question.marks ?? marks,
+      diagram_description: gated.question.diagramDescription,
     },
     image_url: imageUrl,
     content_type: imageUrl ? 'synthetic_image' : 'generated_text',
@@ -501,6 +525,15 @@ Return ONLY the JSON object.`
     model: 'claude-haiku-4-5',
     curriculum_aware: true,
   })
+  }
+
+  return NextResponse.json(
+    {
+      error: 'Generated diagram question failed quality checks',
+      issues: lastIssues,
+    },
+    { status: 422 }
+  )
 }
 
 // =====================================================
@@ -580,31 +613,36 @@ Return ONLY the JSON object.`
       return NextResponse.json({ error: 'No response from AI model' }, { status: 500 })
     }
 
-    let parsedContent: TextGenResponse
-    try {
-      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-      parsedContent = JSON.parse(cleanedContent)
-    } catch {
+    const parsedRaw = safeParseJSON(content)
+    if (!parsedRaw) {
       return NextResponse.json(
         { error: 'Invalid response format from AI', raw_content: content },
         { status: 500 }
       )
     }
 
-    if (!parsedContent.question_latex || !parsedContent.answer) {
+    const normalized = normalizeGeneratedQuestion(parsedRaw)
+    const gated = await qualityGateQuestion(normalized, {
+      hasDiagram: false,
+      runMathValidation: true,
+      apiKey: OPENROUTER_API_KEY,
+    })
+
+    if (!gated.ok) {
       return NextResponse.json(
-        { error: 'Incomplete response from AI', content: parsedContent },
-        { status: 500 }
+        { error: 'Generated question failed quality checks', issues: gated.issues },
+        { status: 422 }
       )
     }
 
-    parsedContent.question_latex = repairLatex(parsedContent.question_latex)
-    parsedContent.answer = repairLatex(parsedContent.answer)
-    if (parsedContent.explanation) parsedContent.explanation = repairLatex(parsedContent.explanation)
-
     return NextResponse.json({
       success: true,
-      data: parsedContent,
+      data: {
+        question_latex: gated.question.questionLatex,
+        answer: gated.question.answer,
+        explanation: gated.question.explanation,
+        marks: gated.question.marks,
+      },
       image_url: null,
       content_type: 'generated_text',
       has_diagram: false,
@@ -690,11 +728,8 @@ Do not include any other text, explanations, or formatting. Only return the JSON
       return NextResponse.json({ error: 'No response from OCR model' }, { status: 500 })
     }
 
-    let parsedContent: ImageOCRResponse
-    try {
-      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-      parsedContent = JSON.parse(cleanedContent)
-    } catch {
+    const parsedContent = safeParseJSON<ImageOCRResponse>(content)
+    if (!parsedContent) {
       return NextResponse.json(
         { error: 'Invalid response format from OCR', raw_content: content },
         { status: 500 }
@@ -710,6 +745,7 @@ Do not include any other text, explanations, or formatting. Only return the JSON
 
     if (!parsedContent.suggested_topic) parsedContent.suggested_topic = 'General'
     if (!parsedContent.suggested_difficulty) parsedContent.suggested_difficulty = 'Foundation'
+    parsedContent.question_latex = repairLatex(parsedContent.question_latex)
 
     return NextResponse.json({
       success: true,

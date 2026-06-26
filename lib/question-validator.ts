@@ -40,8 +40,10 @@ export async function validateQuestion(opts: {
   commandWord: string
   verificationExpression: string | null
   apiKey: string
+  /** If true, validator transport/parse failures reject the question instead of passing through. */
+  failClosed?: boolean
 }): Promise<ValidationResult> {
-  const { questionLatex, markScheme, answer, commandWord, verificationExpression, apiKey } = opts
+  const { questionLatex, markScheme, answer, commandWord, verificationExpression, apiKey, failClosed = false } = opts
 
   const userContent = `QUESTION:
 ${questionLatex}
@@ -79,7 +81,9 @@ Is this question mathematically correct? Return only JSON.`
     if (!response.ok) {
       // Validation is non-blocking — if the validator call fails, pass through
       console.warn('[validator] Validator API call failed, passing question through:', response.status)
-      return { valid: true, issue: null }
+      return failClosed
+        ? { valid: false, issue: `Validator API call failed with status ${response.status}` }
+        : { valid: true, issue: null }
     }
 
     const data = await response.json()
@@ -93,7 +97,9 @@ Is this question mathematically correct? Return only JSON.`
       parsed = JSON.parse(cleaned)
     } catch {
       console.warn('[validator] Could not parse validator response:', content)
-      return { valid: true, issue: null }
+      return failClosed
+        ? { valid: false, issue: 'Could not parse validator response' }
+        : { valid: true, issue: null }
     }
 
     return {
@@ -103,6 +109,8 @@ Is this question mathematically correct? Return only JSON.`
   } catch (err) {
     // Network or unexpected error — don't block generation
     console.warn('[validator] Validator error, passing through:', err)
-    return { valid: true, issue: null }
+    return failClosed
+      ? { valid: false, issue: err instanceof Error ? err.message : 'Validator error' }
+      : { valid: true, issue: null }
   }
 }

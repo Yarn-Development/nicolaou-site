@@ -5,7 +5,11 @@ import {
   buildDiagramSystemPrompt,
   uploadSvgToStorage,
 } from '@/lib/diagram-utils'
-import { repairLatex } from '@/lib/latex-utils'
+import {
+  normalizeGeneratedQuestion,
+  qualityGateQuestion,
+  safeParseJSON,
+} from '@/lib/ai-question-quality'
 
 /**
  * Generate Similar Questions API
@@ -188,35 +192,54 @@ Return ONLY the JSON object with exactly ${count} question(s) in the array.`
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
       console.error('[Similar Diagram] API error:', errorData)
-      // Fall back to text-only
-      return generateSimilarTextOnly(body, count, marks, difficulty, calculatorAllowed)
+      return NextResponse.json(
+        { success: false, error: 'Diagram generation model unavailable', details: errorData },
+        { status: response.status }
+      )
     }
 
     const data = await response.json()
     rawContent = data.choices[0]?.message?.content || ''
   } catch (err) {
     console.error('[Similar Diagram] Network error:', err)
-    return generateSimilarTextOnly(body, count, marks, difficulty, calculatorAllowed)
+    return NextResponse.json(
+      { success: false, error: 'Failed to reach diagram generation model' },
+      { status: 500 }
+    )
   }
 
-  let parsed: { questions: Array<{ question_latex: string; svg_markup: string; answer: string; explanation: string; marks: number; diagram_description?: string }> }
-  try {
-    const cleaned = rawContent.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    parsed = JSON.parse(cleaned)
-  } catch {
-    console.error('[Similar Diagram] Parse failure — falling back to text-only')
-    return generateSimilarTextOnly(body, count, marks, difficulty, calculatorAllowed)
+  const parsed = safeParseJSON<{ questions: Array<{ question_latex: string; svg_markup: string; answer: string; explanation: string; marks: number; diagram_description?: string }> }>(rawContent)
+  if (!parsed) {
+    console.error('[Similar Diagram] Parse failure')
+    return NextResponse.json(
+      { success: false, error: 'Invalid JSON from diagram model' },
+      { status: 500 }
+    )
   }
 
   if (!parsed.questions || !Array.isArray(parsed.questions)) {
-    return generateSimilarTextOnly(body, count, marks, difficulty, calculatorAllowed)
+    return NextResponse.json(
+      { success: false, error: 'Invalid response structure from diagram model' },
+      { status: 500 }
+    )
   }
 
   // Upload SVGs and build result
   const questions: GeneratedQuestion[] = []
 
   for (const q of parsed.questions) {
-    if (!q.question_latex || !q.answer) continue
+    const normalized = normalizeGeneratedQuestion(q)
+    normalized.marks = normalized.marks ?? marks
+    const gated = await qualityGateQuestion(normalized, {
+      expectedMarks: marks,
+      hasDiagram: true,
+      runMathValidation: true,
+      apiKey: OPENROUTER_API_KEY,
+    })
+    if (!gated.ok) {
+      console.warn('[Similar Diagram] Quality gate failed:', gated.issues)
+      continue
+    }
 
     let imageUrl: string | null = null
 
@@ -230,19 +253,22 @@ Return ONLY the JSON object with exactly ${count} question(s) in the array.`
     }
 
     questions.push({
-      questionLatex: repairLatex(q.question_latex),
+      questionLatex: gated.question.questionLatex,
       answerKey: {
-        answer: repairLatex(q.answer),
-        explanation: repairLatex(q.explanation || ''),
+        answer: gated.question.answer,
+        explanation: gated.question.explanation,
       },
-      marks: q.marks || marks,
+      marks: gated.question.marks || marks,
       imageUrl,
       contentType: imageUrl ? 'synthetic_image' : 'generated_text',
     })
   }
 
   if (questions.length === 0) {
-    return generateSimilarTextOnly(body, count, marks, difficulty, calculatorAllowed)
+    return NextResponse.json(
+      { success: false, error: 'Generated diagram questions failed quality checks' },
+      { status: 422 }
+    )
   }
 
   return NextResponse.json({ success: true, data: { questions } })
@@ -363,11 +389,8 @@ Return ONLY the JSON object with exactly ${count} question(s).`
     )
   }
 
-  let parsedContent: { questions: GeneratedQuestion[] }
-  try {
-    const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    parsedContent = JSON.parse(cleanedContent)
-  } catch {
+  const parsedContent = safeParseJSON<{ questions: GeneratedQuestion[] }>(content)
+  if (!parsedContent) {
     return NextResponse.json(
       { success: false, error: 'Invalid response format from AI', details: { raw_content: content } },
       { status: 500 }
@@ -382,16 +405,27 @@ Return ONLY the JSON object with exactly ${count} question(s).`
   }
 
   for (const q of parsedContent.questions) {
-    if (!q.questionLatex || !q.answerKey?.answer) {
+    const normalized = normalizeGeneratedQuestion(q)
+    normalized.marks = normalized.marks ?? marks
+    const gated = await qualityGateQuestion(normalized, {
+      expectedMarks: marks,
+      hasDiagram: false,
+      runMathValidation: true,
+      apiKey: OPENROUTER_API_KEY,
+    })
+
+    if (!gated.ok) {
       return NextResponse.json(
-        { success: false, error: 'Incomplete question data from AI', details: q },
-        { status: 500 }
+        { success: false, error: 'Generated similar question failed quality checks', details: gated.issues },
+        { status: 422 }
       )
     }
-    q.questionLatex = repairLatex(q.questionLatex)
-    q.answerKey.answer = repairLatex(q.answerKey.answer)
-    if (q.answerKey.explanation) q.answerKey.explanation = repairLatex(q.answerKey.explanation)
-    q.marks = q.marks || marks
+    q.questionLatex = gated.question.questionLatex
+    q.answerKey = {
+      answer: gated.question.answer,
+      explanation: gated.question.explanation,
+    }
+    q.marks = gated.question.marks || marks
     q.imageUrl = null
     q.contentType = 'generated_text'
   }

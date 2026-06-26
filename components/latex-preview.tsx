@@ -9,6 +9,8 @@ interface LatexPreviewProps {
   className?: string
   /** Show skeleton while rendering */
   showSkeleton?: boolean
+  /** Show a visible warning when KaTeX falls back to plain text */
+  showErrorIndicator?: boolean
 }
 
 // =====================================================
@@ -207,6 +209,7 @@ export function LatexPreview({
   latex,
   className = '',
   showSkeleton = true,
+  showErrorIndicator = false,
 }: LatexPreviewProps) {
   const [isRendered, setIsRendered] = useState(false)
   const [hasError, setHasError] = useState(false)
@@ -346,6 +349,11 @@ export function LatexPreview({
         >
           [LaTeX rendering error — fallback text shown]
         </span>
+      )}
+      {hasError && showErrorIndicator && (
+        <div className="mt-2 text-xs font-bold uppercase tracking-wider text-red-600">
+          LaTeX render fallback shown. Fix the source before saving.
+        </div>
       )}
     </div>
   )

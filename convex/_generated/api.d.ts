@@ -22,6 +22,7 @@ import type * as files from "../files.js";
 import type * as library from "../library.js";
 import type * as marking from "../marking.js";
 import type * as parentPortal from "../parentPortal.js";
+import type * as practice from "../practice.js";
 import type * as questions from "../questions.js";
 import type * as resources from "../resources.js";
 import type * as revisionLists from "../revisionLists.js";
@@ -51,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   library: typeof library;
   marking: typeof marking;
   parentPortal: typeof parentPortal;
+  practice: typeof practice;
   questions: typeof questions;
   resources: typeof resources;
   revisionLists: typeof revisionLists;

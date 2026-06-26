@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { sanitize } from "@/lib/question-sanitizer"
+import { lintQuestion } from "@/lib/ai-question-quality"
 import { getAuthUser } from "@/lib/auth"
 import { fetchQuery, fetchMutation, api, getConvexUserIdByClerkId } from "@/lib/convex/server"
 import type { Id } from "@/convex/_generated/dataModel"
@@ -115,6 +116,28 @@ export async function createQuestion(input: CreateQuestionInput) {
   const cleanLatex = input.question_latex ? sanitize(input.question_latex) : input.question_latex
   const cleanAnswer = input.answer_key.answer ? sanitize(input.answer_key.answer) : input.answer_key.answer
   const cleanExplanation = input.answer_key.explanation ? sanitize(input.answer_key.explanation) : input.answer_key.explanation
+  const lintIssues = input.content_type === 'image_ocr'
+    ? []
+    : lintQuestion(
+        {
+          questionLatex: cleanLatex,
+          answer: cleanAnswer,
+          explanation: cleanExplanation,
+          marks: input.marks,
+        },
+        {
+          expectedMarks: input.marks,
+          hasDiagram: Boolean(input.image_url),
+          requireExplanation: true,
+        }
+      )
+
+  if (lintIssues.length > 0) {
+    return {
+      success: false,
+      error: `Question failed quality checks: ${lintIssues.join("; ")}`,
+    }
+  }
 
   try {
     const question = await fetchMutation(api.questions.createQuestionFull, {
@@ -122,6 +145,7 @@ export async function createQuestion(input: CreateQuestionInput) {
       contentType: input.content_type,
       questionLatex: cleanLatex,
       imageUrl: input.image_url || undefined,
+      examBoard: input.answer_key.source?.exam_board,
       level: input.curriculum_level,
       topic: input.topic,
       topicName: input.topic,

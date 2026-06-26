@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { CURRICULUM_DATA } from '@/lib/curriculum-data'
+import { safeParseJSON } from '@/lib/ai-question-quality'
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
@@ -114,14 +115,35 @@ Schema:
     const data = await response.json()
     const content = data.choices?.[0]?.message?.content ?? ''
 
-    const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    const parsed = JSON.parse(cleaned)
+    const parsed = safeParseJSON<{ raw_topics?: unknown[]; matched?: unknown[] }>(content)
+    if (!parsed) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid response format from AI' },
+        { status: 500 }
+      )
+    }
+
+    const rawTopics = Array.isArray(parsed.raw_topics)
+      ? parsed.raw_topics.filter((topic): topic is string => typeof topic === 'string')
+      : []
+    const matched = Array.isArray(parsed.matched)
+      ? parsed.matched.filter((item): item is MatchedTopic => {
+          if (!item || typeof item !== 'object') return false
+          const row = item as Partial<MatchedTopic>
+          return (
+            typeof row.subtopic === 'string' &&
+            typeof row.topicName === 'string' &&
+            typeof row.level === 'string' &&
+            (row.confidence === 'high' || row.confidence === 'medium')
+          )
+        })
+      : []
 
     return NextResponse.json({
       success: true,
       data: {
-        raw_topics: parsed.raw_topics ?? [],
-        matched: parsed.matched ?? [],
+        raw_topics: rawTopics,
+        matched,
       },
     })
   } catch (err) {

@@ -9,8 +9,11 @@ import {
   buildDiagramSystemPrompt,
 } from '@/lib/diagram-utils'
 import { uploadSvgToConvex } from '@/lib/convex-svg-upload'
-import { repairLatex } from '@/lib/latex-utils'
-import { validateQuestion } from '@/lib/question-validator'
+import {
+  normalizeGeneratedQuestion,
+  qualityGateQuestion,
+  safeParseJSON,
+} from '@/lib/ai-question-quality'
 
 /**
  * Shadow Paper Generation API
@@ -39,62 +42,6 @@ const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 // Batch size for parallel processing
 const OCR_BATCH_SIZE = 3
 const SHADOW_BATCH_SIZE = 5
-
-// =====================================================
-// Helper: Safe JSON parsing with LaTeX escape handling
-// =====================================================
-
-function safeParseJSON(content: string): unknown | null {
-  // Remove markdown code blocks
-  const cleaned = content
-    .replace(/```json\n?/g, '')
-    .replace(/```\n?/g, '')
-    .trim()
-
-  // First attempt: try parsing as-is
-  try {
-    return JSON.parse(cleaned)
-  } catch {
-    // Continue to cleanup attempts
-  }
-
-  // Second attempt: Fix common LaTeX escape issues
-  try {
-    const latexFixed = cleaned
-      .replace(/(?<!\\)\\(?!\\|"|n|r|t|b|f|u[0-9a-fA-F]{4})/g, '\\\\')
-    
-    return JSON.parse(latexFixed)
-  } catch {
-    // Continue to more aggressive cleanup
-  }
-
-  // Third attempt: More aggressive cleaning
-  try {
-    const aggressive = cleaned
-      .replace(/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/g, '')
-      .replace(/\n/g, '\\n')
-      .replace(/\t/g, '\\t')
-    
-    return JSON.parse(aggressive)
-  } catch {
-    // Continue to final attempt
-  }
-
-  // Fourth attempt: Try to extract JSON object using regex
-  try {
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const extracted = jsonMatch[0]
-        .replace(/(?<!\\)\\(?!\\|"|n|r|t|b|f|u[0-9a-fA-F]{4})/g, '\\\\')
-      return JSON.parse(extracted)
-    }
-  } catch {
-    // All attempts failed
-  }
-
-  console.error('All JSON parsing attempts failed for content:', content.substring(0, 200))
-  return null
-}
 
 // =====================================================
 // Types
@@ -396,13 +343,13 @@ Return ONLY the JSON object.`
     })
 
     if (!response.ok) {
-      console.warn('[Shadow Diagram] API error for Q', original.questionNumber, '— falling back to text-only')
-      return await generateShadowQuestionTextOnly(original, targetStream)
+      console.warn('[Shadow Diagram] API error for Q', original.questionNumber)
+      return null
     }
 
     const data = await response.json()
     const content = data.choices[0]?.message?.content
-    if (!content) return await generateShadowQuestionTextOnly(original, targetStream)
+    if (!content) return null
 
     const parsed = safeParseJSON(content) as {
       questionLatex?: string
@@ -413,7 +360,20 @@ Return ONLY the JSON object.`
 
     if (!parsed || !parsed.questionLatex) {
       console.error('[Shadow Diagram] Parse failure for Q', original.questionNumber)
-      return await generateShadowQuestionTextOnly(original, targetStream)
+      return null
+    }
+
+    const normalized = normalizeGeneratedQuestion(parsed)
+    normalized.marks = original.suggestedMarks
+    const gated = await qualityGateQuestion(normalized, {
+      expectedMarks: original.suggestedMarks,
+      hasDiagram: true,
+      runMathValidation: true,
+      apiKey: OPENROUTER_API_KEY,
+    })
+    if (!gated.ok) {
+      console.warn(`[Shadow Diagram] Q${original.questionNumber} failed quality gate:`, gated.issues)
+      return null
     }
 
     // Upload SVG if present and valid
@@ -426,24 +386,28 @@ Return ONLY the JSON object.`
         console.warn('[Shadow Diagram] SVG sanitization failed for Q', original.questionNumber, sanitized.errors)
       }
     }
+    if (!imageUrl) {
+      console.warn('[Shadow Diagram] No usable SVG for Q', original.questionNumber)
+      return null
+    }
 
     return {
       originalQuestionNumber: original.questionNumber,
-      questionLatex: repairLatex(parsed.questionLatex),
+      questionLatex: gated.question.questionLatex,
       topic: original.suggestedTopic,
       subTopic: original.suggestedSubTopic,
       marks: original.suggestedMarks,
       difficulty: original.suggestedDifficulty,
       calculatorAllowed: parsed.calculatorAllowed ?? true,
       answerKey: {
-        answer: repairLatex(parsed.answerKey?.answer || ''),
-        explanation: repairLatex(parsed.answerKey?.explanation || ''),
+        answer: gated.question.answer,
+        explanation: gated.question.explanation,
       },
       imageUrl,
     }
   } catch (error) {
     console.error('[Shadow Diagram] Error for Q', original.questionNumber, error)
-    return await generateShadowQuestionTextOnly(original, targetStream)
+    return null
   }
 }
 
@@ -544,35 +508,30 @@ Generate the shadow question now. Return ONLY the JSON object.`
       return null
     }
 
-    const repairedLatex = repairLatex(parsed.questionLatex)
-    const repairedAnswer = repairLatex(parsed.answerKey?.answer || '')
-
-    // Verifier pass — skip if answer is empty (proof-type questions)
-    if (repairedAnswer && OPENROUTER_API_KEY) {
-      const validation = await validateQuestion({
-        questionLatex: repairedLatex,
-        markScheme: repairLatex(parsed.answerKey?.explanation || ''),
-        answer: repairedAnswer,
-        commandWord: 'find',
-        verificationExpression: null,
-        apiKey: OPENROUTER_API_KEY as string,
-      })
-      if (!validation.valid) {
-        console.warn(`[shadow] Q${original.questionNumber} validation failed: ${validation.issue}`)
-      }
+    const normalized = normalizeGeneratedQuestion(parsed)
+    normalized.marks = original.suggestedMarks
+    const gated = await qualityGateQuestion(normalized, {
+      expectedMarks: original.suggestedMarks,
+      hasDiagram: false,
+      runMathValidation: true,
+      apiKey: OPENROUTER_API_KEY,
+    })
+    if (!gated.ok) {
+      console.warn(`[shadow] Q${original.questionNumber} failed quality gate:`, gated.issues)
+      return null
     }
 
     return {
       originalQuestionNumber: original.questionNumber,
-      questionLatex: repairedLatex,
+      questionLatex: gated.question.questionLatex,
       topic: original.suggestedTopic,
       subTopic: original.suggestedSubTopic,
       marks: original.suggestedMarks,
       difficulty: original.suggestedDifficulty,
       calculatorAllowed: parsed.calculatorAllowed ?? true,
       answerKey: {
-        answer: repairedAnswer,
-        explanation: repairLatex(parsed.answerKey?.explanation || ''),
+        answer: gated.question.answer,
+        explanation: gated.question.explanation,
       },
       imageUrl: null,
     }
@@ -794,6 +753,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ShadowPap
           contentType: sq.imageUrl ? 'synthetic_image' : 'generated_text',
           questionLatex: sanitize(sq.questionLatex),
           imageUrl: sq.imageUrl || undefined,
+          examBoard: 'Edexcel',
           topic: sq.topic,
           subTopic: sq.subTopic,
           level: targetStream,

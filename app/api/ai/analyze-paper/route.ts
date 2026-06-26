@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth'
+import { safeParseJSON } from '@/lib/ai-question-quality'
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
@@ -205,8 +206,8 @@ async function analyzePages(
   if (!content) throw new Error('No response from AI model')
 
   try {
-    const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    const parsed = JSON.parse(cleanedContent)
+    const parsed = safeParseJSON<{ questions?: Partial<DetectedQuestion>[] }>(content)
+    if (!parsed) throw new Error('Invalid JSON response')
 
     if (!parsed.questions || !Array.isArray(parsed.questions)) return []
 

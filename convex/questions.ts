@@ -47,6 +47,7 @@ export const createQuestionFull = mutation({
     contentType: v.optional(v.string()),
     questionLatex: v.optional(v.string()),
     imageUrl: v.optional(v.string()),
+    examBoard: v.optional(v.string()),
     level: v.optional(v.string()),
     topic: v.optional(v.string()),
     topicName: v.optional(v.string()),
@@ -303,7 +304,9 @@ export const getGeneratedTextSubtopicCounts = query({
  */
 export const insertGeneratedQuestion = mutation({
   args: {
+    contentType: v.optional(v.string()),
     questionLatex: v.optional(v.string()),
+    examBoard: v.optional(v.string()),
     level: v.optional(v.string()),
     topic: v.optional(v.string()),
     topicName: v.optional(v.string()),
@@ -323,8 +326,9 @@ export const insertGeneratedQuestion = mutation({
 
     const id = await ctx.db.insert("questions", {
       createdBy: creator._id,
-      contentType: "generated_text",
+      contentType: args.contentType ?? "generated_text",
       questionLatex: args.questionLatex,
+      examBoard: args.examBoard,
       level: args.level,
       topic: args.topic,
       topicName: args.topicName,

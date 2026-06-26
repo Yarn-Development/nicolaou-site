@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { safeParseJSON } from '@/lib/ai-question-quality'
 
 /**
  * Extract Questions from PDF Page Image API
@@ -207,16 +208,8 @@ Extract all questions now. Return ONLY the JSON object.`
     }
 
     // Parse the JSON response
-    let parsedContent: { questions: ExtractedQuestion[] }
-    try {
-      // Remove markdown code blocks if present
-      const cleanedContent = content
-        .replace(/```json\n?/g, '')
-        .replace(/```\n?/g, '')
-        .trim()
-      
-      parsedContent = JSON.parse(cleanedContent)
-    } catch {
+    let parsedContent = safeParseJSON<{ questions: ExtractedQuestion[] }>(content)
+    if (!parsedContent) {
       console.error('Failed to parse AI response:', content)
       return NextResponse.json(
         { 

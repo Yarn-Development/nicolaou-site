@@ -202,6 +202,7 @@ export async function GET(request: NextRequest) {
             sub_topic: target.sub_topic,
             question_type: questionType,
             marks,
+            calculator_allowed: false,
             exam_board: 'Edexcel',
           }),
         })
@@ -226,7 +227,9 @@ export async function GET(request: NextRequest) {
           : 'Higher'
 
         const insertResult = await fetchMutation(api.questions.insertGeneratedQuestion, {
+          contentType: genJson.content_type ?? 'generated_text',
           questionLatex: gen.question_latex,
+          examBoard: 'Edexcel',
           level: target.curriculum_level,
           topicName: target.topic_name,
           topic: target.topic_name,
@@ -234,11 +237,11 @@ export async function GET(request: NextRequest) {
           difficulty,
           marks: gen.marks ?? marks,
           questionType,
-          calculatorAllowed: false,
+          calculatorAllowed: gen.calculator_allowed ?? false,
           answerKey: {
             answer: gen.answer,
-            explanation: gen.mark_scheme_latex ?? '',
-            mark_scheme: gen.mark_scheme_latex,
+            explanation: gen.explanation ?? '',
+            mark_scheme: gen.explanation ?? '',
             command_word: gen.command_word,
             verification_expression: gen.verification_expression,
             type: 'generated',
@@ -248,9 +251,7 @@ export async function GET(request: NextRequest) {
               is_calculator: false,
             },
           },
-          imageUrl: gen.svg_markup
-            ? `data:image/svg+xml;utf8,${encodeURIComponent(gen.svg_markup)}`
-            : undefined,
+          imageUrl: genJson.image_url ?? undefined,
         })
 
         if (insertResult && 'error' in insertResult) {
